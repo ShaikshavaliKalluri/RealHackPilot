@@ -1,0 +1,363 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { fetchTeams, fetchStats, runAIScreen, aiScreenOne, llmHealth, type LLMHealth } from './api';
+import type { Team, DashboardStats } from './types';
+import { StatCard } from './components/StatCard';
+import { TeamCard } from './components/TeamCard';
+import { UploadCard } from './components/UploadCard';
+import { DrillDownPanel } from './components/DrillDownPanel';
+import { EmailComposer } from './components/EmailComposer';
+import { JudgeMode } from './components/JudgeMode';
+import { OrganizerScoring } from './components/OrganizerScoring';
+import { CommsPanel } from './components/CommsPanel';
+import { BroadcastPanel } from './components/BroadcastPanel';
+
+type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
+type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'flagged' | 'all_mentors' | 'all_participants' | null;
+type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms';
+
+export default function App() {
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [filter, setFilter] = useState<Filter>('all');
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [expandedTeamId, setExpandedTeamId] = useState<number | null>(null);
+  const [statsPanel, setStatsPanel] = useState<StatsPanel>(null);
+  const teamRefs = useRef<Map<number, HTMLDivElement | null>>(new Map());
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [llm, setLlm] = useState<LLMHealth | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [mode, setMode] = useState<Mode>('dashboard');
+
+  const reload = async () => {
+    setLoading(true);
+    try {
+      const [t, s] = await Promise.all([fetchTeams(), fetchStats()]);
+      setTeams(t);
+      setStats(s);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reload().catch((e) => console.error(e));
+    llmHealth().then(setLlm).catch((e) => console.error(e));
+  }, []);
+
+  const handleRunAIScreen = async (force = false) => {
+    setAiBusy(true);
+    setAiSummary(null);
+    try {
+      const r = await runAIScreen(force);
+      const providerLabel = Object.entries(r.providers).map(([p, c]) => `${p}×${c}`).join(', ') || 'none';
+      setAiSummary(
+        `AI-screened ${r.scored} team${r.scored === 1 ? '' : 's'}` +
+        (r.skipped ? ` · skipped ${r.skipped} already-scored` : '') +
+        (r.failed ? ` · ${r.failed} failed` : '') +
+        ` · via ${providerLabel}`
+      );
+      await reload();
+    } catch (e: any) {
+      setAiSummary(`Error: ${e.message ?? String(e)}`);
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const handleRescoreTeam = async (teamId: number) => {
+    try {
+      await aiScreenOne(teamId);
+      await reload();
+    } catch (e: any) {
+      console.error(e);
+      setAiSummary(`Rescore failed: ${e.message ?? String(e)}`);
+    }
+  };
+
+  const filteredTeams = useMemo(() => {
+    let list = teams;
+    if (filter === 'flagged') list = list.filter((t) => t.flags && t.flags.length > 0);
+    if (filter === 'complete') list = list.filter((t) => t.completeness_score >= 0.8 && (!t.flags || t.flags.length === 0));
+    if (filter === 'incomplete') list = list.filter((t) => t.completeness_score < 0.8);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          (t.mentor_name && t.mentor_name.toLowerCase().includes(q)) ||
+          (t.idea && t.idea.toLowerCase().includes(q)),
+      );
+    }
+    return list;
+  }, [teams, filter, search]);
+
+  const jumpToTeam = (teamId: number) => {
+    // ensure team is in the visible filter set
+    setFilter('all');
+    setSearch('');
+    setExpandedTeamId(teamId);
+    setStatsPanel(null);
+    setTimeout(() => {
+      const node = teamRefs.current.get(teamId);
+      node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 60);
+  };
+
+  return (
+    <div className="min-h-screen p-8 max-w-7xl mx-auto">
+      <header className="mb-6 flex items-start justify-between gap-6">
+        <div className="min-w-0 flex-1">
+          <div className="text-xs tracking-[0.2em] font-bold text-lime-400 uppercase">RealHack Pilot</div>
+          <h1 className="text-4xl font-extrabold mt-2 tracking-tight">
+            {mode === 'dashboard' && <>Registration <span className="text-lime-300">Command Center</span></>}
+            {mode === 'judge' && <>Judge <span className="text-sky-300">Scorecard</span></>}
+            {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}
+            {mode === 'comms' && <>Teams <span className="text-violet-300">Channels &amp; Broadcast</span></>}
+          </h1>
+          <p className="text-slate-400 mt-2 text-sm max-w-3xl">
+            {mode === 'dashboard' && 'Upload the latest MS Forms export. Teams get scored on completeness, screened for duplicates and rule violations, and surfaced in one place.'}
+            {mode === 'judge' && 'Sign in, pick a round, score each team against the rubric. Each judge can submit once per team per round.'}
+            {mode === 'scoring' && 'Live leaderboard aggregating judge scores per round, plus manual entry for organizers to log scores on behalf of a judge.'}
+            {mode === 'comms' && 'Create per-team Microsoft Teams channels and broadcast announcements to every team at once.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <a
+            href="/api/export.csv"
+            className="bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold px-3 py-2 rounded-lg text-sm transition whitespace-nowrap"
+            title="Download teams + scores as CSV (opens in Excel)"
+          >
+            Export CSV
+          </a>
+          <div className="flex gap-1 bg-ink-800/60 border border-slate-700/40 rounded-lg p-1">
+            <button
+              onClick={() => setMode('dashboard')}
+              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'dashboard' ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+            >
+              Dashboard
+            </button>
+            <button
+              onClick={() => setMode('judge')}
+              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'judge' ? 'bg-sky-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+            >
+              Judge mode
+            </button>
+            <button
+              onClick={() => setMode('scoring')}
+              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'scoring' ? 'bg-amber-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+            >
+              Scoring
+            </button>
+            <button
+              onClick={() => setMode('comms')}
+              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'comms' ? 'bg-violet-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+            >
+              Comms
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {mode === 'dashboard' && (
+      <>
+      <section className="mb-6">
+        <UploadCard onUploaded={reload} />
+      </section>
+
+      <section className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-5">
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <div>
+              <h3 className="font-bold">AI screening</h3>
+              <p className="text-sm text-slate-400">
+                Score every submission on genuineness, solution clarity, business value &amp; novelty.
+                {llm && (
+                  <span className="ml-1 text-xs text-slate-500">
+                    · provider: <span className="text-lime-300">{llm.active_provider}</span>
+                  </span>
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              disabled={aiBusy || teams.length === 0}
+              onClick={() => handleRunAIScreen(false)}
+              className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
+            >
+              {aiBusy ? 'Screening…' : 'Run AI Screen'}
+            </button>
+            <button
+              disabled={aiBusy || teams.length === 0}
+              onClick={() => handleRunAIScreen(true)}
+              className="bg-ink-900 hover:bg-ink-900/70 disabled:opacity-40 border border-slate-700/40 text-slate-200 font-semibold px-3 py-2 rounded-lg text-sm transition"
+              title="Re-run AI screening on all teams (overwrites existing scores)"
+            >
+              Force rescore all
+            </button>
+          </div>
+          {aiSummary && <p className="text-xs text-lime-300 mt-2">{aiSummary}</p>}
+        </div>
+
+        <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-5">
+          <div className="mb-2">
+            <h3 className="font-bold">Email &amp; comms</h3>
+            <p className="text-sm text-slate-400">
+              Compose fix-it, welcome, mentor-confirm or final-call mails — personalized per team, opened in Outlook.
+            </p>
+          </div>
+          <button
+            disabled={teams.length === 0}
+            onClick={() => setComposerOpen(true)}
+            className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
+          >
+            Compose email
+          </button>
+        </div>
+      </section>
+
+
+      {stats && (() => {
+        const uniqueMentors = new Set<string>();
+        for (const t of teams) {
+          if (t.mentor_name && t.mentor_name.trim()) uniqueMentors.add(t.mentor_name.trim().toLowerCase());
+        }
+        const uniqueMembers = new Set<string>();
+        for (const t of teams) {
+          for (const m of t.members) {
+            if (m.name && m.name.trim()) uniqueMembers.add(m.name.trim().toLowerCase());
+          }
+        }
+        return (
+        <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-6">
+          <StatCard label="Teams" value={stats.total_teams} />
+          <StatCard
+            label="Mentors"
+            value={uniqueMentors.size}
+            onClick={() => setStatsPanel(statsPanel === 'all_mentors' ? null : 'all_mentors')}
+            active={statsPanel === 'all_mentors'}
+          />
+          <StatCard
+            label="Members"
+            value={uniqueMembers.size}
+            onClick={() => setStatsPanel(statsPanel === 'all_participants' ? null : 'all_participants')}
+            active={statsPanel === 'all_participants'}
+          />
+          <StatCard
+            label="Complete"
+            value={stats.complete_teams}
+            tone="success"
+            onClick={() => setStatsPanel(statsPanel === 'complete' ? null : 'complete')}
+            active={statsPanel === 'complete'}
+          />
+          <StatCard
+            label="Flagged"
+            value={stats.flagged_teams}
+            tone="warn"
+            onClick={() => setStatsPanel(statsPanel === 'flagged' ? null : 'flagged')}
+            active={statsPanel === 'flagged'}
+          />
+          <StatCard
+            label="Duplicate participants"
+            value={stats.duplicate_participants}
+            tone="danger"
+            onClick={() => setStatsPanel(statsPanel === 'duplicates' ? null : 'duplicates')}
+            active={statsPanel === 'duplicates'}
+          />
+          <StatCard
+            label="Overloaded mentors"
+            value={stats.multi_team_mentors}
+            tone="danger"
+            onClick={() => setStatsPanel(statsPanel === 'mentors' ? null : 'mentors')}
+            active={statsPanel === 'mentors'}
+          />
+        </section>
+        );
+      })()}
+
+      {statsPanel && (
+        <DrillDownPanel
+          mode={statsPanel}
+          teams={teams}
+          onJumpToTeam={jumpToTeam}
+          onClose={() => setStatsPanel(null)}
+        />
+      )}
+
+      <section className="flex flex-wrap gap-3 items-center mb-5">
+        <div className="flex gap-1 bg-ink-800/60 border border-slate-700/40 rounded-lg p-1">
+          {(['all', 'flagged', 'complete', 'incomplete'] as Filter[]).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`px-3 py-1.5 rounded text-sm font-semibold capitalize transition ${
+                filter === f ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+        <input
+          type="text"
+          placeholder="Search team, mentor, or idea…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="flex-1 min-w-[240px] bg-ink-800/60 border border-slate-700/40 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-lime-500/60"
+        />
+        <span className="text-sm text-slate-400">
+          {filteredTeams.length} of {teams.length}
+        </span>
+      </section>
+
+      {loading && teams.length === 0 ? (
+        <div className="text-slate-400">Loading…</div>
+      ) : teams.length === 0 ? (
+        <div className="bg-ink-800/40 border border-dashed border-slate-700/40 rounded-xl p-10 text-center text-slate-400">
+          No teams yet. Upload an MS Forms Excel export above to populate the dashboard.
+        </div>
+      ) : (
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+          {filteredTeams.map((t) => (
+            <div
+              key={t.id}
+              ref={(el) => {
+                teamRefs.current.set(t.id, el);
+              }}
+              className={expandedTeamId === t.id ? 'lg:col-span-3 md:col-span-2' : ''}
+            >
+              <TeamCard
+                team={t}
+                expanded={expandedTeamId === t.id}
+                onToggle={() => setExpandedTeamId(expandedTeamId === t.id ? null : t.id)}
+                onRescore={() => handleRescoreTeam(t.id)}
+                onReload={reload}
+              />
+            </div>
+          ))}
+        </section>
+      )}
+      </>
+      )}
+
+      {mode === 'judge' && <JudgeMode teams={teams} />}
+
+      {mode === 'scoring' && <OrganizerScoring teams={teams} />}
+
+      {mode === 'comms' && (
+        <div className="space-y-6">
+          <CommsPanel teams={teams} onReload={reload} />
+          <BroadcastPanel teams={teams} onReload={reload} />
+        </div>
+      )}
+
+      <EmailComposer
+        open={composerOpen}
+        teams={teams}
+        onClose={() => setComposerOpen(false)}
+      />
+    </div>
+  );
+}

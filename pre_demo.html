@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>RealHack Pilot — Pre-Demo</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #0a0e1a;
+    color: #f1f5f9;
+    overflow: hidden;
+    height: 100vh;
+}
+
+.deck { position: relative; width: 100vw; height: 100vh; }
+
+.slide {
+    position: absolute;
+    inset: 0;
+    padding: 55px 80px;
+    opacity: 0;
+    transition: opacity 0.4s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    pointer-events: none;
+    overflow-y: auto;
+}
+.slide.active { opacity: 1; pointer-events: auto; }
+
+.slide-num {
+    position: absolute;
+    bottom: 22px;
+    right: 38px;
+    font-size: 0.82rem;
+    color: #475569;
+    letter-spacing: 1.5px;
+}
+
+.brand {
+    position: absolute;
+    top: 22px;
+    left: 38px;
+    font-size: 0.75rem;
+    color: #a3e635;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+
+.eyebrow {
+    display: inline-block;
+    background: rgba(163, 230, 53, 0.15);
+    color: #a3e635;
+    padding: 6px 18px;
+    border-radius: 100px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 22px;
+}
+
+.eyebrow.danger { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+.eyebrow.success { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+.eyebrow.warn { background: rgba(251, 146, 60, 0.15); color: #fb923c; }
+.eyebrow.info { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
+
+h1 {
+    font-size: 3.4rem;
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    margin-bottom: 24px;
+}
+h1 .accent {
+    background: linear-gradient(135deg, #a3e635 0%, #38bdf8 50%, #818cf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+h2 {
+    font-size: 2.4rem;
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    margin-bottom: 18px;
+}
+h2 .accent {
+    background: linear-gradient(135deg, #a3e635 0%, #38bdf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+h3 { font-size: 1.25rem; font-weight: 700; margin-bottom: 10px; color: #f1f5f9; }
+
+p, li {
+    font-size: 1.05rem;
+    line-height: 1.55;
+    color: #cbd5e1;
+}
+
+.lead { font-size: 1.25rem; color: #94a3b8; max-width: 900px; margin-bottom: 22px; }
+
+ul { list-style: none; padding: 0; }
+li { padding: 6px 0; padding-left: 22px; position: relative; }
+li::before {
+    content: '▸';
+    position: absolute;
+    left: 0;
+    color: #a3e635;
+    font-weight: 700;
+}
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+
+.card {
+    background: rgba(30, 41, 59, 0.55);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 14px;
+    padding: 22px;
+    transition: all 0.2s;
+}
+.card:hover { border-color: rgba(163, 230, 53, 0.35); transform: translateY(-2px); }
+
+.card.pain { border-left: 3px solid #f87171; }
+.card.gain { border-left: 3px solid #4ade80; }
+.card.mod  { border-left: 3px solid #a3e635; }
+
+.tag {
+    display: inline-block;
+    background: rgba(56, 189, 248, 0.12);
+    color: #38bdf8;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    padding: 3px 11px;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin: 3px 4px 3px 0;
+}
+.tag.green { background: rgba(163, 230, 53, 0.12); color: #a3e635; border-color: rgba(163, 230, 53, 0.35); }
+.tag.purple { background: rgba(168, 85, 247, 0.12); color: #c084fc; border-color: rgba(168, 85, 247, 0.35); }
+.tag.orange { background: rgba(251, 146, 60, 0.12); color: #fb923c; border-color: rgba(251, 146, 60, 0.35); }
+
+.metric {
+    font-size: 2.2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #a3e635 0%, #38bdf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 4px;
+}
+.metric-label { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px; }
+
+.flow {
+    display: flex;
+    align-items: stretch;
+    gap: 14px;
+    margin-top: 18px;
+}
+.flow-step {
+    flex: 1;
+    background: rgba(30, 41, 59, 0.5);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 12px;
+    padding: 16px;
+    position: relative;
+}
+.flow-step .num {
+    width: 28px; height: 28px;
+    background: linear-gradient(135deg, #a3e635, #38bdf8);
+    color: #0a0e1a;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800;
+    margin-bottom: 10px;
+}
+
+.nav {
+    position: fixed;
+    bottom: 22px; left: 50%;
+    transform: translateX(-50%);
+    display: flex; gap: 10px;
+    z-index: 100;
+    background: rgba(15, 23, 42, 0.8);
+    backdrop-filter: blur(10px);
+    padding: 9px 18px;
+    border-radius: 100px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+.nav button {
+    background: rgba(99, 102, 241, 0.2);
+    color: #f1f5f9;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    padding: 7px 16px;
+    border-radius: 100px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+}
+.nav button:hover { background: rgba(163, 230, 53, 0.3); }
+.nav .counter { color: #94a3b8; font-size: 0.85rem; padding: 7px 10px; }
+
+.kbd {
+    display: inline-block;
+    background: #1e293b;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 5px;
+    padding: 2px 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: #cbd5e1;
+}
+
+.title-hero {
+    text-align: center;
+    align-items: center;
+}
+.title-hero h1 { font-size: 4.2rem; }
+.title-hero .tagline { font-size: 1.35rem; color: #94a3b8; margin-bottom: 28px; }
+
+.cred {
+    display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
+    margin-top: 22px;
+}
+.cred span {
+    background: rgba(30, 41, 59, 0.7);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    padding: 8px 16px;
+    border-radius: 100px;
+    font-size: 0.88rem;
+    color: #cbd5e1;
+}
+
+.stack-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+.stack-row:last-child { border-bottom: none; }
+.stack-label { width: 150px; font-weight: 700; color: #a3e635; font-size: 0.95rem; }
+
+.timeline {
+    position: relative;
+    padding-left: 30px;
+    margin-top: 14px;
+}
+.timeline::before {
+    content: '';
+    position: absolute; left: 8px; top: 6px; bottom: 6px;
+    width: 2px;
+    background: linear-gradient(to bottom, #a3e635, #38bdf8, #818cf8);
+}
+.tl-item { position: relative; padding: 10px 0 10px 0; }
+.tl-item::before {
+    content: '';
+    position: absolute; left: -27px; top: 18px;
+    width: 12px; height: 12px;
+    background: #a3e635;
+    border: 3px solid #0a0e1a;
+    border-radius: 50%;
+}
+.tl-item h3 { color: #f1f5f9; font-size: 1.05rem; margin-bottom: 3px; }
+.tl-item p { font-size: 0.92rem; color: #94a3b8; }
+.tl-date { color: #38bdf8; font-size: 0.78rem; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<div class="deck">
+
+<!-- SLIDE 1: TITLE -->
+<div class="slide active title-hero" data-slide="1">
+    <div class="brand">RealHack 2026 · Pre-Demo</div>
+    <div class="eyebrow">Pre-Demo Walkthrough</div>
+    <h1><span class="accent">RealHack Pilot</span></h1>
+    <div class="tagline">An AI-assisted operating system for running RealHack — from registration to results.</div>
+    <p style="max-width: 760px; color: #94a3b8; font-size: 1.05rem;">
+        Turning the manual, error-prone hackathon ops loop into a one-pane-of-glass platform —
+        with intelligent screening, automated comms, and an AI evaluator that gives panelists a head-start before every demo.
+    </p>
+    <div class="cred">
+        <span>RealHack 2026 · June 18–19</span>
+    </div>
+    <div class="slide-num">01</div>
+</div>
+
+<!-- SLIDE 2: WHY THIS, WHY NOW -->
+<div class="slide" data-slide="2">
+    <div class="brand">Context</div>
+    <div class="eyebrow info">Why this, why now</div>
+    <h2>RealHack 2026 has outgrown <span class="accent">manual operations.</span></h2>
+    <p class="lead">
+        The registration → screening → communication → judging loop runs today on Excel, email threads, and heroic manual effort from the organizing team.
+        At the 2026 scale, that approach simply does not hold.
+    </p>
+    <div class="grid-3" style="margin-top: 14px;">
+        <div class="card">
+            <div class="metric">100–150</div>
+            <div class="metric-label">Teams expected for RealHack 2026</div>
+        </div>
+        <div class="card">
+            <div class="metric">500–900</div>
+            <div class="metric-label">Participants to track, communicate with &amp; ship swag to</div>
+        </div>
+        <div class="card">
+            <div class="metric">2 days</div>
+            <div class="metric-label">For panelists to score every team — back-to-back</div>
+        </div>
+    </div>
+    <p style="margin-top: 24px; color: #fb923c; font-size: 1rem;">
+        ▸ The ask from the organizing team: <em>treat this as a real partnership, not a hackathon-only project — ship something usable for RealHack 2026 itself.</em>
+    </p>
+    <div class="slide-num">02</div>
+</div>
+
+<!-- SLIDE 3: PAIN POINTS -->
+<div class="slide" data-slide="3">
+    <div class="brand">Problem</div>
+    <div class="eyebrow danger">Pain points · from the organizing team</div>
+    <h2>What's broken today</h2>
+    <div class="grid-2" style="margin-top: 8px;">
+        <div class="card pain">
+            <h3>📥 Submission quality varies widely</h3>
+            <p>Incomplete forms, placeholder text (&ldquo;TBD&rdquo;), and low-detail entries sit alongside serious submissions — with no easy way to triage signal from noise before panelists see them.</p>
+        </div>
+        <div class="card pain">
+            <h3>👥 Duplicate &amp; invalid participants</h3>
+            <p>Same person shows up on multiple teams. Mentors stretched across too many teams. No validation at the form layer — all caught (or missed) manually post-submission.</p>
+        </div>
+        <div class="card pain">
+            <h3>📧 Reminder &amp; follow-up at scale</h3>
+            <p>Today: generic broadcast mails. No way to send a targeted nudge to only the teams with incomplete submissions, or only mentors who haven&rsquo;t confirmed. No template library.</p>
+        </div>
+        <div class="card pain">
+            <h3>⚖️ Panelist fatigue &amp; recall drift</h3>
+            <p>Director-level judges sit through dozens of demos across 2 days. By Day 2, recall of Day 1 themes fades — making it harder to spot similar ideas or apply scoring consistently.</p>
+        </div>
+        <div class="card pain">
+            <h3>📮 Swag-shipping data quality</h3>
+            <p>US and Philippines participants need clean addresses and validated t-shirt sizes. Malformed entries (&ldquo;NA&rdquo;, &ldquo;N/A&rdquo;, &ldquo;non&rdquo;, blanks) force manual cleanup before procurement and shipping — a recurring headache the team currently absorbs.</p>
+        </div>
+        <div class="card pain">
+            <h3>🏗️ Teams channel setup</h3>
+            <p>One channel per team, the right members tagged, a customized welcome posted in each. Across 100&ndash;150 teams that becomes hundreds of manual steps — error-prone and time-consuming.</p>
+        </div>
+    </div>
+    <div class="slide-num">03</div>
+</div>
+
+<!-- SLIDE 4: SOLUTION OVERVIEW -->
+<div class="slide" data-slide="4">
+    <div class="brand">Solution</div>
+    <div class="eyebrow success">Our answer</div>
+    <h2>One platform. <span class="accent">Four modules.</span> Built in phases.</h2>
+    <p class="lead">A web dashboard for the organizing team and panelists — backed by an AI agent that reads, classifies, validates, and scores.</p>
+    <div class="grid-4" style="margin-top: 16px;">
+        <div class="card mod">
+            <div style="font-size: 1.8rem;">🗂️</div>
+            <h3>M1 · Registration<br>Command Center</h3>
+            <p style="font-size: 0.92rem;">Single dashboard. All teams. All members. All ideas. Filter, search, export.</p>
+            <span class="tag green">Phase 1</span>
+        </div>
+        <div class="card mod">
+            <div style="font-size: 1.8rem;">🔍</div>
+            <h3>M2 · AI Screening<br>&amp; Validation</h3>
+            <p style="font-size: 0.92rem;">Detect duplicates, mentor/member conflicts, low-quality &amp; placeholder submissions.</p>
+            <span class="tag green">Phase 1</span>
+        </div>
+        <div class="card mod">
+            <div style="font-size: 1.8rem;">📨</div>
+            <h3>M3 · Email &amp; Teams<br>Automation</h3>
+            <p style="font-size: 0.92rem;">Targeted reminders, custom templates, auto-create Teams channels with members tagged.</p>
+            <span class="tag purple">Phase 1.5</span>
+        </div>
+        <div class="card mod">
+            <div style="font-size: 1.8rem;">⚖️</div>
+            <h3>M4 · AI Judge<br>Assistant</h3>
+            <p style="font-size: 0.92rem;">Reads repos, PPTs &amp; demos. Pre-scores each team on ROI, viability, novelty. Panelists confirm or override.</p>
+            <span class="tag orange">Phase 2 · Pre-Demo</span>
+        </div>
+    </div>
+    <div class="card" style="margin-top: 22px; border-left: 3px solid #38bdf8;">
+        <h3 style="color: #38bdf8;">🎁 Stretch Module · Team Matchmaker</h3>
+        <p>For participants with "idea but no team" or "team but no idea" — an AI-assisted matcher that shuffles & pairs them based on skill, BU, and idea fit. Submitted via a follow-up form.</p>
+    </div>
+    <div class="slide-num">04</div>
+</div>
+
+<!-- SLIDE 5: ARCHITECTURE -->
+<div class="slide" data-slide="5">
+    <div class="brand">How it works</div>
+    <div class="eyebrow info">End-to-end flow</div>
+    <h2>From MS Form → Dashboard → AI Judge</h2>
+    <div class="flow" style="margin-top: 28px;">
+        <div class="flow-step">
+            <div class="num">1</div>
+            <h3>Ingest</h3>
+            <p style="font-size: 0.9rem;">MS Forms export (Excel) or Graph API pull. Auto-sync at intervals.</p>
+        </div>
+        <div class="flow-step">
+            <div class="num">2</div>
+            <h3>Normalize</h3>
+            <p style="font-size: 0.9rem;">Parse rows → team/member/mentor entities. Persist in lightweight DB.</p>
+        </div>
+        <div class="flow-step">
+            <div class="num">3</div>
+            <h3>AI Screen</h3>
+            <p style="font-size: 0.9rem;">LLM agent scores: completeness, genuineness, duplicate likelihood, similarity to existing teams.</p>
+        </div>
+        <div class="flow-step">
+            <div class="num">4</div>
+            <h3>Act</h3>
+            <p style="font-size: 0.9rem;">Trigger reminders, flag duplicates, surface to ops dashboard, create Teams channels.</p>
+        </div>
+        <div class="flow-step">
+            <div class="num">5</div>
+            <h3>Evaluate</h3>
+            <p style="font-size: 0.9rem;">During demos: AI Judge ingests repo + slides + summary → produces pre-score. Panelists confirm.</p>
+        </div>
+    </div>
+    <div class="card" style="margin-top: 26px;">
+        <h3 style="color: #a3e635;">Why agentic, not just rules?</h3>
+        <p>Rules can catch <em>"this field is empty."</em> They cannot catch <em>"this problem statement is too vague to evaluate."</em> An LLM agent applying a checklist (ROI, viability, novelty, completeness) gives nuanced, explainable scores — every flag comes with a reason the organizing team can act on.</p>
+    </div>
+    <div class="slide-num">05</div>
+</div>
+
+<!-- SLIDE 6: MODULE 1 DEEP DIVE -->
+<div class="slide" data-slide="6">
+    <div class="brand">Module 1</div>
+    <div class="eyebrow">M1 · Registration Command Center</div>
+    <h2>Everything in <span class="accent">one pane of glass</span></h2>
+    <div class="grid-2">
+        <div>
+            <h3>What the organizing team sees</h3>
+            <ul>
+                <li>Live count: registered teams against the 2026 capacity target</li>
+                <li>Per-team card: name, mentor, members, idea snippet, completeness %, AI confidence score</li>
+                <li>Status chips: <span class="tag green">Complete</span> <span class="tag orange">Incomplete</span> <span class="tag" style="background: rgba(239,68,68,0.12); color: #f87171; border-color: rgba(239,68,68,0.35);">Flagged</span></li>
+                <li>One-click filters: BU, location, T-shirt size aggregation (for swag ops)</li>
+                <li>Export to Excel — same shape the team already uses</li>
+            </ul>
+        </div>
+        <div>
+            <h3>What's underneath</h3>
+            <ul>
+                <li>Excel → CSV importer (works on day 1)</li>
+                <li>MS Graph poller for live Forms data (when permissions land)</li>
+                <li>PostgreSQL for state, Redis for jobs</li>
+                <li>FastAPI backend, React frontend</li>
+                <li>Role-based view: <span class="tag">Organizer</span> <span class="tag purple">Panelist</span> <span class="tag green">Read-only</span></li>
+            </ul>
+        </div>
+    </div>
+    <div class="card" style="margin-top: 22px; border-left: 3px solid #a3e635;">
+        <h3>Why this matters most</h3>
+        <p>The strongest signal from the organizing team was clear: the dashboard comes first. AI-driven filtration can layer on later. M1 alone removes the single biggest daily-pain item — and is the foundation every other module reads from.</p>
+    </div>
+    <div class="slide-num">06</div>
+</div>
+
+<!-- SLIDE 7: MODULE 2 -->
+<div class="slide" data-slide="7">
+    <div class="brand">Module 2</div>
+    <div class="eyebrow">M2 · AI Screening & Validation</div>
+    <h2>Catch the noise <span class="accent">before</span> it reaches the panel</h2>
+    <div class="grid-2">
+        <div>
+            <h3>Validation checks (deterministic)</h3>
+            <ul>
+                <li>Email format + RealPage domain check</li>
+                <li>Duplicate participant detection across teams</li>
+                <li>Mentor-as-member conflict (rules forbid this)</li>
+                <li>Mentor capped at 2 teams</li>
+                <li>Required field completeness scoring</li>
+                <li>Address presence for US / Philippines participants</li>
+            </ul>
+        </div>
+        <div>
+            <h3>AI checks (semantic)</h3>
+            <ul>
+                <li><strong>Genuineness score</strong>: Is the problem statement coherent, or placeholder text?</li>
+                <li><strong>Similarity clustering</strong>: Flag near-duplicate ideas across teams</li>
+                <li><strong>Quality signal</strong>: Does the approach mention concrete tech/process — or is it 4 lines of vague intent?</li>
+                <li><strong>ROI/Business value</strong>: Extract claimed business value; LLM rates clarity 1-5</li>
+                <li><strong>Auto-reasoned flag</strong>: Every red flag comes with a one-line "why"</li>
+            </ul>
+        </div>
+    </div>
+    <div class="card" style="margin-top: 18px; border-left: 3px solid #38bdf8;">
+        <h3>Output: a triaged worklist</h3>
+        <p>The organizing team opens the dashboard and sees a categorized list — incomplete submissions, likely duplicates, low-detail entries, mentor/member rule conflicts. Each row has a one-click <em>"Send Fix-it Mail"</em> action wired to Module 3.</p>
+        <p style="margin-top: 6px; font-size: 0.82rem; color: #94a3b8;"><em>Numbers vary submission to submission — the dashboard surfaces the actual breakdown live.</em></p>
+    </div>
+    <div class="slide-num">07</div>
+</div>
+
+<!-- SLIDE 8: MODULE 3 -->
+<div class="slide" data-slide="8">
+    <div class="brand">Module 3</div>
+    <div class="eyebrow">M3 · Email & Teams Automation</div>
+    <h2>Stop blasting. <span class="accent">Start targeting.</span></h2>
+    <div class="grid-2">
+        <div>
+            <h3>Email engine</h3>
+            <ul>
+                <li>Pre-built templates: <em>welcome, reminder, fix incomplete, mentor confirm, channel-ready, final-call</em></li>
+                <li>Mail-merge tokens: team name, mentor, missing fields</li>
+                <li>Targeted sends: "all incomplete teams in India" — one click</li>
+                <li>Send via Graph API (OAuth-scoped to ops mailbox) or organizer's Outlook</li>
+                <li>Audit log: who got what, when, opened?</li>
+            </ul>
+        </div>
+        <div>
+            <h3>Teams channel factory</h3>
+            <ul>
+                <li>Auto-create one channel per registered team</li>
+                <li>Add mentor + members with correct roles</li>
+                <li>Post a customized welcome message (team name, problem statement, mentor name)</li>
+                <li>Pin guidelines + judging criteria</li>
+                <li>Rerunnable: new member added later → auto-invited</li>
+            </ul>
+        </div>
+    </div>
+    <div class="card" style="margin-top: 18px;">
+        <h3>Permissions we'll need (call out early)</h3>
+        <p style="color: #fbbf24;">Microsoft Graph API scopes for: <code style="color: #a3e635;">Mail.Send</code>, <code style="color: #a3e635;">ChannelMessage.Send</code>, <code style="color: #a3e635;">Team.Create</code>, <code style="color: #a3e635;">User.Read.All</code>. Need IT-approved app registration — start the request <strong>this week</strong>. If delayed, fallback = export-and-send via organizer's Outlook.</p>
+    </div>
+    <div class="slide-num">08</div>
+</div>
+
+<!-- SLIDE 9: MODULE 4 -->
+<div class="slide" data-slide="9">
+    <div class="brand">Module 4</div>
+    <div class="eyebrow warn">M4 · AI Judge Assistant (the original idea)</div>
+    <h2>Give panelists a <span class="accent">head-start</span> on every demo</h2>
+    <div class="grid-2">
+        <div>
+            <h3>What the agent does</h3>
+            <ul>
+                <li>Reads the team's repo (GitHub URL) — what's the tech stack, is it real code, is there a working POC?</li>
+                <li>Reads the slide deck / submission doc — extract approach, architecture, business value</li>
+                <li>Scores against a fixed rubric: <em>Problem clarity · Solution viability · Industry-readiness · ROI · Novelty · Demo quality</em></li>
+                <li>Generates a 3-line summary: <em>"What they built, how, and why it matters"</em></li>
+                <li>Surfaces similarity to prior teams: <em>"Team 40's idea overlaps 78% with Team 12 (presented Day 1)"</em></li>
+            </ul>
+        </div>
+        <div>
+            <h3>What the panelist sees</h3>
+            <ul>
+                <li>Pre-demo briefing card: AI summary + rubric pre-scores</li>
+                <li>Side-by-side: <strong>AI score</strong> | <strong>your score</strong></li>
+                <li>One-click confirm or override — with optional comment</li>
+                <li>At end of day: consolidated leaderboard, with AI &amp; human deltas highlighted</li>
+                <li>Panelists shortlist for Round 2 from the leaderboard, not from memory</li>
+            </ul>
+        </div>
+    </div>
+    <div class="card" style="margin-top: 18px; border-left: 3px solid #fb923c;">
+        <h3>Important framing for the org</h3>
+        <p>The AI does <strong>not replace</strong> the panel. It removes recall drift, surfaces similarities humans miss across 2 days, and gives every team an objective baseline. <em>Final scoring is always human.</em></p>
+    </div>
+    <div class="slide-num">09</div>
+</div>
+
+<!-- SLIDE 10: TECH STACK -->
+<div class="slide" data-slide="10">
+    <div class="brand">Tech</div>
+    <div class="eyebrow info">Stack &amp; platform</div>
+    <h2>Boring tech where it matters. <span class="accent">AI where it earns its keep.</span></h2>
+    <div class="card" style="margin-top: 10px;">
+        <div class="stack-row">
+            <div class="stack-label">Frontend</div>
+            <div>
+                <span class="tag green">React 18 + Vite</span>
+                <span class="tag green">TailwindCSS + shadcn/ui</span>
+                <span class="tag green">TanStack Query</span>
+                <span class="tag green">Recharts</span>
+                <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 6px;">Fast dev cycle, internal-only dashboard — no need for SSR/Next.js overhead.</div>
+            </div>
+        </div>
+        <div class="stack-row">
+            <div class="stack-label">Backend</div>
+            <div>
+                <span class="tag green">Python 3.11</span>
+                <span class="tag green">FastAPI</span>
+                <span class="tag green">SQLAlchemy 2.0 + Alembic</span>
+                <span class="tag green">Pydantic v2</span>
+                <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 6px;">Python plays nicely with our existing model serving. FastAPI = auto-docs, async-ready, fast to ship.</div>
+            </div>
+        </div>
+        <div class="stack-row">
+            <div class="stack-label">Storage</div>
+            <div>
+                <span class="tag purple">PostgreSQL 16</span>
+                <span class="tag purple">Redis (queue + cache)</span>
+                <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 6px;">One Postgres instance covers teams, members, scores, audit log. Redis backs the email/job queue.</div>
+            </div>
+        </div>
+        <div class="stack-row">
+            <div class="stack-label">Background jobs</div>
+            <div>
+                <span class="tag">RQ (Redis Queue)</span>
+                <span class="tag">APScheduler for cron</span>
+                <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 6px;">RQ over Celery — same job model, half the moving parts. Reminders + Forms-sync run on a schedule.</div>
+            </div>
+        </div>
+        <div class="stack-row">
+            <div class="stack-label">AI Layer</div>
+            <div>
+                <span class="tag orange">Local LLM (existing) for screening</span>
+                <span class="tag orange">Azure OpenAI (GPT-4o) for judging</span>
+                <span class="tag orange">pgvector for similarity</span>
+                <span class="tag orange">Lightweight prompt-orchestration (no LangChain)</span>
+                <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 6px;">Cheap local model for high-volume screening; hosted model only for the judge layer where quality matters.</div>
+            </div>
+        </div>
+        <div class="stack-row">
+            <div class="stack-label">Integrations</div>
+            <div>
+                <span class="tag">MS Graph API (mail + Teams)</span>
+                <span class="tag">MS Forms Excel export (fallback)</span>
+                <span class="tag">GitHub REST API</span>
+                <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 6px;">Graph API is the prize; Excel-import keeps us unblocked while permissions are pending.</div>
+            </div>
+        </div>
+        <div class="stack-row">
+            <div class="stack-label">Auth</div>
+            <div>
+                <span class="tag purple">Azure AD SSO (MSAL)</span>
+                <span class="tag purple">RBAC: Organizer / Panelist / Read-only</span>
+                <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 6px;">Same identity people use for Outlook &amp; Teams — zero new credentials.</div>
+            </div>
+        </div>
+        <div class="stack-row">
+            <div class="stack-label">Hosting &amp; Ops</div>
+            <div>
+                <span class="tag green">Docker Compose on internal server</span>
+                <span class="tag green">nginx reverse proxy + TLS</span>
+                <span class="tag green">Loguru + simple status page</span>
+                <div style="font-size: 0.82rem; color: #94a3b8; margin-top: 6px;">No new cloud spend. Reuses the box we already run models on.</div>
+            </div>
+        </div>
+    </div>
+    <p style="margin-top: 16px; color: #a3e635; font-size: 0.95rem;"><strong>Why this exact mix:</strong> every piece either we've shipped before, or it's the obvious-and-boring choice. Zero exotic frameworks. Optimized for shipping by June 18, not for portfolio points.</p>
+    <div class="slide-num">10</div>
+</div>
+
+<!-- SLIDE 10b: STACK JUSTIFICATIONS -->
+<div class="slide" data-slide="10b">
+    <div class="brand">Tech · justified</div>
+    <div class="eyebrow info">Why each choice — and what we said no to</div>
+    <h2>Every pick has <span class="accent">a reason and a rival it beat</span></h2>
+    <div class="grid-2" style="margin-top: 8px; gap: 14px;">
+
+        <div class="card mod">
+            <h3>⚛️ React + Vite (not Next.js)</h3>
+            <p style="font-size: 0.92rem;">Internal, auth-gated dashboard — no SEO, no public pages, no SSR value. Vite cold-starts in ~300ms vs Next's multi-second; faster dev loop matters more here than Next's features. shadcn/ui gives us copy-paste components we own outright — no Material UI / Ant Design version lock-in.</p>
+        </div>
+
+        <div class="card mod">
+            <h3>🐍 FastAPI + Python (not Node / Django)</h3>
+            <p style="font-size: 0.92rem;">Our AI/ML libs (transformers, openai SDK, embeddings) are Python-native — Node would force a Python sidecar anyway. Django brings ORM/admin/templating we don't need for an API-first app. FastAPI = async + typed + auto-OpenAPI docs out of the box, which doubles as the handover doc for ops.</p>
+        </div>
+
+        <div class="card mod">
+            <h3>🐘 Postgres + pgvector (not Mongo / Pinecone)</h3>
+            <p style="font-size: 0.92rem;">Our data is relational — teams → members → scores → submissions. SQL is the right shape; Mongo would fight us on joins. pgvector handles similarity inside Postgres, so we skip running a separate vector DB (Pinecone, Weaviate) — fewer services to secure, fewer creds to manage, $0 extra. With ~500 submissions, pgvector is overkill-grade fine.</p>
+        </div>
+
+        <div class="card mod">
+            <h3>⚡ Redis + RQ (not Celery)</h3>
+            <p style="font-size: 0.92rem;">Celery has 4 brokers, 3 result-backends, and a config file longer than the job. RQ has one config: connection URL. For our scale (~10 concurrent jobs: send mail, sync Forms, score submission) RQ wins on simplicity and debug-ability — and during a live event, debuggability is everything.</p>
+        </div>
+
+        <div class="card mod">
+            <h3>🧠 Hybrid LLM: local + Azure OpenAI</h3>
+            <p style="font-size: 0.92rem;"><strong>Local model for screening:</strong> high-volume, low-stakes — runs at no marginal cost on our existing infra. <strong>Azure OpenAI (GPT-4o) for judging:</strong> panelists see this output, so quality matters. Assumes Azure OpenAI is available under RealPage&rsquo;s enterprise Azure tenant (to verify with IT) — if not, we fall back to a higher-grade local model.</p>
+        </div>
+
+        <div class="card mod">
+            <h3>🪶 Plain prompts, not LangChain</h3>
+            <p style="font-size: 0.92rem;">LangChain&rsquo;s API churns frequently and most of its abstractions are thin wrappers we&rsquo;d end up re-implementing anyway. During a live 2-day event we need every component to be transparent and quickly debuggable. Direct API calls with a thin orchestrator are simpler to reason about and version.</p>
+        </div>
+
+        <div class="card mod">
+            <h3>🔐 Azure AD SSO via MSAL</h3>
+            <p style="font-size: 0.92rem;">RealPage employees already authenticate via Azure AD. Re-using it means zero new credentials, instant access for all panelists, and clean RBAC. MSAL is Microsoft&rsquo;s first-party SDK — well-supported for both Python and JS — and maps cleanly to our three roles (Organizer / Panelist / Read-only).</p>
+        </div>
+
+        <div class="card mod">
+            <h3>🐳 Docker Compose (not Kubernetes / cloud)</h3>
+            <p style="font-size: 0.92rem;">One application, one host, one config file. Kubernetes adds operational overhead disproportionate to our scale. Going to cloud (AKS/EC2) would mean fresh procurement, budget, and a new monitoring stack — without delivering value over an internal server we already operate. nginx handles TLS termination and reverse-proxying in a compact config.</p>
+        </div>
+
+    </div>
+    <p style="margin-top: 18px; color: #94a3b8; font-size: 0.9rem;">
+        <strong style="color: #a3e635;">The decision principle:</strong> for each layer, we ask <em>"if this component fails during the live event, can a single engineer diagnose and recover quickly?"</em> Every choice above passes that test. Familiar tools and small surface areas matter more here than novelty.
+    </p>
+    <div class="slide-num">11</div>
+</div>
+
+<!-- SLIDE 11: TIMELINE -->
+<div class="slide" data-slide="11">
+    <div class="brand">Plan</div>
+    <div class="eyebrow success">Phased delivery</div>
+    <h2>Built in <span class="accent">phases</span> — usable from day 1</h2>
+    <div class="timeline">
+        <div class="tl-item">
+            <span class="tl-date">Now → May 19 · Registration window</span>
+            <h3>Phase 1 · Command Center + Screening (M1 + M2)</h3>
+            <p>Excel import path. Dashboard live. AI screening flags incomplete / duplicate / low-detail submissions. Organizing team uses it daily through registration close.</p>
+        </div>
+        <div class="tl-item">
+            <span class="tl-date">May 20 → June 5 · Pre-event ops</span>
+            <h3>Phase 1.5 · Email + Teams automation (M3)</h3>
+            <p>Reminder mails, fix-it nudges, mentor confirmations. Teams channels auto-created &amp; populated. Requires Graph API permissions approved by then.</p>
+        </div>
+        <div class="tl-item">
+            <span class="tl-date">June 6 → June 17 · Pre-demo</span>
+            <h3>Phase 2 · AI Judge Assistant (M4)</h3>
+            <p>Rubric finalized with org leadership. Repo + deck ingestion pipeline. Panelist UI ready. Dry-run with 5 sample teams.</p>
+        </div>
+        <div class="tl-item">
+            <span class="tl-date">June 18–19 · RealHack</span>
+            <h3>Live event</h3>
+            <p>Panelists use the Assistant in real time. AI pre-scores per team. Human scores side-by-side. Round 2 shortlist generated from leaderboard.</p>
+        </div>
+        <div class="tl-item">
+            <span class="tl-date">Post-event</span>
+            <h3>Phase 3 · Matchmaker + retrospective</h3>
+            <p>Orphan idea/team matcher. Post-event analytics. Re-use kit for RealHack 2027.</p>
+        </div>
+    </div>
+    <div class="slide-num">12</div>
+</div>
+
+<!-- SLIDE 12: WHAT WE NEED FROM AARTHI -->
+<div class="slide" data-slide="12">
+    <div class="brand">Asks</div>
+    <div class="eyebrow warn">What we need from the organizing team</div>
+    <h2>To ship this <span class="accent">in time for THIS RealHack</span></h2>
+    <div class="grid-2">
+        <div class="card gain">
+            <h3>🔑 Access &amp; data</h3>
+            <ul>
+                <li>Latest MS Forms registration export (Excel)</li>
+                <li>A few example submissions (good and weak) so we can tune the AI screener thresholds</li>
+                <li>The evaluation rubric / criteria the panelists use today</li>
+            </ul>
+        </div>
+        <div class="card gain">
+            <h3>🛂 Permissions (long pole)</h3>
+            <ul>
+                <li>Sponsor an Azure AD app registration for Graph API</li>
+                <li>Mail send scope on the RealHack@realpage.com mailbox</li>
+                <li>Teams create/manage scope on the RealHack tenant</li>
+            </ul>
+        </div>
+        <div class="card gain">
+            <h3>🧑‍⚖️ Stakeholder alignment</h3>
+            <ul>
+                <li>20-min review with the organizing team on the rubric &amp; flag thresholds</li>
+                <li>1 panelist as design partner for the Judge Assistant UI</li>
+                <li>Go-ahead to host on the internal server we already run</li>
+            </ul>
+        </div>
+        <div class="card gain">
+            <h3>📅 Cadence</h3>
+            <ul>
+                <li>15-min weekly check-in until June 5</li>
+                <li>Daily standups in event week</li>
+                <li>One Slack/Teams channel as the comms backbone</li>
+            </ul>
+        </div>
+    </div>
+    <div class="slide-num">13</div>
+</div>
+
+<!-- SLIDE 13: RISKS -->
+<div class="slide" data-slide="13">
+    <div class="brand">Risks</div>
+    <div class="eyebrow danger">Honest list · with mitigations</div>
+    <h2>What could go wrong — and how we handle it</h2>
+    <div class="grid-2" style="margin-top: 12px;">
+        <div class="card pain">
+            <h3>Graph API permissions stall</h3>
+            <p><strong>Mitigation:</strong> All M1+M2 work runs off Excel exports — zero dependency on Graph. M3 has Outlook-SMTP fallback for mail, and a manual Teams-channel export script.</p>
+        </div>
+        <div class="card pain">
+            <h3>AI hallucinates a score</h3>
+            <p><strong>Mitigation:</strong> Scores are always shown with the source evidence the LLM cited. Panelists override is one click. Final scoring is human — AI is advisory.</p>
+        </div>
+        <div class="card pain">
+            <h3>Adoption risk — Excel is the comfort zone</h3>
+            <p><strong>Mitigation:</strong> The dashboard exports the same Excel shape the team uses today. It&rsquo;s additive, not a replacement — anyone who prefers Excel can keep working that way while still benefiting from the AI screening output.</p>
+        </div>
+        <div class="card pain">
+            <h3>Scope expansion mid-build</h3>
+            <p><strong>Mitigation:</strong> Strict module boundaries with a Phase&nbsp;3 backlog for new asks. We hold the line on no new modules added between May&nbsp;19 and June&nbsp;5 to protect the delivery date.</p>
+        </div>
+    </div>
+    <div class="slide-num">14</div>
+</div>
+
+<!-- SLIDE 14: CLOSE -->
+<div class="slide title-hero" data-slide="14">
+    <div class="brand">Close</div>
+    <div class="eyebrow success">Bottom line</div>
+    <h1>Let's give RealHack 2026 <span class="accent">the platform it deserves.</span></h1>
+    <div class="tagline" style="margin-top: 20px;">
+        Phase 1 in days. Full platform by event week. AI Judge Assistant live during demos.
+    </div>
+    <div class="grid-3" style="max-width: 900px; margin: 32px auto 0;">
+        <div class="card">
+            <div class="metric">4</div>
+            <div class="metric-label">Modules</div>
+        </div>
+        <div class="card">
+            <div class="metric">3</div>
+            <div class="metric-label">Phases</div>
+        </div>
+        <div class="card">
+            <div class="metric">1</div>
+            <div class="metric-label">Goal — ship before June 18</div>
+        </div>
+    </div>
+    <p style="margin-top: 32px; color: #94a3b8; font-size: 1.05rem;">
+        Next step: green-light Phase 1, hand over the latest Forms export, and let's get the Graph API request in motion this week.
+    </p>
+    <div class="cred" style="margin-top: 24px;">
+        <span>📧 Shaikshavali.Kalluri@realpage.com</span>
+        <span>📧 RealHack@realpage.com</span>
+    </div>
+    <div class="slide-num">15</div>
+</div>
+
+</div>
+
+<div class="nav">
+    <button onclick="prev()">‹ Prev</button>
+    <span class="counter"><span id="cur">1</span> / <span id="tot">14</span></span>
+    <button onclick="next()">Next ›</button>
+</div>
+
+<script>
+const slides = document.querySelectorAll('.slide');
+let idx = 0;
+document.getElementById('tot').textContent = slides.length;
+
+function show(i) {
+    slides.forEach(s => s.classList.remove('active'));
+    slides[i].classList.add('active');
+    document.getElementById('cur').textContent = i + 1;
+}
+function next() { if (idx < slides.length - 1) { idx++; show(idx); } }
+function prev() { if (idx > 0) { idx--; show(idx); } }
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') next();
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') prev();
+    if (e.key === 'Home') { idx = 0; show(0); }
+    if (e.key === 'End') { idx = slides.length - 1; show(idx); }
+});
+</script>
+
+</body>
+</html>
