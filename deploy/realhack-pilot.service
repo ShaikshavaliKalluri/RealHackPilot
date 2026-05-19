@@ -14,10 +14,12 @@ ExecStart=/opt/realhack-pilot/app/backend/.venv/bin/python -m uvicorn app.main:a
 Restart=on-failure
 RestartSec=5
 
-# Resource hints — tune later if needed
+# Resource hints — conservative because this box also runs Pulse (.NET + Next.js)
+# and Postgres. 16GB total; budgeting ~2GB hard ceiling for us is plenty for
+# 48 teams' worth of data and a couple of concurrent LLM calls.
 LimitNOFILE=4096
-MemoryHigh=2G
-MemoryMax=4G
+MemoryHigh=1G
+MemoryMax=2G
 
 # Hardening
 NoNewPrivileges=true

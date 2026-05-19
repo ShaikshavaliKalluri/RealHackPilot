@@ -34,6 +34,19 @@ Frontend served as static files (Vite build). Backend is a `realhack-pilot.servi
 
 ---
 
+## Pre-flight: this box also runs Pulse
+
+`rcapaywwaiw002` already hosts Pulse (internal AI engineering platform) on the same nginx, Postgres, and systemd. Coexistence is handled, but two things must be true before `setup.sh`:
+
+1. **DNS A record `realhack.realpage.com` → same IP as `pulse.realpage.com`.** Ask IT — Pulse already has the equivalent record, so this is a quick add. Our nginx config only catches traffic for this hostname; Pulse keeps `default_server` and continues owning `rcapaywwaiw002.realpage.com` + `pulse.realpage.com`.
+2. **Postgres 16 must already be running** (Pulse may or may not use it — doesn't matter). `setup.sh` only *creates* the `realhack_pilot` database and `realhack` role; it never touches other databases.
+
+The setup script `reload`s nginx instead of restarting it, so Pulse's in-flight connections aren't dropped. Our systemd unit is capped at `MemoryMax=2G` to leave headroom for Pulse on the 16GB box. Our service runs as a dedicated `realhack` user so it can never write into `/opt/pulse`.
+
+**If DNS is delayed and you need to test today:** edit `realhack-pilot.nginx.conf` — change `listen 80;` to `listen 8080;` and `server_name realhack.realpage.com;` to `server_name _;`. Open the firewall with `sudo firewall-cmd --permanent --add-port=8080/tcp && sudo firewall-cmd --reload`. URL becomes `http://rcapaywwaiw002.realpage.com:8080/`. Swap back the moment DNS lands.
+
+---
+
 ## First-time deployment (~10 minutes)
 
 Run all of this on the server as a user with sudo.

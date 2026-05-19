@@ -159,9 +159,13 @@ if command -v setsebool >/dev/null 2>&1; then
     setsebool -P httpd_can_network_connect 1 || true
 fi
 
+# Validate config before touching the running nginx. If `nginx -t` fails, exit
+# rather than reload — the running config (which serves Pulse) stays intact.
 nginx -t
 systemctl enable nginx
-systemctl restart nginx
+# reload, not restart: this box also hosts Pulse on the same nginx process.
+# `reload` re-reads config without dropping in-flight Pulse connections.
+systemctl reload nginx
 
 # ------------------------------------------------------------------
 # 8. Firewall (firewalld is default on Rocky)
