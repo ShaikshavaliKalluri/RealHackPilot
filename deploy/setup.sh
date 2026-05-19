@@ -17,10 +17,11 @@ APP_USER="realhack"
 APP_HOME="/opt/realhack-pilot"
 APP_DIR="${APP_HOME}/app"
 ENV_FILE="${APP_HOME}/.env.production"
-PYTHON_BIN="python3.11"   # Rocky 9 default is 3.9; we need 3.10+
+PYTHON_BIN="python3.11"   # Rocky 8/9 default is older; we need 3.10+
 
+# DB lives on a remote VM (see section 5). We only reference the database
+# name here for the connectivity check; the role is `postgres` via trust auth.
 DB_NAME="realhack_pilot"
-DB_USER="realhack"
 
 # ------------------------------------------------------------------
 # Helpers
@@ -97,42 +98,35 @@ EOF
 [[ -d "${APP_DIR}/frontend/dist" ]] || die "Frontend build did not produce dist/"
 
 # ------------------------------------------------------------------
-# 5. PostgreSQL: ensure service + create db/user if missing
+# 5. PostgreSQL — remote DB on rcapaydbpgr001
 # ------------------------------------------------------------------
-log "Configuring PostgreSQL"
+# Postgres is NOT on this box. It lives on the dedicated DB VM rcapaydbpgr001
+# which is reached over the network on port 5432. The DB box's pg_hba.conf
+# trusts this app server by IP for the postgres user, so we just need the
+# psql client locally for connectivity checks (no server install, no role
+# creation here — the DB and the connection auth are managed off-box).
+#
+# Phase 2 hardening (before broader hackathon traffic): switch from the
+# `postgres` superuser to a dedicated `realhack` role with a password.
+log "Checking remote PostgreSQL connectivity"
 
-# Start postgres if it isn't running (some images leave it disabled)
-if ! systemctl is-active --quiet postgresql; then
-    # Some Rocky 9 setups use postgresql-16 instead of plain postgresql
-    if systemctl list-unit-files | grep -q '^postgresql-16.service'; then
-        systemctl enable --now postgresql-16
-    else
-        systemctl enable --now postgresql
-    fi
+if ! command -v psql >/dev/null 2>&1; then
+    # Install just the client (small, no server). --disableexcludes=all is
+    # needed because some corporate Rocky repos block postgresql installs.
+    dnf install -y --disableexcludes=all postgresql >/dev/null
 fi
 
-# Pull DB password from the .env file (the user fills it in before running this script)
-DB_PASSWORD="$(grep -E '^DATABASE_URL=' "${ENV_FILE}" | sed -E 's|^DATABASE_URL=postgresql\+psycopg2://[^:]+:([^@]+)@.*|\1|')"
-if [[ -z "${DB_PASSWORD}" || "${DB_PASSWORD}" == "CHANGE_ME" ]]; then
-    die "Set a real password in ${ENV_FILE} DATABASE_URL before running setup.sh"
+# Parse the DB host from DATABASE_URL so this stays in sync with .env
+DB_HOST="$(grep -E '^DATABASE_URL=' "${ENV_FILE}" | sed -E 's|^DATABASE_URL=postgresql\+psycopg2://[^@]+@([^:/]+).*|\1|')"
+if [[ -z "${DB_HOST}" ]]; then
+    die "Could not parse DB host from ${ENV_FILE} DATABASE_URL"
 fi
 
-sudo -u postgres psql <<SQL
-DO \$\$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${DB_USER}') THEN
-        CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASSWORD}';
-    ELSE
-        ALTER ROLE ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';
-    END IF;
-END
-\$\$;
-
-SELECT 'CREATE DATABASE ${DB_NAME} OWNER ${DB_USER}'
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}')\gexec
-
-GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
-SQL
+if ! psql -h "${DB_HOST}" -U postgres -d "${DB_NAME}" -c "SELECT 1;" >/dev/null 2>&1; then
+    die "Cannot reach Postgres on ${DB_HOST} as 'postgres' user, or database '${DB_NAME}' is missing. \
+Verify with:  psql -h ${DB_HOST} -U postgres -d ${DB_NAME} -c '\\\\l'"
+fi
+echo "  [OK] remote Postgres reachable at ${DB_HOST}, database '${DB_NAME}' exists"
 
 # ------------------------------------------------------------------
 # 6. systemd service

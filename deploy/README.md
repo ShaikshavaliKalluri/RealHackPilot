@@ -12,34 +12,40 @@ VMware infra (for any sibling server requests like the dedicated DB box):
 ## What this deploys
 
 ```
-                ┌────────────────────────────────────────────┐
-   http://<IP>/ │  rcapaywwaiw002                            │
-                │                                             │
-                │  [nginx :80]                                │
-                │      ├── /        → /opt/.../dist (static)  │
-                │      ├── /api/*   → 127.0.0.1:8000          │
-                │      └── /health  → 127.0.0.1:8000/api/...  │
-                │                                             │
-                │  [uvicorn :8000]  (systemd service)         │
-                │      └── connects to                        │
-                │                                             │
-                │  [Postgres :5432] (local, swap to dedicated │
-                │                    DB host when provisioned)│
-                └────────────────────────────────────────────┘
+   http://realhack.realpage.com/
+                │
+                ▼
+   ┌────────────────────────────────────────┐         ┌──────────────────────┐
+   │  rcapaywwaiw002 (app host, Rocky 8)    │         │  rcapaydbpgr001      │
+   │                                         │  TCP    │  (DB VM, Postgres 14)│
+   │  [nginx :80]                            │ :5432   │                      │
+   │     ├── / (Host: realhack.realpage…)    │────────▶│  realhack_pilot DB   │
+   │     │     → /opt/.../frontend/dist      │         │  postgres user       │
+   │     ├── /api/* → 127.0.0.1:8000         │         │  (trust auth by IP)  │
+   │     └── /health → 127.0.0.1:8000/api… │         └──────────────────────┘
+   │                                         │
+   │  [uvicorn :8000]  (systemd service,     │
+   │                    user=realhack)       │
+   │                                         │
+   │  (shares nginx with Pulse — Pulse keeps │
+   │   default_server + its own hostnames)   │
+   └────────────────────────────────────────┘
 ```
 
-Frontend served as static files (Vite build). Backend is a `realhack-pilot.service` systemd unit running uvicorn under a dedicated `realhack` user. Postgres uses the pre-installed Postgres 16 on the same host today.
+Frontend served as static files (Vite build). Backend is a `realhack-pilot.service` systemd unit running uvicorn under a dedicated `realhack` user. Postgres runs on a separate VM (`rcapaydbpgr001`, Postgres 14) reached over the network on port 5432 — no Postgres installed on the app host.
 
 **HTTP only for now.** Real Entra-mode sign-in (and any real Graph operations triggered from the dashboard UI) requires HTTPS — see "Phase 2: HTTPS + Real Auth" at the bottom.
+
+**DB auth note (Phase 2 hardening).** Today we connect as the `postgres` superuser with no password — the DB box's `pg_hba.conf` trusts the app server's IP. This is convenient but means an app-server compromise yields DB root. Before broader hackathon traffic, create a dedicated `realhack` role with a password scoped to just `realhack_pilot` and update `DATABASE_URL` accordingly.
 
 ---
 
 ## Pre-flight: this box also runs Pulse
 
-`rcapaywwaiw002` already hosts Pulse (internal AI engineering platform) on the same nginx, Postgres, and systemd. Coexistence is handled, but two things must be true before `setup.sh`:
+`rcapaywwaiw002` already hosts Pulse (internal AI engineering platform) on the same nginx and systemd. Coexistence is handled, but a few things must be true before `setup.sh`:
 
-1. **DNS A record `realhack.realpage.com` → same IP as `pulse.realpage.com`.** Ask IT — Pulse already has the equivalent record, so this is a quick add. Our nginx config only catches traffic for this hostname; Pulse keeps `default_server` and continues owning `rcapaywwaiw002.realpage.com` + `pulse.realpage.com`.
-2. **Postgres 16 must already be running** (Pulse may or may not use it — doesn't matter). `setup.sh` only *creates* the `realhack_pilot` database and `realhack` role; it never touches other databases.
+1. **DNS A record `realhack.realpage.com` → same IP as `pulse.realpage.com`** (already in place — verify with `nslookup realhack.realpage.com`). Our nginx config only catches traffic for this hostname; Pulse keeps `default_server` and continues owning `rcapaywwaiw002.realpage.com` + `pulse.realpage.com`.
+2. **Remote Postgres on `rcapaydbpgr001` must be reachable** with the `realhack_pilot` database already created. Verify with `psql -h rcapaydbpgr001 -U postgres -d realhack_pilot -c '\\l'` from the app server. `setup.sh` does not create the database — that's a one-time manual step (`psql -h rcapaydbpgr001 -U postgres -d postgres -c "CREATE DATABASE realhack_pilot;"`).
 
 The setup script `reload`s nginx instead of restarting it, so Pulse's in-flight connections aren't dropped. Our systemd unit is capped at `MemoryMax=2G` to leave headroom for Pulse on the 16GB box. Our service runs as a dedicated `realhack` user so it can never write into `/opt/pulse`.
 
@@ -67,11 +73,10 @@ sudo nano /opt/realhack-pilot/.env.production
 ```
 
 Fill in:
-- `DATABASE_URL` — pick a strong Postgres password (replace `CHANGE_ME`)
 - `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`
 - `AZURE_CLIENT_SECRET`
 - Leave `GRAPH_MODE=mock` for now (flip to `graph` once HTTPS + MSAL are in)
-- Update `CORS_ORIGINS` to include the server's IP, e.g. `http://10.20.30.40`
+- `DATABASE_URL` and `CORS_ORIGINS` are pre-filled in the template — leave as-is unless the DB host or app hostname changes
 
 Lock down the file:
 ```bash
@@ -144,7 +149,7 @@ This pulls the latest from GitHub, rebuilds frontend, restarts the backend servi
 | Nginx reload (e.g. after config change) | `sudo nginx -t && sudo systemctl reload nginx` |
 | Nginx access log | `sudo tail -f /var/log/nginx/realhack-pilot.access.log` |
 | Nginx errors | `sudo tail -f /var/log/nginx/realhack-pilot.error.log` |
-| DB dump (manual backup) | `sudo -u postgres pg_dump realhack_pilot > /var/backups/realhack-pilot-$(date +%F).sql` |
+| DB dump (manual backup) | `pg_dump -h rcapaydbpgr001 -U postgres realhack_pilot > /var/backups/realhack-pilot-$(date +%F).sql` |
 
 ---
 
@@ -164,18 +169,27 @@ The script uses device-code auth (sign in via `microsoft.com/device` with the co
 
 ---
 
-## Migrate to dedicated DB server (when provisioned)
+## Phase 2 DB hardening: dedicated role + password
 
-When the new DB host is ready:
+Today the app connects to `rcapaydbpgr001` as the `postgres` superuser via `pg_hba.conf` trust auth on the app server's IP. Before broader hackathon traffic, swap to a least-privilege setup:
 
-1. Create the DB + user on the new host (same SQL the setup.sh runs)
-2. Migrate data:
-   ```bash
-   sudo -u postgres pg_dump realhack_pilot | PGPASSWORD=<new-pw> psql -h <new-db-host> -U realhack realhack_pilot
+1. On `rcapaydbpgr001` (or via psql from the app server as `postgres`):
+   ```sql
+   CREATE ROLE realhack LOGIN PASSWORD '<strong-pw>';
+   ALTER DATABASE realhack_pilot OWNER TO realhack;
+   GRANT ALL PRIVILEGES ON DATABASE realhack_pilot TO realhack;
    ```
-3. Update `/opt/realhack-pilot/.env.production` — change `DATABASE_URL` to point at the new host
+2. Ask whoever owns `rcapaydbpgr001`'s `pg_hba.conf` to add (and reload):
+   ```
+   host realhack_pilot realhack <app-server-IP>/32 scram-sha-256
+   ```
+   …and ideally tighten the existing app-server trust line so only specific accounts get in passwordlessly.
+3. Update `/opt/realhack-pilot/.env.production`:
+   ```
+   DATABASE_URL=postgresql+psycopg2://realhack:<strong-pw>@rcapaydbpgr001:5432/realhack_pilot
+   ```
 4. `sudo systemctl restart realhack-pilot`
-5. Verify with `curl http://127.0.0.1:8000/api/stats` — should return the same team counts
+5. Verify with `curl http://127.0.0.1:8000/api/stats` — should return the same team counts.
 
 ---
 
@@ -205,7 +219,7 @@ sudo journalctl -u realhack-pilot -n 100 --no-pager
 ```
 
 Common causes:
-- `DATABASE_URL` password doesn't match Postgres user's actual password → re-run the `CREATE/ALTER ROLE` step from setup.sh
+- Remote DB unreachable → `psql -h rcapaydbpgr001 -U postgres -d realhack_pilot -c 'SELECT 1;'` from the app server. If it fails, check the network path and the DB box's `pg_hba.conf`.
 - `.env.production` has Windows line endings (CRLF) → `sudo dos2unix /opt/realhack-pilot/.env.production`
 - Python 3.11 missing → `sudo dnf install python3.11 python3.11-devel`
 

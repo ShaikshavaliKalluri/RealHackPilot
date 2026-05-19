@@ -1,7 +1,9 @@
 [Unit]
 Description=RealHack Pilot FastAPI backend (uvicorn)
 Documentation=https://github.com/ShaikshavaliKalluri/RealHackPilot
-After=network-online.target postgresql.service
+# Postgres lives on a remote VM (rcapaydbpgr001), so we only need the network
+# to be up — no local postgresql.service to depend on.
+After=network-online.target
 Wants=network-online.target
 
 [Service]
