@@ -11,10 +11,13 @@ You'll be shown a verification URL and a short code. Open the URL on any
 browser (your work laptop is fine — corporate SSO will likely sign you in
 silently), enter the code, confirm. Token comes back. Script prints
 everything it can verify.
+
+Auth: device-code flow with client_secret in the token exchange. See
+_device_code_auth.py for the why (sidesteps AADSTS7000218 / the "Allow
+public client flows" toggle).
 """
 from __future__ import annotations
 
-import base64
 import json
 import os
 import sys
@@ -24,7 +27,8 @@ sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
 
 import httpx
 from dotenv import load_dotenv
-from msal import PublicClientApplication
+
+from _device_code_auth import acquire_token, decode_jwt_payload
 
 load_dotenv(".env")
 
@@ -32,9 +36,8 @@ TENANT = os.environ.get("AZURE_TENANT_ID", "")
 CLIENT = os.environ.get("AZURE_CLIENT_ID", "")
 SECRET = os.environ.get("AZURE_CLIENT_SECRET", "")
 
-# Scopes we ASKED for in the SR (delegated permissions).
-# We use individual scope strings (not /.default) so we can see exactly which
-# ones come back as granted versus which ones get filtered out.
+# Scopes we ASKED for in the SR (delegated permissions). offline_access gives
+# us a refresh token (useful for long-running provisioning).
 REQUESTED_SCOPES = [
     "Mail.Send",
     "User.Read",
@@ -43,13 +46,8 @@ REQUESTED_SCOPES = [
     "Channel.Create",
     "ChannelMember.ReadWrite.All",
     "ChannelMessage.Send",
+    "offline_access",
 ]
-
-
-def decode_jwt_payload(token: str) -> dict:
-    payload_b64 = token.split(".")[1]
-    payload_b64 += "=" * (-len(payload_b64) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload_b64))
 
 
 def main() -> int:
@@ -61,37 +59,9 @@ def main() -> int:
     print(f"Client ID: {CLIENT}")
     print(f"Secret:    {SECRET[:4]}...{SECRET[-4:]}  (len={len(SECRET)})")
     print()
+    print("Initiating device-code flow (confidential client, secret included)...")
 
-    # Device-code is a PUBLIC client flow (the user is the credential, not the app secret).
-    # The real backend in production will still use a confidential client + the secret.
-    app = PublicClientApplication(
-        CLIENT,
-        authority=f"https://login.microsoftonline.com/{TENANT}",
-    )
-
-    print("Initiating device-code flow...")
-    flow = app.initiate_device_flow(scopes=REQUESTED_SCOPES)
-    if "user_code" not in flow:
-        print()
-        print("ERROR: device-code flow could not start.")
-        print(json.dumps(flow, indent=2))
-        if flow.get("error") in ("invalid_client", "unauthorized_client"):
-            print()
-            print("This usually means: 'Allow public client flows' is set to NO on the app.")
-            print("Fix in Entra Admin Center > App registrations > RealHack Pilot > Authentication >")
-            print("  Advanced settings > Allow public client flows -> Yes -> Save.")
-            print("(This setting is required for device-code; production MSAL.js does NOT need it.)")
-        return 2
-
-    print()
-    print("=" * 72)
-    print(flow["message"])  # human-readable: "go to https://microsoft.com/devicelogin and enter code XXXX"
-    print("=" * 72)
-    print()
-    print("Waiting for sign-in (this script will poll Microsoft every ~5s)...")
-
-    # acquire_token_by_device_flow blocks until success or timeout
-    result = app.acquire_token_by_device_flow(flow)
+    result = acquire_token(TENANT, CLIENT, SECRET, REQUESTED_SCOPES)
 
     if "access_token" not in result:
         print()
@@ -110,14 +80,17 @@ def main() -> int:
     print(f"  App:     {claims.get('app_displayname') or claims.get('appid')}")
     print(f"  Tenant:  {claims.get('tid')}")
     print(f"  Expires: in {result.get('expires_in')}s")
+    print(f"  Refresh: {'yes' if result.get('refresh_token') else 'no'}")
     print()
 
     scp = claims.get("scp", "")
     granted = scp.split() if scp else []
     print(f"=== Delegated scopes granted [{len(granted)}] ===")
-    requested_set = set(REQUESTED_SCOPES)
+    requested_set = {s for s in REQUESTED_SCOPES if s != "offline_access"}
     granted_set = set(granted)
     for s in REQUESTED_SCOPES:
+        if s == "offline_access":
+            continue  # not visible in scp claim; signaled by presence of refresh_token
         mark = "[OK]" if s in granted_set else "[MISSING]"
         print(f"  {mark}  {s}")
     extras = granted_set - requested_set

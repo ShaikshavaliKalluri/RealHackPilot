@@ -20,7 +20,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import sys
@@ -32,11 +31,11 @@ sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
 
 import httpx
 from dotenv import load_dotenv
-from msal import PublicClientApplication
 
 # Make sure the app package is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from _device_code_auth import acquire_token, decode_jwt_payload  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
 from app.models import Team, CommLog  # noqa: E402
 
@@ -45,6 +44,7 @@ load_dotenv(".env")
 
 TENANT = os.environ.get("AZURE_TENANT_ID", "")
 CLIENT = os.environ.get("AZURE_CLIENT_ID", "")
+SECRET = os.environ.get("AZURE_CLIENT_SECRET", "")
 PARENT_TEAM = os.environ.get("GRAPH_PARENT_TEAM_ID", "")
 
 # Scopes we need for: create channels, add members, post messages (later)
@@ -88,31 +88,14 @@ def err(msg: str) -> None:
 
 # ===== Auth =====
 
-def acquire_token() -> str:
-    if not TENANT or not CLIENT:
-        err("AZURE_TENANT_ID or AZURE_CLIENT_ID missing from .env")
+def get_access_token() -> str:
+    """Run device-code sign-in (confidential client, secret included) and return the bearer token."""
+    if not TENANT or not CLIENT or not SECRET:
+        err("AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET must all be set in .env")
         sys.exit(2)
 
-    app = PublicClientApplication(
-        CLIENT,
-        authority=f"https://login.microsoftonline.com/{TENANT}",
-    )
-
     print("Starting device-code sign-in...")
-    flow = app.initiate_device_flow(scopes=SCOPES)
-    if "user_code" not in flow:
-        err("Could not start device flow.")
-        print(json.dumps(flow, indent=2))
-        sys.exit(3)
-
-    print()
-    hr()
-    print(flow["message"])
-    hr()
-    print()
-    print("Polling Microsoft for sign-in completion...")
-
-    result = app.acquire_token_by_device_flow(flow)
+    result = acquire_token(TENANT, CLIENT, SECRET, SCOPES)
     if "access_token" not in result:
         err("Sign-in failed.")
         print(json.dumps(result, indent=2))
@@ -120,17 +103,10 @@ def acquire_token() -> str:
 
     token = result["access_token"]
     claims = decode_jwt_payload(token)
-    print()
     ok(f"Signed in as: {claims.get('name')} ({claims.get('preferred_username') or claims.get('upn')})")
     ok(f"Granted scopes: {claims.get('scp', '(none)')}")
     print()
     return token
-
-
-def decode_jwt_payload(token: str) -> dict:
-    payload_b64 = token.split(".")[1]
-    payload_b64 += "=" * (-len(payload_b64) % 4)
-    return json.loads(base64.urlsafe_b64decode(payload_b64))
 
 
 # ===== Graph calls =====
@@ -249,7 +225,7 @@ def main() -> int:
     if only_names:
         info(f"Filtering to: {only_names}")
 
-    token = acquire_token()
+    token = get_access_token()
     graph = GraphClient(token, dry_run=args.dry_run)
     signed_in_email = decode_jwt_payload(token).get("preferred_username") or "organizer@realpage.com"
 
