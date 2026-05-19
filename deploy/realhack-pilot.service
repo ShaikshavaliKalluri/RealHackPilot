@@ -1,0 +1,36 @@
+[Unit]
+Description=RealHack Pilot FastAPI backend (uvicorn)
+Documentation=https://github.com/ShaikshavaliKalluri/RealHackPilot
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=realhack
+Group=realhack
+WorkingDirectory=/opt/realhack-pilot/app/backend
+EnvironmentFile=/opt/realhack-pilot/.env.production
+ExecStart=/opt/realhack-pilot/app/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 2 --log-level info
+Restart=on-failure
+RestartSec=5
+
+# Resource hints — tune later if needed
+LimitNOFILE=4096
+MemoryHigh=2G
+MemoryMax=4G
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+# Stream stdout/stderr to journalctl
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=realhack-pilot
+
+[Install]
+WantedBy=multi-user.target

@@ -119,6 +119,43 @@ TEMPLATES: list[EmailTemplate] = [
             "— RealHack Organizing Team"
         ),
     ),
+    EmailTemplate(
+        id="individual_participation",
+        label="Individual participation — for people without a team or idea",
+        description=(
+            "Sent to RealPage employees who reached out about participating but don't "
+            "have a team or a problem statement yet. Points them to the individual "
+            "registration link and sets expectations about team matchmaking."
+        ),
+        # Audience is intentionally 'team' so the same composer flow renders it.
+        # Recipient list is the team members on the selected row(s); the message
+        # body itself is generic enough to read well even if forwarded to individuals.
+        audience="team",
+        subject="RealHack 2026 — individual participation: how to proceed",
+        body=(
+            "Hi {member_first_names_or_team},\n\n"
+            "Thank you for your interest in participating in RealHack 2026!\n\n"
+            "If you're interested but don't currently have a problem statement, idea, "
+            "or team, you can still register as an individual.\n\n"
+            "Here's how to proceed:\n\n"
+            "Please click on the Individual Registration link: "
+            "<INSERT_INDIVIDUAL_REGISTRATION_LINK_HERE>\n\n"
+            "Then follow whichever option applies to you:\n\n"
+            "  • If you already have an idea:\n"
+            "    Complete the Idea section in the registration form along with the "
+            "required basic details.\n\n"
+            "  • If you'd like to participate but don't have an idea or a team:\n"
+            "    Fill in only the basic registration details (the first section of "
+            "the form).\n\n"
+            "The organizing committee will make every effort to help place individual "
+            "registrants into teams based on the information provided. However, please "
+            "note that team allocation and participation cannot be guaranteed.\n\n"
+            "If you have any questions, feel free to reach out. We look forward to "
+            "your participation in RealHack 2026!\n\n"
+            "Thanks,\n"
+            "RealHack Team"
+        ),
+    ),
 ]
 
 

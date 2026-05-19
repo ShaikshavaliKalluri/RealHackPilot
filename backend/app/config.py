@@ -16,7 +16,15 @@ class Settings(BaseSettings):
     anthropic_model_fast: str = "claude-haiku-4-5-20251001"
     anthropic_model_smart: str = "claude-sonnet-4-6"
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+    # Microsoft Graph integration
+    graph_mode: str = "mock"  # "mock" or "graph"
+    azure_tenant_id: str = ""
+    azure_client_id: str = ""
+    azure_client_secret: str = ""
+    graph_mail_from: str = ""
+    graph_parent_team_id: str = ""
+
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
     @property
     def cors_origins_list(self) -> list[str]:
