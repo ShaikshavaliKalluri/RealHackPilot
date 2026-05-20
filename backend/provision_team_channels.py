@@ -183,6 +183,15 @@ def teams_to_process(only: list[str] | None) -> list[Team]:
 
 
 def update_team_after_create(team_id: int, channel_id: str, sent_by_email: str, dry_run: bool) -> None:
+    """Mark the team as channel-provisioned and write an audit log entry.
+
+    In dry-run mode, this is a no-op — we deliberately avoid touching the DB
+    so multiple dry-runs leave the database in the same state as before.
+    Without this guard, a dry-run would flip has_teams_channel=True with a
+    fake "dryrun-..." channel_id, causing the next real run to skip every team.
+    """
+    if dry_run:
+        return
     with SessionLocal() as s:
         team = s.query(Team).get(team_id)
         if not team:
@@ -195,7 +204,7 @@ def update_team_after_create(team_id: int, channel_id: str, sent_by_email: str, 
             kind="teams_channel_create",
             subject=f"Channel created: {team.name}",
             body=f"Channel ID: {channel_id}",
-            status=("dry_run" if dry_run else "sent"),
+            status="sent",
             sent_by_email=sent_by_email,
         ))
         s.commit()
