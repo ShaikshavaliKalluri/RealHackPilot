@@ -94,7 +94,7 @@ export function Analytics({ teams, stats, onJumpToTeam }: Props) {
     const axisAvgs = axisKeys.map(([key, label]) => {
       const scores = teams
         .map((t) => {
-          const v = (t.ai_scores?.[key] as any)?.score;
+          const v = (t.ai_scores as any)?.[key]?.score;
           return v != null ? Number(v) : null;
         })
         .filter((v): v is number => v !== null);
