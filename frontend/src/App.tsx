@@ -63,19 +63,6 @@ export default function App() {
     llmHealth().then(setLlm).catch((e) => console.error(e));
   }, [isAuthenticated]);
 
-  // ---- Render auth-gated content ----
-  // While MSAL is finishing a redirect or processing, show a spinner
-  if (inProgress !== 'none' && !isAuthenticated) {
-    return (
-      <div className="min-h-screen flex items-center justify-center text-slate-400">
-        Loading…
-      </div>
-    );
-  }
-  if (!isAuthenticated) {
-    return <LoginPage error={authError} />;
-  }
-
   const handleRunAIScreen = async (force = false) => {
     setAiBusy(true);
     setAiSummary('Starting AI screening...');
@@ -150,6 +137,20 @@ export default function App() {
       node?.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 60);
   };
+
+  // ---- Auth gate (placed AFTER all hooks so hook order stays stable
+  // across renders — React requires hooks to be called in the same
+  // order every render, hence no early returns before this point) ----
+  if (inProgress !== 'none' && !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-400">
+        Loading…
+      </div>
+    );
+  }
+  if (!isAuthenticated) {
+    return <LoginPage error={authError} />;
+  }
 
   return (
     <div className="min-h-screen p-8 max-w-7xl mx-auto">
