@@ -7,8 +7,10 @@ For each Team row in the DB that doesn't have a Teams channel yet:
   4. Update the Team row: has_teams_channel=True, teams_channel_id=<new id>
   5. Append a CommLog audit entry (status='sent', not 'mocked')
 
-Auth: device-code flow. You'll be shown a verification URL + short code; sign in once
-on any browser. The token (delegated, ~1 hour) is then used for all the Graph calls.
+Auth: OAuth authorization-code flow with a localhost loopback. The script opens
+your default browser to sign in (corporate SSO will likely be silent), captures
+the redirect on a temporary local port, and exchanges the code for a delegated
+token (~1 hour) used for all the Graph calls.
 
 Idempotent: teams that already have a channel are skipped.
 
@@ -89,12 +91,12 @@ def err(msg: str) -> None:
 # ===== Auth =====
 
 def get_access_token() -> str:
-    """Run device-code sign-in (confidential client, secret included) and return the bearer token."""
+    """Run auth-code + localhost loopback sign-in and return the bearer token."""
     if not TENANT or not CLIENT or not SECRET:
         err("AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET must all be set in .env")
         sys.exit(2)
 
-    print("Starting device-code sign-in...")
+    print("Starting browser sign-in...")
     result = acquire_token(TENANT, CLIENT, SECRET, SCOPES)
     if "access_token" not in result:
         err("Sign-in failed.")

@@ -1,20 +1,22 @@
 """One-shot verification of the Entra ID app registration.
 
-Runs the OAuth device-code flow against our app, then decodes the resulting
-delegated token and probes Microsoft Graph with calls our real app will make.
+Runs the OAuth authorization-code flow with a localhost loopback against
+our app, then decodes the resulting delegated token and probes Microsoft
+Graph with calls our real app will make.
 
 Run from backend/ with the venv active:
 
     .\.venv\Scripts\python.exe verify_graph_auth.py
 
-You'll be shown a verification URL and a short code. Open the URL on any
-browser (your work laptop is fine — corporate SSO will likely sign you in
-silently), enter the code, confirm. Token comes back. Script prints
-everything it can verify.
+The script will open your default browser to sign in with your work account
+(corporate SSO will likely sign you in silently). Once you complete sign-in,
+the browser is redirected back to a temporary local server, the script picks
+up the auth code, exchanges it for a token, and runs Graph probes.
 
-Auth: device-code flow with client_secret in the token exchange. See
-_device_code_auth.py for the why (sidesteps AADSTS7000218 / the "Allow
-public client flows" toggle).
+Auth: see _device_code_auth.py for why we use auth-code-loopback instead of
+device-code (Entra rejects device-code against confidential clients with
+AADSTS7000218 unless the public-client-flows toggle is enabled, which our
+security team won't approve).
 """
 from __future__ import annotations
 
@@ -59,7 +61,7 @@ def main() -> int:
     print(f"Client ID: {CLIENT}")
     print(f"Secret:    {SECRET[:4]}...{SECRET[-4:]}  (len={len(SECRET)})")
     print()
-    print("Initiating device-code flow (confidential client, secret included)...")
+    print("Initiating OAuth authorization-code flow (localhost loopback)...")
 
     result = acquire_token(TENANT, CLIENT, SECRET, REQUESTED_SCOPES)
 
