@@ -411,7 +411,7 @@ export default function App() {
       </>
       )}
 
-      {mode === 'judge' && <JudgeMode teams={teams} />}
+      {mode === 'judge' && user && <JudgeMode teams={teams} user={user} />}
 
       {mode === 'scoring' && <OrganizerScoring teams={teams} />}
 

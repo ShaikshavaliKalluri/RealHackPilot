@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Judge, RubricAxis, Team, JudgeScoreRecord } from '../types';
-import { fetchRubric, judgeLogin, submitJudgeScore, fetchJudgeScores } from '../api';
+import { fetchRubric, judgeLogin, submitJudgeScore, fetchJudgeScores, type UserProfile } from '../api';
 
 interface Props {
   teams: Team[];
+  user: UserProfile;
 }
 
 const JUDGE_KEY = 'realhack_pilot_judge';
@@ -18,11 +19,8 @@ function loadJudge(): Judge | null {
   try { return JSON.parse(raw); } catch { return null; }
 }
 
-export function JudgeMode({ teams }: Props) {
+export function JudgeMode({ teams, user }: Props) {
   const [judge, setJudge] = useState<Judge | null>(() => loadJudge());
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [loginBusy, setLoginBusy] = useState(false);
   const [loginErr, setLoginErr] = useState<string | null>(null);
 
   const [round, setRound] = useState<number>(1);
@@ -35,6 +33,20 @@ export function JudgeMode({ teams }: Props) {
     fetchRubric().then((r) => setAxes(r.axes)).catch(() => {});
   }, []);
 
+  // Auto-create the Judge record from the SSO profile — no separate sign-in
+  // needed now that the dashboard is gated by Entra SSO. We still keep the
+  // Judge entity for the score-attribution + leaderboard pipeline.
+  useEffect(() => {
+    if (judge) return; // already signed in via cached localStorage
+    if (!user?.name || !user?.email) return;
+    judgeLogin(user.name, user.email)
+      .then((j) => {
+        setJudge(j);
+        persistJudge(j);
+      })
+      .catch((e: any) => setLoginErr(e.message ?? String(e)));
+  }, [user, judge]);
+
   useEffect(() => {
     if (!judge) { setSubmittedScores([]); return; }
     fetchJudgeScores({ judge_id: judge.id, round })
@@ -44,69 +56,30 @@ export function JudgeMode({ teams }: Props) {
 
   const scoredTeamIds = useMemo(() => new Set(submittedScores.map((s) => s.team_id)), [submittedScores]);
 
-  const handleLogin = async () => {
-    if (!name.trim()) { setLoginErr('Please enter your name'); return; }
-    setLoginBusy(true);
-    setLoginErr(null);
-    try {
-      const j = await judgeLogin(name.trim(), email.trim() || `${name.toLowerCase().replace(/\s+/g, '.')}@realpage.com`);
-      setJudge(j);
-      persistJudge(j);
-    } catch (e: any) {
-      setLoginErr(e.message ?? String(e));
-    } finally {
-      setLoginBusy(false);
-    }
-  };
-
   const logout = () => {
     setJudge(null);
     persistJudge(null);
     setActiveTeamId(null);
   };
 
-  // ===== Login screen =====
+  // ===== Waiting for SSO auto-login (or showing an error) =====
   if (!judge) {
     return (
       <div className="max-w-md mx-auto">
         <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-8 text-center">
-          <div className="mb-4">
-            <svg className="w-12 h-12 mx-auto" viewBox="0 0 23 23"><rect x="1" y="1" width="10" height="10" fill="#f25022"/><rect x="12" y="1" width="10" height="10" fill="#7fba00"/><rect x="1" y="12" width="10" height="10" fill="#00a4ef"/><rect x="12" y="12" width="10" height="10" fill="#ffb900"/></svg>
-          </div>
-          <h2 className="text-2xl font-extrabold">Sign in to score</h2>
-          <p className="text-sm text-slate-400 mt-1">RealHack Pilot · Panelist access</p>
-
-          <div className="space-y-3 mt-6 text-left">
-            <div>
-              <label className="text-xs uppercase tracking-wider text-slate-400">Your full name</label>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Shaikshavali …"
-                className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 mt-1 focus:outline-none focus:border-sky-500/60"
-              />
-            </div>
-            <div>
-              <label className="text-xs uppercase tracking-wider text-slate-400">Email</label>
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="firstname.lastname@realpage.com"
-                className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 mt-1 focus:outline-none focus:border-sky-500/60"
-              />
-            </div>
-            <button
-              disabled={loginBusy}
-              onClick={handleLogin}
-              className="w-full bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded transition mt-2"
-            >
-              {loginBusy ? 'Signing in…' : 'Sign in with Microsoft'}
-            </button>
-            {loginErr && <p className="text-sm text-rose-300">{loginErr}</p>}
-            <p className="text-xs text-slate-500 italic text-center pt-2">
-              Demo build · real Azure AD SSO pending IT app registration.
-            </p>
-          </div>
+          {loginErr ? (
+            <>
+              <h2 className="text-2xl font-extrabold text-rose-300">Couldn't set up judge profile</h2>
+              <p className="text-sm text-slate-400 mt-2">{loginErr}</p>
+            </>
+          ) : (
+            <>
+              <h2 className="text-2xl font-extrabold">Preparing your scorecard…</h2>
+              <p className="text-sm text-slate-400 mt-2">
+                Signed in as <span className="text-slate-200">{user?.name}</span>
+              </p>
+            </>
+          )}
         </div>
       </div>
     );
