@@ -31,7 +31,12 @@ from . import comms
 from . import backup as backup_service
 from . import llm as llm_service
 from . import chat as chat_service
-from fastapi.responses import FileResponse
+from .auth import require_auth, fetch_profile, build_profile_payload
+from fastapi import Security
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+_bearer_scheme = HTTPBearer(auto_error=False)
 from .schemas import (
     TeamOut, UploadResult, DashboardStats, AIScreenResult,
     EmailTemplateOut, EmailRenderRequest, RenderedEmail,
@@ -55,6 +60,38 @@ app.add_middleware(
 )
 
 
+# ---- Auth middleware ----
+# Every /api/* request requires a valid Entra Bearer token. Health + docs are
+# exempt so monitoring + dev-time exploration still work without sign-in.
+_AUTH_EXEMPT_PATHS = {"/api/health", "/docs", "/redoc", "/openapi.json"}
+
+
+@app.middleware("http")
+async def _require_auth_middleware(request, call_next):
+    path = request.url.path
+    # Allow CORS preflight and exempt paths through without auth
+    if request.method == "OPTIONS" or path in _AUTH_EXEMPT_PATHS or not path.startswith("/api/"):
+        return await call_next(request)
+    auth_header = request.headers.get("Authorization") or ""
+    if not auth_header.lower().startswith("bearer "):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Authentication required"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = auth_header.split(" ", 1)[1].strip()
+    try:
+        from .auth import validate_token  # local import to avoid circular
+        validate_token(token)
+    except Exception as e:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": f"Invalid token: {e}"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await call_next(request)
+
+
 @app.on_event("startup")
 def _startup() -> None:
     Base.metadata.create_all(bind=engine)
@@ -65,6 +102,20 @@ def _startup() -> None:
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "env": settings.app_env}
+
+
+@app.get("/api/me", response_model=dict)
+def me(
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+) -> dict:
+    """Return the signed-in user's profile: name, email, jobTitle, department.
+
+    Combines JWT claims (authoritative for identity) with Graph /me data
+    (jobTitle, department) so the dashboard can show a rich profile badge.
+    """
+    graph_profile = fetch_profile(creds.credentials) if creds else {}
+    return build_profile_payload(claims, graph_profile)
 
 
 @app.get("/api/llm/health")

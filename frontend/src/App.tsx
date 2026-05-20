@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, type LLMHealth, type AIScreenStatus } from './api';
+import { useIsAuthenticated, useMsal } from '@azure/msal-react';
+import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, type LLMHealth, type AIScreenStatus, type UserProfile } from './api';
 import type { Team, DashboardStats } from './types';
 import { StatCard } from './components/StatCard';
 import { TeamCard } from './components/TeamCard';
@@ -12,12 +13,21 @@ import { CommsPanel } from './components/CommsPanel';
 import { BroadcastPanel } from './components/BroadcastPanel';
 import { ChatPanel } from './components/ChatPanel';
 import { Analytics } from './components/Analytics';
+import { LoginPage } from './components/LoginPage';
+import { UserBadge } from './components/UserBadge';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
 type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | null;
 type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics';
 
 export default function App() {
+  // ---- Auth (MSAL) ----
+  const isAuthenticated = useIsAuthenticated();
+  const { inProgress } = useMsal();
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // ---- Dashboard state ----
   const [teams, setTeams] = useState<Team[]>([]);
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [filter, setFilter] = useState<Filter>('all');
@@ -43,10 +53,28 @@ export default function App() {
     }
   };
 
+  // Auth gate: once authenticated, fetch profile + dashboard data
   useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchMe()
+      .then(setUser)
+      .catch((e) => setAuthError(e.message || 'Failed to load profile'));
     reload().catch((e) => console.error(e));
     llmHealth().then(setLlm).catch((e) => console.error(e));
-  }, []);
+  }, [isAuthenticated]);
+
+  // ---- Render auth-gated content ----
+  // While MSAL is finishing a redirect or processing, show a spinner
+  if (inProgress !== 'none' && !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-400">
+        Loading…
+      </div>
+    );
+  }
+  if (!isAuthenticated) {
+    return <LoginPage error={authError} />;
+  }
 
   const handleRunAIScreen = async (force = false) => {
     setAiBusy(true);
@@ -183,6 +211,7 @@ export default function App() {
               Analytics
             </button>
           </div>
+          {user && <UserBadge user={user} />}
         </div>
       </header>
 

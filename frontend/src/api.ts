@@ -1,15 +1,29 @@
 import type { Team, DashboardStats, UploadResult } from './types';
+import { getAccessToken } from './auth';
 
 const BASE = '/api';
 
+/**
+ * Wrapper around `fetch` that auto-injects the MSAL access token as
+ * `Authorization: Bearer ...` for every API call. Falls through to plain
+ * fetch if the user isn't signed in (the backend will then return 401 and
+ * the UI redirects to the login page).
+ */
+async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const token = await getAccessToken();
+  const headers = new Headers(init.headers || {});
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
+}
+
 export async function fetchTeams(): Promise<Team[]> {
-  const r = await fetch(`${BASE}/teams`);
+  const r = await authFetch(`${BASE}/teams`);
   if (!r.ok) throw new Error(`Failed to fetch teams: ${r.status}`);
   return r.json();
 }
 
 export async function fetchStats(): Promise<DashboardStats> {
-  const r = await fetch(`${BASE}/stats`);
+  const r = await authFetch(`${BASE}/stats`);
   if (!r.ok) throw new Error(`Failed to fetch stats: ${r.status}`);
   return r.json();
 }
@@ -17,7 +31,7 @@ export async function fetchStats(): Promise<DashboardStats> {
 export async function uploadRegistrations(file: File): Promise<UploadResult> {
   const fd = new FormData();
   fd.append('file', file);
-  const r = await fetch(`${BASE}/upload`, { method: 'POST', body: fd });
+  const r = await authFetch(`${BASE}/upload`, { method: 'POST', body: fd });
   if (!r.ok) {
     const text = await r.text();
     throw new Error(`Upload failed: ${r.status} — ${text}`);
@@ -26,7 +40,7 @@ export async function uploadRegistrations(file: File): Promise<UploadResult> {
 }
 
 export async function rescreen(): Promise<{ teams_scanned: number; duplicate_participants: number; multi_team_mentors: number }> {
-  const r = await fetch(`${BASE}/rescreen`, { method: 'POST' });
+  const r = await authFetch(`${BASE}/rescreen`, { method: 'POST' });
   if (!r.ok) throw new Error(`Rescreen failed: ${r.status}`);
   return r.json();
 }
@@ -47,7 +61,7 @@ export interface AIScreenStatus {
 }
 
 export async function runAIScreen(force = false): Promise<AIScreenStatus> {
-  const r = await fetch(`${BASE}/ai-screen?force=${force}`, { method: 'POST' });
+  const r = await authFetch(`${BASE}/ai-screen?force=${force}`, { method: 'POST' });
   if (r.status === 409) {
     // A job is already running — return its current status instead of erroring
     const body = await r.json().catch(() => null);
@@ -58,13 +72,13 @@ export async function runAIScreen(force = false): Promise<AIScreenStatus> {
 }
 
 export async function aiScreenStatus(): Promise<AIScreenStatus> {
-  const r = await fetch(`${BASE}/ai-screen/status`);
+  const r = await authFetch(`${BASE}/ai-screen/status`);
   if (!r.ok) throw new Error(`AI screen status failed: ${r.status}`);
   return r.json();
 }
 
 export async function aiScreenOne(teamId: number): Promise<any> {
-  const r = await fetch(`${BASE}/ai-screen/${teamId}`, { method: 'POST' });
+  const r = await authFetch(`${BASE}/ai-screen/${teamId}`, { method: 'POST' });
   if (!r.ok) throw new Error(`AI screen for team ${teamId} failed: ${r.status}`);
   return r.json();
 }
@@ -84,7 +98,7 @@ export interface ChatResponse {
 }
 
 export async function chatSend(messages: ChatMessage[]): Promise<ChatResponse> {
-  const r = await fetch(`${BASE}/chat`, {
+  const r = await authFetch(`${BASE}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages }),
@@ -104,7 +118,7 @@ export interface LLMHealth {
 }
 
 export async function llmHealth(): Promise<LLMHealth> {
-  const r = await fetch(`${BASE}/llm/health`);
+  const r = await authFetch(`${BASE}/llm/health`);
   if (!r.ok) throw new Error(`LLM health failed: ${r.status}`);
   return r.json();
 }
@@ -128,13 +142,13 @@ export interface RenderedEmail {
 }
 
 export async function fetchEmailTemplates(): Promise<EmailTemplate[]> {
-  const r = await fetch(`${BASE}/email/templates`);
+  const r = await authFetch(`${BASE}/email/templates`);
   if (!r.ok) throw new Error(`Templates fetch failed: ${r.status}`);
   return r.json();
 }
 
 export async function renderEmails(templateId: string, teamIds: number[] | null): Promise<RenderedEmail[]> {
-  const r = await fetch(`${BASE}/email/render`, {
+  const r = await authFetch(`${BASE}/email/render`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ template_id: templateId, team_ids: teamIds }),
@@ -144,7 +158,7 @@ export async function renderEmails(templateId: string, teamIds: number[] | null)
 }
 
 export async function judgeAI(teamId: number, repoUrl: string | null): Promise<any> {
-  const r = await fetch(`${BASE}/judge/${teamId}/ai`, {
+  const r = await authFetch(`${BASE}/judge/${teamId}/ai`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repo_url: repoUrl }),
@@ -159,7 +173,7 @@ export async function judgeHuman(
   panelist: string | null,
   repoUrl: string | null,
 ): Promise<any> {
-  const r = await fetch(`${BASE}/judge/${teamId}/human`, {
+  const r = await authFetch(`${BASE}/judge/${teamId}/human`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ scores, panelist, repo_url: repoUrl }),
@@ -173,13 +187,13 @@ export async function judgeHuman(
 import type { Judge, RubricAxis, JudgeScoreRecord, LeaderboardData } from './types';
 
 export async function fetchRubric(): Promise<{ axes: RubricAxis[]; max_per_axis: number }> {
-  const r = await fetch(`${BASE}/judging/rubric`);
+  const r = await authFetch(`${BASE}/judging/rubric`);
   if (!r.ok) throw new Error(`Rubric fetch failed: ${r.status}`);
   return r.json();
 }
 
 export async function judgeLogin(name: string, email: string): Promise<Judge> {
-  const r = await fetch(`${BASE}/judges/login`, {
+  const r = await authFetch(`${BASE}/judges/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, email }),
@@ -189,13 +203,13 @@ export async function judgeLogin(name: string, email: string): Promise<Judge> {
 }
 
 export async function fetchJudges(): Promise<Judge[]> {
-  const r = await fetch(`${BASE}/judges`);
+  const r = await authFetch(`${BASE}/judges`);
   if (!r.ok) throw new Error(`Judges fetch failed: ${r.status}`);
   return r.json();
 }
 
 export async function createJudge(name: string, email: string | null, role = 'judge'): Promise<Judge> {
-  const r = await fetch(`${BASE}/judges`, {
+  const r = await authFetch(`${BASE}/judges`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, email, role }),
@@ -212,7 +226,7 @@ export async function submitJudgeScore(payload: {
   comment?: string | null;
   entered_by_email?: string | null;
 }): Promise<JudgeScoreRecord> {
-  const r = await fetch(`${BASE}/judging/scores`, {
+  const r = await authFetch(`${BASE}/judging/scores`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -230,13 +244,13 @@ export async function fetchJudgeScores(opts: { round?: number; judge_id?: number
   if (opts.judge_id !== undefined) qs.set('judge_id', String(opts.judge_id));
   if (opts.team_id !== undefined) qs.set('team_id', String(opts.team_id));
   const url = `${BASE}/judging/scores${qs.toString() ? '?' + qs : ''}`;
-  const r = await fetch(url);
+  const r = await authFetch(url);
   if (!r.ok) throw new Error(`Scores fetch failed: ${r.status}`);
   return r.json();
 }
 
 export async function fetchLeaderboard(round: number): Promise<LeaderboardData> {
-  const r = await fetch(`${BASE}/judging/leaderboard?round=${round}`);
+  const r = await authFetch(`${BASE}/judging/leaderboard?round=${round}`);
   if (!r.ok) throw new Error(`Leaderboard fetch failed: ${r.status}`);
   return r.json();
 }
@@ -246,13 +260,13 @@ export async function fetchLeaderboard(round: number): Promise<LeaderboardData> 
 import type { CommLogEntry } from './types';
 
 export async function commsMode(): Promise<{ mode: string }> {
-  const r = await fetch(`${BASE}/comms/mode`);
+  const r = await authFetch(`${BASE}/comms/mode`);
   if (!r.ok) throw new Error(`Comms mode failed: ${r.status}`);
   return r.json();
 }
 
 export async function createTeamsChannels(teamIds: number[] | null, sentByEmail: string | null): Promise<{ created: number[]; already_existing: number[]; mode: string }> {
-  const r = await fetch(`${BASE}/comms/channels`, {
+  const r = await authFetch(`${BASE}/comms/channels`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ team_ids: teamIds, sent_by_email: sentByEmail }),
@@ -262,7 +276,7 @@ export async function createTeamsChannels(teamIds: number[] | null, sentByEmail:
 }
 
 export async function postTeamMessage(teamId: number, message: string, sentByEmail: string | null): Promise<any> {
-  const r = await fetch(`${BASE}/comms/teams/${teamId}/message`, {
+  const r = await authFetch(`${BASE}/comms/teams/${teamId}/message`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, sent_by_email: sentByEmail }),
@@ -272,7 +286,7 @@ export async function postTeamMessage(teamId: number, message: string, sentByEma
 }
 
 export async function broadcastMessage(message: string, teamIds: number[] | null, sentByEmail: string | null): Promise<any> {
-  const r = await fetch(`${BASE}/comms/broadcast`, {
+  const r = await authFetch(`${BASE}/comms/broadcast`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, team_ids: teamIds, sent_by_email: sentByEmail }),
@@ -287,7 +301,7 @@ export async function fetchCommLog(opts: { team_id?: number; kind?: string; limi
   if (opts.kind) qs.set('kind', opts.kind);
   if (opts.limit) qs.set('limit', String(opts.limit));
   const url = `${BASE}/comms/log${qs.toString() ? '?' + qs : ''}`;
-  const r = await fetch(url);
+  const r = await authFetch(url);
   if (!r.ok) throw new Error(`Comm log fetch failed: ${r.status}`);
   return r.json();
 }
@@ -302,7 +316,7 @@ export async function appendCommLog(payload: {
   sent_by_email?: string | null;
   status?: string;
 }): Promise<CommLogEntry> {
-  const r = await fetch(`${BASE}/comms/log`, {
+  const r = await authFetch(`${BASE}/comms/log`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -314,23 +328,39 @@ export async function appendCommLog(payload: {
 export async function checkDuplicate(teamId: number, kind = 'email', templateId: string | null = null, hours = 24): Promise<{ duplicate: boolean; last_sent_at?: string; last_sent_by_email?: string }> {
   const qs = new URLSearchParams({ team_id: String(teamId), kind, hours: String(hours) });
   if (templateId) qs.set('template_id', templateId);
-  const r = await fetch(`${BASE}/comms/duplicate-check?${qs}`);
+  const r = await authFetch(`${BASE}/comms/duplicate-check?${qs}`);
   if (!r.ok) throw new Error(`Duplicate check failed: ${r.status}`);
   return r.json();
 }
 
 export async function checkRepo(teamId: number): Promise<{ ready: boolean; notes: string; github?: any }> {
-  const r = await fetch(`${BASE}/teams/${teamId}/check-repo`, { method: 'POST' });
+  const r = await authFetch(`${BASE}/teams/${teamId}/check-repo`, { method: 'POST' });
   if (!r.ok) throw new Error(`Repo check failed: ${r.status}`);
   return r.json();
 }
 
 export async function updateReadiness(teamId: number, patch: { presentation_uploaded?: boolean; repo_url?: string | null; has_teams_channel?: boolean }): Promise<any> {
-  const r = await fetch(`${BASE}/teams/${teamId}/readiness`, {
+  const r = await authFetch(`${BASE}/teams/${teamId}/readiness`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   });
   if (!r.ok) throw new Error(`Readiness update failed: ${r.status}`);
+  return r.json();
+}
+
+// ===== Auth (current user profile) =====
+
+export interface UserProfile {
+  name: string;
+  email: string;
+  job_title: string | null;
+  department: string | null;
+  initials: string;
+}
+
+export async function fetchMe(): Promise<UserProfile> {
+  const r = await authFetch(`${BASE}/me`);
+  if (!r.ok) throw new Error(`Profile fetch failed: ${r.status}`);
   return r.json();
 }
