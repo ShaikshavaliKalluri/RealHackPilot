@@ -35,8 +35,17 @@ export const loginRequest = {
 };
 
 /**
- * Get an access token for the signed-in user, requesting fresh if needed.
- * Returns null if not signed in.
+ * Get a bearer token for the signed-in user — used in the Authorization
+ * header on every call to our backend API.
+ *
+ * Returns the ID TOKEN (not the access token) because our backend validates
+ * audience = our client_id, and only the ID token has our client_id as its
+ * audience. The access token returned for the User.Read scope has
+ * Microsoft Graph as its audience and would fail backend validation.
+ *
+ * (If/when we expose a custom API scope like `api://<clientId>/access`,
+ * we can switch to a properly-scoped access token. Until then ID-token-as-
+ * auth is fine for an internal app and is the simplest path.)
  */
 export async function getAccessToken(): Promise<string | null> {
   const accounts = msalInstance.getAllAccounts();
@@ -46,7 +55,7 @@ export async function getAccessToken(): Promise<string | null> {
       scopes: loginRequest.scopes,
       account: accounts[0],
     });
-    return result.accessToken;
+    return result.idToken;
   } catch {
     // Silent acquire failed — the caller should redirect to login
     return null;
