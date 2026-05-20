@@ -122,14 +122,20 @@ def send_one(
     *,
     subject: str,
     body_text: str,
+    body_html: str | None,
     to_emails: list[str],
     cc_emails: list[str] | None,
     send_as: str | None,
 ) -> tuple[int, str]:
-    """POST /sendMail. Returns (status_code, response_text_or_empty)."""
+    """POST /sendMail. Returns (status_code, response_text_or_empty).
+
+    Uses HTML body when provided (richer formatting); falls back to plain text.
+    """
+    content_type = "HTML" if body_html else "text"
+    content = body_html if body_html else body_text
     message: dict[str, Any] = {
         "subject": subject,
-        "body": {"contentType": "text", "content": body_text},
+        "body": {"contentType": content_type, "content": content},
         "toRecipients": [{"emailAddress": {"address": e}} for e in to_emails if e],
     }
     if cc_emails:
@@ -283,6 +289,7 @@ def main() -> int:
                     client,
                     subject=r["subject"],
                     body_text=r["body"],
+                    body_html=r.get("body_html"),
                     to_emails=recipients,
                     cc_emails=cc,
                     send_as=MAIL_FROM or None,

@@ -29,7 +29,52 @@ class EmailTemplate:
     description: str
     audience: str  # 'team' | 'mentor' | 'all'
     subject: str
-    body: str
+    body: str           # plain-text fallback
+    body_html: str = "" # rich HTML version; used when set, else body is sent as text
+
+
+# ---- HTML branded wrapper ----
+def _html_wrap(content: str) -> str:
+    """Wrap a content HTML snippet in the RealHack branded email shell."""
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {{margin:0;padding:0;background:#f0f2f5;font-family:-apple-system,Segoe UI,Arial,sans-serif;}}
+    .wrap {{max-width:600px;margin:24px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);}}
+    .hdr {{background:#0078d4;padding:24px 32px;}}
+    .hdr h1 {{color:#fff;margin:0;font-size:20px;font-weight:700;letter-spacing:-.3px;}}
+    .hdr p {{color:#a8d4f5;margin:4px 0 0;font-size:12px;}}
+    .bdy {{padding:28px 32px;color:#222;font-size:15px;line-height:1.65;}}
+    .bdy p {{margin:0 0 14px;}}
+    .bdy ul {{margin:8px 0 14px;padding-left:22px;}}
+    .bdy li {{margin:4px 0;}}
+    .bdy .label {{font-weight:600;color:#333;}}
+    .bdy .info-block {{background:#f4f8fd;border-left:3px solid #0078d4;border-radius:4px;padding:12px 16px;margin:14px 0;font-size:14px;}}
+    .bdy .fields {{background:#fff8f0;border-left:3px solid #e67e00;border-radius:4px;padding:12px 16px;margin:14px 0;font-size:14px;}}
+    .ftr {{background:#f8f8f8;padding:14px 32px;color:#999;font-size:12px;border-top:1px solid #eee;}}
+    .ftr a {{color:#0078d4;text-decoration:none;}}
+    a {{color:#0078d4;}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hdr">
+      <h1>RealHack 2026</h1>
+      <p>June 18–19 &nbsp;·&nbsp; RealPage Internal Hackathon</p>
+    </div>
+    <div class="bdy">
+{content}
+    </div>
+    <div class="ftr">
+      RealHack Organizing Team &nbsp;·&nbsp;
+      <a href="mailto:RealHack@realpage.com">RealHack@realpage.com</a>
+    </div>
+  </div>
+</body>
+</html>"""
 
 
 TEMPLATES: list[EmailTemplate] = [
@@ -53,6 +98,24 @@ TEMPLATES: list[EmailTemplate] = [
             "If anything above looks wrong, reply to RealHack@realpage.com.\n\n"
             "— RealHack Organizing Team"
         ),
+        body_html=_html_wrap(
+            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "      <p>You're confirmed for <strong>RealHack 2026</strong> (June 18–19). Here's your registration summary:</p>\n"
+            "      <div class='info-block'>\n"
+            "        <p class='label'>Team &nbsp;·&nbsp; {team_name}</p>\n"
+            "        <p><span class='label'>Mentor:</span> {mentor_name}</p>\n"
+            "        <p><span class='label'>Members:</span><br>{member_list}</p>\n"
+            "        <p><span class='label'>Idea on file:</span> {idea_short}</p>\n"
+            "      </div>\n"
+            "      <p><strong>Next steps:</strong></p>\n"
+            "      <ul>\n"
+            "        <li>Your private Teams channel will be created in the next few days.</li>\n"
+            "        <li>Watch your inbox for the kickoff and schedule details.</li>\n"
+            "        <li>Your mentor will reach out to align before the event.</li>\n"
+            "      </ul>\n"
+            "      <p>If anything above looks wrong, reply to "
+            "<a href='mailto:RealHack@realpage.com'>RealHack@realpage.com</a>.</p>"
+        ),
     ),
     EmailTemplate(
         id="fix_it",
@@ -71,6 +134,17 @@ TEMPLATES: list[EmailTemplate] = [
             "If you're unsure what to write or want to discuss the idea, your mentor "
             "({mentor_name}) is available to help.\n\n"
             "— RealHack Organizing Team"
+        ),
+        body_html=_html_wrap(
+            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "      <p>Thanks for registering team <strong>{team_name}</strong> for RealHack 2026.</p>\n"
+            "      <p>When we reviewed your submission, the following field(s) were either "
+            "empty, marked TBD, or too brief to evaluate:</p>\n"
+            "      <div class='fields'>{missing_fields_block}</div>\n"
+            "      <p>Could you update the registration with a more detailed answer for each "
+            "of the above? <strong>The deadline is May 19, 2026 and will not be extended.</strong></p>\n"
+            "      <p>If you're unsure what to write or want to discuss the idea, your mentor "
+            "<strong>{mentor_name}</strong> is available to help.</p>"
         ),
     ),
     EmailTemplate(
@@ -248,6 +322,7 @@ def render(template: EmailTemplate, team: Team) -> dict:
         "to": [e for e in to_emails if e],
         "subject": fill(template.subject),
         "body": fill(template.body),
+        "body_html": fill(template.body_html) if template.body_html else None,
         "missing_fields": missing,
     }
 

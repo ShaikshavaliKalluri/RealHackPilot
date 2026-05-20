@@ -11,10 +11,11 @@ import { OrganizerScoring } from './components/OrganizerScoring';
 import { CommsPanel } from './components/CommsPanel';
 import { BroadcastPanel } from './components/BroadcastPanel';
 import { ChatPanel } from './components/ChatPanel';
+import { Analytics } from './components/Analytics';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
 type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | null;
-type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms';
+type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics';
 
 export default function App() {
   const [teams, setTeams] = useState<Team[]>([]);
@@ -132,12 +133,14 @@ export default function App() {
             {mode === 'judge' && <>Judge <span className="text-sky-300">Scorecard</span></>}
             {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}
             {mode === 'comms' && <>Teams <span className="text-violet-300">Channels &amp; Broadcast</span></>}
+            {mode === 'analytics' && <>Analytics <span className="text-teal-300">&amp; Reporting</span></>}
           </h1>
           <p className="text-slate-400 mt-2 text-sm max-w-3xl">
             {mode === 'dashboard' && 'Upload the latest MS Forms export. Teams get scored on completeness, screened for duplicates and rule violations, and surfaced in one place.'}
             {mode === 'judge' && 'Sign in, pick a round, score each team against the rubric. Each judge can submit once per team per round.'}
             {mode === 'scoring' && 'Live leaderboard aggregating judge scores per round, plus manual entry for organizers to log scores on behalf of a judge.'}
             {mode === 'comms' && 'Create per-team Microsoft Teams channels and broadcast announcements to every team at once.'}
+            {mode === 'analytics' && 'Location heat map, completeness distribution, AI score breakdown, top teams, flag analysis, and swag procurement summary.'}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -172,6 +175,12 @@ export default function App() {
               className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'comms' ? 'bg-violet-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
             >
               Comms
+            </button>
+            <button
+              onClick={() => setMode('analytics')}
+              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'analytics' ? 'bg-teal-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+            >
+              Analytics
             </button>
           </div>
         </div>
@@ -375,6 +384,10 @@ export default function App() {
       {mode === 'judge' && <JudgeMode teams={teams} />}
 
       {mode === 'scoring' && <OrganizerScoring teams={teams} />}
+
+      {mode === 'analytics' && stats && (
+        <Analytics teams={teams} stats={stats} onJumpToTeam={(id) => { setMode('dashboard'); setTimeout(() => jumpToTeam(id), 50); }} />
+      )}
 
       {mode === 'comms' && (
         <div className="space-y-6">
