@@ -176,7 +176,9 @@ def rescreen(db: Session = Depends(get_db)) -> dict:
 # race window if a status check lands on the other worker is acceptable —
 # worst case the UI sees stale "idle" for one poll, then catches up.
 _ai_screen_logger = logging.getLogger("ai_screen")
-_ai_screen_lock = threading.Lock()
+# RLock so the same thread can re-enter (e.g. if the handler builds an error
+# payload via _ai_screen_status_payload() while still holding the lock).
+_ai_screen_lock = threading.RLock()
 _ai_screen_state: dict[str, Any] = {
     "running": False,
     "job_id": None,
@@ -260,17 +262,32 @@ def ai_screen(force: bool = False) -> dict:
 
     Poll GET /api/ai-screen/status to watch progress.
     """
+    # Cheap, lockless pre-check — we re-verify under the lock below before mutating
+    if _ai_screen_state.get("running"):
+        # Build the status payload BEFORE we touch the lock, so we never hold
+        # and re-acquire it on the error path.
+        existing_status = _ai_screen_status_payload()
+        raise HTTPException(
+            status_code=409,
+            detail={"message": "A screening job is already running", "status": existing_status},
+        )
+
+    # Snapshot total team count up-front so the UI has a denominator.
+    # This runs outside the lock so a slow DB doesn't block anyone else.
+    with SessionLocal() as s:
+        total = s.query(models.Team).count()
+    job_id = uuid.uuid4().hex[:12]
+    started_at = datetime.utcnow().isoformat()
+
+    # Atomic check-then-set: race-safe even if two requests slip past the
+    # lockless pre-check at the same time.
     with _ai_screen_lock:
-        if _ai_screen_state["running"]:
-            # Don't trample an in-flight job — return its status with 409
+        if _ai_screen_state.get("running"):
+            existing_status = _ai_screen_status_payload()
             raise HTTPException(
                 status_code=409,
-                detail={"message": "A screening job is already running", "status": _ai_screen_status_payload()},
+                detail={"message": "A screening job is already running", "status": existing_status},
             )
-        # Snapshot total team count up-front so the UI has a denominator
-        with SessionLocal() as s:
-            total = s.query(models.Team).count()
-        job_id = uuid.uuid4().hex[:12]
         _ai_screen_state.update({
             "running": True,
             "job_id": job_id,
@@ -279,7 +296,7 @@ def ai_screen(force: bool = False) -> dict:
             "scored": 0,
             "failed": 0,
             "providers": {},
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": started_at,
             "finished_at": None,
             "error": None,
         })
