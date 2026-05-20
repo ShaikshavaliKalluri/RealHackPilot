@@ -31,9 +31,35 @@ export async function rescreen(): Promise<{ teams_scanned: number; duplicate_par
   return r.json();
 }
 
-export async function runAIScreen(force = false): Promise<{ scored: number; skipped: number; failed: number; providers: Record<string, number> }> {
+// AI screening is async: POST kicks off a background job and returns
+// immediately with the current job status. Callers should poll
+// aiScreenStatus() to watch progress and decide when to refresh the UI.
+export interface AIScreenStatus {
+  job_id: string | null;
+  status: 'idle' | 'running' | 'done' | 'error';
+  total: number;
+  scored: number;
+  failed: number;
+  providers: Record<string, number>;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+}
+
+export async function runAIScreen(force = false): Promise<AIScreenStatus> {
   const r = await fetch(`${BASE}/ai-screen?force=${force}`, { method: 'POST' });
+  if (r.status === 409) {
+    // A job is already running — return its current status instead of erroring
+    const body = await r.json().catch(() => null);
+    if (body?.detail?.status) return body.detail.status as AIScreenStatus;
+  }
   if (!r.ok) throw new Error(`AI screen failed: ${r.status}`);
+  return r.json();
+}
+
+export async function aiScreenStatus(): Promise<AIScreenStatus> {
+  const r = await fetch(`${BASE}/ai-screen/status`);
+  if (!r.ok) throw new Error(`AI screen status failed: ${r.status}`);
   return r.json();
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fetchTeams, fetchStats, runAIScreen, aiScreenOne, llmHealth, type LLMHealth } from './api';
+import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, type LLMHealth, type AIScreenStatus } from './api';
 import type { Team, DashboardStats } from './types';
 import { StatCard } from './components/StatCard';
 import { TeamCard } from './components/TeamCard';
@@ -48,16 +48,29 @@ export default function App() {
 
   const handleRunAIScreen = async (force = false) => {
     setAiBusy(true);
-    setAiSummary(null);
+    setAiSummary('Starting AI screening...');
     try {
-      const r = await runAIScreen(force);
-      const providerLabel = Object.entries(r.providers).map(([p, c]) => `${p}×${c}`).join(', ') || 'none';
-      setAiSummary(
-        `AI-screened ${r.scored} team${r.scored === 1 ? '' : 's'}` +
-        (r.skipped ? ` · skipped ${r.skipped} already-scored` : '') +
-        (r.failed ? ` · ${r.failed} failed` : '') +
-        ` · via ${providerLabel}`
-      );
+      const initial = await runAIScreen(force);
+      // Poll until the background job is done. Backend returns scored/failed
+      // as it processes each team, so we can show running progress.
+      let last: AIScreenStatus = initial;
+      const summarize = (s: AIScreenStatus, label: string) => {
+        const providerLabel = Object.entries(s.providers).map(([p, c]) => `${p}×${c}`).join(', ');
+        const provBit = providerLabel ? ` · via ${providerLabel}` : '';
+        const failBit = s.failed ? ` · ${s.failed} failed` : '';
+        return `${label}: ${s.scored} / ${s.total} team${s.total === 1 ? '' : 's'} scored${failBit}${provBit}`;
+      };
+      setAiSummary(summarize(last, 'AI screening'));
+      while (last.status === 'running') {
+        await new Promise((r) => setTimeout(r, 2500));
+        last = await aiScreenStatus();
+        setAiSummary(summarize(last, 'AI screening'));
+      }
+      if (last.status === 'error') {
+        setAiSummary(`AI screening error: ${last.error ?? '(unknown)'}`);
+      } else {
+        setAiSummary(summarize(last, 'AI screening complete'));
+      }
       await reload();
     } catch (e: any) {
       setAiSummary(`Error: ${e.message ?? String(e)}`);

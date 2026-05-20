@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import tempfile
+import threading
+import uuid
 from collections import Counter
+from datetime import datetime
+from typing import Any
 
 import csv
 import io
@@ -14,7 +19,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .db import Base, engine, get_db, lightweight_migrate
+from .db import Base, SessionLocal, engine, get_db, lightweight_migrate
 from . import models
 from .importer import parse_workbook, dicts_to_models
 from .screener import screen_all
@@ -158,11 +163,141 @@ def rescreen(db: Session = Depends(get_db)) -> dict:
     return summary
 
 
-@app.post("/api/ai-screen", response_model=AIScreenResult)
-def ai_screen(force: bool = False, db: Session = Depends(get_db)) -> AIScreenResult:
-    summary = ai_score_all(db, force=force)
-    db.commit()
-    return AIScreenResult(**summary)
+# ---- AI screening — async background job ----
+#
+# Bulk AI screening hits the LLM 48× back-to-back and easily blows past
+# corporate-LB / nginx timeouts on a single HTTP request. We run it in a
+# background thread instead: POST kicks it off and returns a job_id; the
+# UI polls GET /api/ai-screen/status every couple of seconds until done.
+#
+# Single-worker assumption: the systemd unit runs uvicorn with --workers 2,
+# so this in-memory state is per-process. Concurrent screening jobs in
+# practice never happen (one organizer clicks the button), so the small
+# race window if a status check lands on the other worker is acceptable —
+# worst case the UI sees stale "idle" for one poll, then catches up.
+_ai_screen_logger = logging.getLogger("ai_screen")
+_ai_screen_lock = threading.Lock()
+_ai_screen_state: dict[str, Any] = {
+    "running": False,
+    "job_id": None,
+    "force": False,
+    "total": 0,
+    "scored": 0,
+    "failed": 0,
+    "providers": {},
+    "started_at": None,
+    "finished_at": None,
+    "error": None,
+}
+
+
+def _ai_screen_status_payload() -> dict:
+    with _ai_screen_lock:
+        state = dict(_ai_screen_state)
+    if state.get("error"):
+        status = "error"
+    elif state.get("running"):
+        status = "running"
+    elif state.get("finished_at"):
+        status = "done"
+    else:
+        status = "idle"
+    return {
+        "job_id": state.get("job_id"),
+        "status": status,
+        "total": state.get("total", 0),
+        "scored": state.get("scored", 0),
+        "failed": state.get("failed", 0),
+        "providers": state.get("providers", {}),
+        "started_at": state.get("started_at"),
+        "finished_at": state.get("finished_at"),
+        "error": state.get("error"),
+    }
+
+
+def _run_ai_screen_background(force: bool, job_id: str) -> None:
+    """Worker that runs in a background thread.
+
+    Scores teams one at a time so we can publish progress mid-run. Each
+    team's score is committed individually so a crash mid-job leaves
+    everything before it durably saved.
+    """
+    try:
+        with SessionLocal() as db:
+            teams = db.query(models.Team).all()
+            scored = 0
+            failed = 0
+            providers: dict[str, int] = {}
+            for t in teams:
+                if not force and t.ai_scores and t.ai_scores.get("overall", {}).get("score"):
+                    continue
+                result = ai_score_team(t)
+                t.ai_scores = result
+                db.commit()
+                if result.get("error"):
+                    failed += 1
+                else:
+                    scored += 1
+                    p = result.get("provider") or "unknown"
+                    providers[p] = providers.get(p, 0) + 1
+                with _ai_screen_lock:
+                    _ai_screen_state["scored"] = scored
+                    _ai_screen_state["failed"] = failed
+                    _ai_screen_state["providers"] = providers
+    except Exception as e:  # pragma: no cover — failsafe
+        _ai_screen_logger.exception("AI screen background job %s failed", job_id)
+        with _ai_screen_lock:
+            _ai_screen_state["error"] = str(e)[:200]
+    finally:
+        with _ai_screen_lock:
+            _ai_screen_state["running"] = False
+            _ai_screen_state["finished_at"] = datetime.utcnow().isoformat()
+
+
+@app.post("/api/ai-screen", response_model=dict)
+def ai_screen(force: bool = False) -> dict:
+    """Start AI screening in the background. Returns immediately with job info.
+
+    Poll GET /api/ai-screen/status to watch progress.
+    """
+    with _ai_screen_lock:
+        if _ai_screen_state["running"]:
+            # Don't trample an in-flight job — return its status with 409
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "A screening job is already running", "status": _ai_screen_status_payload()},
+            )
+        # Snapshot total team count up-front so the UI has a denominator
+        with SessionLocal() as s:
+            total = s.query(models.Team).count()
+        job_id = uuid.uuid4().hex[:12]
+        _ai_screen_state.update({
+            "running": True,
+            "job_id": job_id,
+            "force": force,
+            "total": total,
+            "scored": 0,
+            "failed": 0,
+            "providers": {},
+            "started_at": datetime.utcnow().isoformat(),
+            "finished_at": None,
+            "error": None,
+        })
+
+    threading.Thread(
+        target=_run_ai_screen_background,
+        args=(force, job_id),
+        daemon=True,
+        name=f"ai-screen-{job_id}",
+    ).start()
+
+    return _ai_screen_status_payload()
+
+
+@app.get("/api/ai-screen/status", response_model=dict)
+def ai_screen_status() -> dict:
+    """Current state of the most recent / in-flight AI screening job."""
+    return _ai_screen_status_payload()
 
 
 @app.post("/api/ai-screen/{team_id}", response_model=dict)
