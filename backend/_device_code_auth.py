@@ -53,18 +53,17 @@ def _basic_auth_header(client_id: str, client_secret: str) -> str:
 def initiate_device_flow(tenant: str, client_id: str, client_secret: str, scopes: list[str]) -> dict:
     """POST /devicecode and return user_code, device_code, verification_uri, etc.
 
-    Sends client_secret too so Entra registers the flow as confidential — so
-    the matching /token call later is accepted.
+    Sends client_secret in the body so Entra registers the flow as confidential —
+    so the matching /token call later is accepted. RFC 6749 §2.3.1 says clients
+    SHOULD use a single auth channel, so we deliberately don't add a Basic auth
+    header alongside the body credential.
     """
     body = urlencode({
         "client_id": client_id,
         "client_secret": client_secret,
         "scope": " ".join(scopes),
     })
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Authorization": _basic_auth_header(client_id, client_secret),
-    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
     if _DEBUG:
         print(f"[debug] POST /devicecode body: {_redact(body, client_secret)}")
 
@@ -92,18 +91,16 @@ def poll_for_token(
 ) -> dict:
     """Poll the token endpoint until sign-in completes (or times out).
 
-    Includes credentials in BOTH the body (client_id + client_secret) and the
-    Authorization: Basic header — RFC 6749 allows either, Entra accepts both,
-    and sending them on both channels guarantees we're not tripped up by any
-    parser quirk on either side.
+    Credentials go in the request body only. We previously tried both body +
+    Authorization: Basic header, but Entra's strict token-issuance validator
+    (the one that runs AFTER user sign-in completes, distinct from the lenient
+    polling validator) seems to reject requests with credentials present on
+    both channels. RFC 6749 §2.3.1 says clients SHOULD pick one — picked body.
     """
     deadline = time.monotonic() + expires_in
     poll_interval = max(interval, 1)
 
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Authorization": _basic_auth_header(client_id, client_secret),
-    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
     while time.monotonic() < deadline:
         time.sleep(poll_interval)
