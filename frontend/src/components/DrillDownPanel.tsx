@@ -89,17 +89,19 @@ function toTeamRow(t: Team): TeamRow {
 }
 
 function computeComplete(teams: Team[]): TeamRow[] {
+  // Complete now means just "completeness_score >= 0.8" (regardless of flags).
+  // Complete + Incomplete partition the total cleanly; Flagged is orthogonal.
   return teams
-    .filter((t) => t.completeness_score >= 0.8 && (!t.flags || t.flags.length === 0))
+    .filter((t) => t.completeness_score >= 0.8)
     .map(toTeamRow)
     .sort((a, b) => b.completeness - a.completeness || a.name.localeCompare(b.name));
 }
 
 function computeIncomplete(teams: Team[]): TeamRow[] {
-  // Inverse of "complete" — anything under 0.8 completeness, OR with any flag.
-  // Sorted by lowest completeness first so the worst cases are at the top.
+  // Just the score-based inverse of Complete. Sorted worst-first so the most
+  // problematic submissions surface at the top of the drill-down.
   return teams
-    .filter((t) => t.completeness_score < 0.8 || (t.flags && t.flags.length > 0))
+    .filter((t) => t.completeness_score < 0.8)
     .map(toTeamRow)
     .sort((a, b) => a.completeness - b.completeness || a.name.localeCompare(b.name));
 }

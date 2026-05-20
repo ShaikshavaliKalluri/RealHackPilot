@@ -91,8 +91,11 @@ export default function App() {
 
   const filteredTeams = useMemo(() => {
     let list = teams;
+    // Complete + Incomplete partition the total by completeness_score (>= 0.8).
+    // Flagged is orthogonal — a team can be Complete AND Flagged (filled out
+    // well but has, say, a duplicate member or mentor overloaded).
     if (filter === 'flagged') list = list.filter((t) => t.flags && t.flags.length > 0);
-    if (filter === 'complete') list = list.filter((t) => t.completeness_score >= 0.8 && (!t.flags || t.flags.length === 0));
+    if (filter === 'complete') list = list.filter((t) => t.completeness_score >= 0.8);
     if (filter === 'incomplete') list = list.filter((t) => t.completeness_score < 0.8);
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -243,6 +246,12 @@ export default function App() {
             if (m.name && m.name.trim()) uniqueMembers.add(m.name.trim().toLowerCase());
           }
         }
+        // Complete + Incomplete now partition by completeness alone, so they
+        // sum to total_teams. Flagged is orthogonal and overlaps with both.
+        // Computed in the frontend because stats.complete_teams from the API
+        // still uses the old (score AND no-flags) definition.
+        const completeCount = teams.filter((t) => t.completeness_score >= 0.8).length;
+        const incompleteCount = teams.length - completeCount;
         return (
         <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
           <StatCard label="Teams" value={stats.total_teams} />
@@ -260,14 +269,14 @@ export default function App() {
           />
           <StatCard
             label="Complete"
-            value={stats.complete_teams}
+            value={completeCount}
             tone="success"
             onClick={() => setStatsPanel(statsPanel === 'complete' ? null : 'complete')}
             active={statsPanel === 'complete'}
           />
           <StatCard
             label="Incomplete"
-            value={stats.total_teams - stats.complete_teams}
+            value={incompleteCount}
             tone="warn"
             onClick={() => setStatsPanel(statsPanel === 'incomplete' ? null : 'incomplete')}
             active={statsPanel === 'incomplete'}
