@@ -7,9 +7,12 @@ For now we cover the deterministic checks the organizing team flagged:
   - duplicate participants across teams
   - mentor stretched across too many teams
   - malformed location / t-shirt size (impacts swag shipping)
+  - team name accidentally set to a member's name (form-fill confusion)
+  - suspicious-looking email addresses that likely won't resolve in AD
 """
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
 
 from sqlalchemy.orm import Session
@@ -24,6 +27,16 @@ VALID_LOCATIONS = {"us", "india", "philippines"}
 VALID_TSHIRT = {"s", "m", "l", "xl", "xxl", "xxxl"}
 MENTOR_MAX_TEAMS = 2
 
+# Email-shape rules. We don't try to enforce strict RFC 5322 — we just catch
+# the patterns that empirically don't resolve in RealPage's AD:
+#   - VRAJKUMAR@RealPage.com   (no dot, all uppercase)
+#   - RRishitha@RealPage.com   (no dot, single-cap prefix)
+#   - SMahamkali@RealPage.com  (no dot, initial+lastname)
+#   - Subba.Sai.Sireesha.Sakshi@... (>2 dots, almost always typo)
+# The canonical RealPage format is `first.last@realpage.com`.
+_EMAIL_BASIC = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_REALPAGE_DOMAIN = re.compile(r"@realpage\.com$", re.IGNORECASE)
+
 
 def _is_low_quality(value: str | None) -> bool:
     if value is None:
@@ -32,6 +45,40 @@ def _is_low_quality(value: str | None) -> bool:
     if s in PLACEHOLDERS:
         return True
     return len(s) < MIN_FIELD_CHARS
+
+
+def _normalize(s: str | None) -> str:
+    """Lowercase + collapse internal whitespace for fuzzy equality checks."""
+    if not s:
+        return ""
+    return " ".join(s.strip().lower().split())
+
+
+def _email_issue(email: str | None) -> str | None:
+    """Return None if the email looks fine; otherwise return a short reason.
+
+    Used to flag emails that we expect to fail Microsoft Graph user-resolution
+    (so the organizer can fix them in the source before channel provisioning).
+    """
+    if not email:
+        return None  # empty handled by other checks; not "invalid" per se
+    addr = email.strip()
+    if not _EMAIL_BASIC.match(addr):
+        return "malformed"
+
+    local, _, _ = addr.partition("@")
+    if not _REALPAGE_DOMAIN.search(addr):
+        return "non_realpage_domain"
+
+    # Local-part patterns that almost never resolve in RealPage's AD:
+    dots = local.count(".")
+    if dots == 0:
+        # no separator — almost certainly a typo like VRAJKUMAR or SMahamkali
+        return "no_first_last_separator"
+    if dots > 2:
+        # 3+ dots — unusual; probably a typo merging multiple names
+        return "too_many_dots"
+    return None
 
 
 def _completeness(team: Team) -> float:
@@ -54,11 +101,35 @@ def _team_flags(team: Team) -> list[str]:
     if not team.mentor_name or not str(team.mentor_name).strip():
         flags.append("missing_mentor")
 
+    # Team-name-is-a-member-name: when filling the form, registrants sometimes
+    # paste a person's name into the team-name field by mistake. We catch this
+    # by checking if the (normalized) team name matches any member's name, or
+    # if it's a strict substring of one.
+    team_name_norm = _normalize(team.name)
+    if team_name_norm:
+        for m in team.members:
+            mname_norm = _normalize(m.name)
+            if not mname_norm:
+                continue
+            if team_name_norm == mname_norm or team_name_norm in mname_norm or mname_norm in team_name_norm:
+                flags.append(f"team_name_is_member:{m.name}")
+                break  # one is enough
+
+    # Suspicious-looking member emails (likely Graph-unresolvable)
     for m in team.members:
+        issue = _email_issue(m.email)
+        if issue:
+            flags.append(f"bad_email:{issue}:{m.email or m.name}")
         if m.location and m.location.strip().lower() not in VALID_LOCATIONS:
             flags.append(f"bad_location:{m.name}")
         if m.tshirt_size and m.tshirt_size.strip().upper() not in {x.upper() for x in VALID_TSHIRT}:
             flags.append(f"bad_tshirt:{m.name}")
+
+    # Mentor email too
+    if team.mentor_email:
+        issue = _email_issue(team.mentor_email)
+        if issue:
+            flags.append(f"bad_mentor_email:{issue}:{team.mentor_email}")
 
     return flags
 
