@@ -58,7 +58,14 @@ def _redact(body: str, client_secret: str) -> str:
 
 
 class _LoopbackHandler(http.server.BaseHTTPRequestHandler):
-    """Catches the single GET that Entra sends after the user signs in."""
+    """Catches the single GET that Entra sends after the user signs in.
+
+    Browsers also fire follow-up requests (favicon.ico, etc.) against our
+    ephemeral port after they render the success page. We must ignore those
+    so they don't overwrite the captured redirect data — only the first
+    request that looks like an OAuth redirect (has state + code/error) is
+    captured. Everything else gets a tiny 204.
+    """
 
     # Class attributes mutated by the run loop below.
     captured_query: Optional[dict] = None
@@ -66,20 +73,29 @@ class _LoopbackHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802 (stdlib naming)
         parsed = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(parsed.query)
-        # parse_qs returns lists; flatten to single values
-        _LoopbackHandler.captured_query = {k: v[0] for k, v in query.items()}
+        flat = {k: v[0] for k, v in query.items()}
 
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.end_headers()
+        looks_like_redirect = "state" in flat and ("code" in flat or "error" in flat)
+        first_capture = _LoopbackHandler.captured_query is None
 
-        if "code" in _LoopbackHandler.captured_query:
-            page = _SUCCESS_PAGE
+        if first_capture and looks_like_redirect:
+            _LoopbackHandler.captured_query = flat
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            if "code" in flat:
+                page = _SUCCESS_PAGE
+            else:
+                err = flat.get("error", "(no error code)")
+                desc = flat.get("error_description", "")
+                page = _ERROR_PAGE_TEMPLATE.format(error=_html_escape(err), desc=_html_escape(desc))
+            self.wfile.write(page.encode("utf-8"))
         else:
-            err = _LoopbackHandler.captured_query.get("error", "(no error code)")
-            desc = _LoopbackHandler.captured_query.get("error_description", "")
-            page = _ERROR_PAGE_TEMPLATE.format(error=_html_escape(err), desc=_html_escape(desc))
-        self.wfile.write(page.encode("utf-8"))
+            # favicon, prefetch, second navigation — anything that isn't the
+            # OAuth redirect itself. Respond with 204 No Content so the
+            # browser stays quiet and we don't pollute the capture state.
+            self.send_response(204)
+            self.end_headers()
 
     def log_message(self, format, *args):  # noqa: A002
         # Quiet — we don't want every favicon.ico request spamming stderr.
