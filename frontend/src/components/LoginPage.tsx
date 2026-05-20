@@ -72,9 +72,11 @@ export function LoginPage({ error }: Props) {
 
         {/* Access policy footer */}
         <div className="mt-6 pt-5 border-t border-slate-700/40 text-xs text-slate-500 leading-relaxed">
-          Access is restricted to members of the{' '}
-          <code className="text-slate-300">AGAa-RealHack-Pilot-Users</code>{' '}
-          security group. If you can't sign in, your account needs to be added to that group.
+          Need access? Reach out to the RealHack organizers or email{' '}
+          <a href="mailto:RealHack@realpage.com" className="text-lime-300 hover:text-lime-200">
+            RealHack@realpage.com
+          </a>
+          .
         </div>
       </div>
     </div>
