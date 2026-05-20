@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Judge, RubricAxis, Team, JudgeScoreRecord } from '../types';
-import { fetchRubric, judgeLogin, submitJudgeScore, fetchJudgeScores, type UserProfile } from '../api';
+import { fetchRubric, judgeLogin, submitJudgeScore, fetchJudgeScores, deleteJudgeScore, type UserProfile } from '../api';
 
 interface Props {
   teams: Team[];
@@ -237,6 +237,21 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
     }
   };
 
+  const resetScore = async () => {
+    if (!existing) return;
+    if (!confirm(`Reset your score for "${team.name}" in Round ${round}? This will remove the score entirely — the team will show as unscored.`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await deleteJudgeScore(judgeId, team.id, round);
+      await onSubmitted();
+    } catch (e: any) {
+      setErr(e.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="bg-ink-800/60 border border-sky-500/40 rounded-xl p-5 space-y-5">
       <div className="flex items-start justify-between gap-3">
@@ -317,13 +332,23 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
         />
       </div>
 
-      <div className="flex items-center justify-between pt-3 border-t border-slate-700/40">
+      <div className="flex items-center justify-between pt-3 border-t border-slate-700/40 gap-3 flex-wrap">
         <div>
           <span className="text-xs uppercase tracking-wider text-slate-400">Your total</span>
           <div className="text-3xl font-extrabold text-sky-300">{total}<span className="text-base text-slate-500">/{maxTotal}</span></div>
         </div>
         {err && <div className="text-sm text-rose-300">{err}</div>}
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center flex-wrap">
+          {existing && (
+            <button
+              onClick={resetScore}
+              disabled={busy}
+              className="text-xs px-3 py-2 rounded font-semibold bg-ink-900 border border-rose-500/30 hover:border-rose-500/60 text-rose-300 hover:text-rose-200 transition"
+              title="Delete this score entirely — team becomes unscored again"
+            >
+              Reset score
+            </button>
+          )}
           <button onClick={onBack} className="px-4 py-2 rounded text-sm font-semibold bg-ink-900 border border-slate-700/40 hover:border-slate-500 text-slate-200 transition">Cancel</button>
           <button onClick={submit} disabled={busy} className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-5 py-2 rounded text-sm transition">
             {busy ? 'Submitting…' : existing ? 'Update score' : 'Submit score'}

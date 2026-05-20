@@ -238,6 +238,16 @@ export async function submitJudgeScore(payload: {
   return r.json();
 }
 
+export async function deleteJudgeScore(judgeId: number, teamId: number, round: number): Promise<{ deleted: boolean }> {
+  const qs = new URLSearchParams({ judge_id: String(judgeId), team_id: String(teamId), round: String(round) });
+  const r = await authFetch(`${BASE}/judging/scores?${qs}`, { method: 'DELETE' });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Delete score failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
 export async function fetchJudgeScores(opts: { round?: number; judge_id?: number; team_id?: number } = {}): Promise<JudgeScoreRecord[]> {
   const qs = new URLSearchParams();
   if (opts.round !== undefined) qs.set('round', String(opts.round));

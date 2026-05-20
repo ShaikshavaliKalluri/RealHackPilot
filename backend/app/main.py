@@ -646,6 +646,34 @@ def list_judge_scores(
     return q.order_by(models.JudgeScore.submitted_at.desc()).all()
 
 
+@app.delete("/api/judging/scores", response_model=dict)
+def delete_judge_score(
+    judge_id: int,
+    team_id: int,
+    round: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Delete a single judge-team-round score row.
+
+    Used by JudgeMode's 'Reset my score' action so a judge can correct
+    or rescind a score before it's final. Returns {deleted: bool}.
+    """
+    score = (
+        db.query(models.JudgeScore)
+        .filter(
+            models.JudgeScore.judge_id == judge_id,
+            models.JudgeScore.team_id == team_id,
+            models.JudgeScore.round == round,
+        )
+        .first()
+    )
+    if not score:
+        return {"deleted": False, "message": "No score found for this judge/team/round."}
+    db.delete(score)
+    db.commit()
+    return {"deleted": True, "judge_id": judge_id, "team_id": team_id, "round": round}
+
+
 @app.get("/api/judging/leaderboard", response_model=LeaderboardOut)
 def get_leaderboard(round: int = 1, db: Session = Depends(get_db)) -> LeaderboardOut:
     rows = judging.leaderboard(db, round)
