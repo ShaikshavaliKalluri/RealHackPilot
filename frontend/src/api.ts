@@ -69,6 +69,33 @@ export async function aiScreenOne(teamId: number): Promise<any> {
   return r.json();
 }
 
+// Organizer chatbot
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatResponse {
+  reply: string;
+  team_refs: number[];
+  provider: string | null;
+  model: string | null;
+  error: string | null;
+}
+
+export async function chatSend(messages: ChatMessage[]): Promise<ChatResponse> {
+  const r = await fetch(`${BASE}/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`Chat failed (${r.status}): ${txt.slice(0, 200)}`);
+  }
+  return r.json();
+}
+
 export interface LLMHealth {
   configured_primary: string;
   openai: { key_set: boolean; working: boolean; model: string | null; error: string | null };

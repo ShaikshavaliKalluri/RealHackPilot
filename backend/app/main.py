@@ -30,6 +30,7 @@ from . import judging
 from . import comms
 from . import backup as backup_service
 from . import llm as llm_service
+from . import chat as chat_service
 from fastapi.responses import FileResponse
 from .schemas import (
     TeamOut, UploadResult, DashboardStats, AIScreenResult,
@@ -39,6 +40,7 @@ from .schemas import (
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
     CommLogOut, TeamChannelCreateRequest, TeamMessageRequest, BroadcastRequest,
     CommLogCreateRequest, RepoCheckOut, ReadinessFlagsRequest,
+    ChatRequest, ChatResponse,
 )
 
 
@@ -315,6 +317,18 @@ def ai_screen(force: bool = False) -> dict:
 def ai_screen_status() -> dict:
     """Current state of the most recent / in-flight AI screening job."""
     return _ai_screen_status_payload()
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+def chat_endpoint(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
+    """Organizer Q&A chatbot over the team dataset.
+
+    Accepts a list of messages (full conversation context) and returns the
+    assistant's next reply plus any team IDs the answer references.
+    """
+    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    result = chat_service.chat(db, messages)
+    return ChatResponse(**result)
 
 
 @app.post("/api/ai-screen/{team_id}", response_model=dict)

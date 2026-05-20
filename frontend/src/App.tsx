@@ -10,6 +10,7 @@ import { JudgeMode } from './components/JudgeMode';
 import { OrganizerScoring } from './components/OrganizerScoring';
 import { CommsPanel } from './components/CommsPanel';
 import { BroadcastPanel } from './components/BroadcastPanel';
+import { ChatPanel } from './components/ChatPanel';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
 type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | null;
@@ -387,6 +388,8 @@ export default function App() {
         teams={teams}
         onClose={() => setComposerOpen(false)}
       />
+
+      <ChatPanel teams={teams} onJumpToTeam={jumpToTeam} />
     </div>
   );
 }

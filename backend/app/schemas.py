@@ -192,6 +192,23 @@ class AIScreenResult(BaseModel):
     providers: dict[str, int]
 
 
+class ChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage]
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    team_refs: list[int] = []
+    provider: str | None = None
+    model: str | None = None
+    error: str | None = None
+
+
 class EmailTemplateOut(BaseModel):
     id: str
     label: str
