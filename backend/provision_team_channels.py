@@ -174,9 +174,17 @@ class GraphClient:
 # ===== DB helpers =====
 
 def teams_to_process(only: list[str] | None) -> list[Team]:
-    """Pick teams that don't have channels yet, optionally filtered by name."""
+    """Pick teams that don't have channels yet, optionally filtered by name.
+
+    Eager-load `members` with selectinload so the caller can iterate
+    t.members after the session closes — without this, lazy loading
+    triggers DetachedInstanceError on every access.
+    """
+    from sqlalchemy.orm import selectinload  # local import, only used here
     with SessionLocal() as s:
-        q = s.query(Team).filter((Team.has_teams_channel == False) | (Team.has_teams_channel.is_(None)))  # noqa: E712
+        q = (s.query(Team)
+             .options(selectinload(Team.members))
+             .filter((Team.has_teams_channel == False) | (Team.has_teams_channel.is_(None))))  # noqa: E712
         if only:
             q = q.filter(Team.name.in_(only))
         return q.order_by(Team.name.asc()).all()
