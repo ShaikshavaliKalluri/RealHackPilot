@@ -56,12 +56,6 @@ export function JudgeMode({ teams, user }: Props) {
 
   const scoredTeamIds = useMemo(() => new Set(submittedScores.map((s) => s.team_id)), [submittedScores]);
 
-  const logout = () => {
-    setJudge(null);
-    persistJudge(null);
-    setActiveTeamId(null);
-  };
-
   // ===== Waiting for SSO auto-login (or showing an error) =====
   if (!judge) {
     return (
@@ -90,33 +84,25 @@ export function JudgeMode({ teams, user }: Props) {
 
   return (
     <div className="space-y-5">
-      {/* Header with judge info + round selector */}
+      {/* Round selector + progress (identity + sign-out live in the global UserBadge) */}
       <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <div className="text-xs uppercase tracking-wider text-slate-400">Signed in as</div>
-          <div className="font-bold text-lg">{judge.name}</div>
-          <div className="text-xs text-slate-500">{judge.email}</div>
+          <div className="text-xs uppercase tracking-wider text-slate-400">Round</div>
+          <div className="flex gap-1 bg-ink-900 border border-slate-700/40 rounded-lg p-1 mt-1">
+            {[1, 2, 3].map((r) => (
+              <button
+                key={r}
+                onClick={() => { setRound(r); setActiveTeamId(null); }}
+                className={`px-3 py-1 rounded text-sm font-semibold transition ${round === r ? 'bg-sky-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+              >
+                R{r}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex items-center gap-4">
-          <div>
-            <div className="text-xs uppercase tracking-wider text-slate-400">Round</div>
-            <div className="flex gap-1 bg-ink-900 border border-slate-700/40 rounded-lg p-1 mt-1">
-              {[1, 2, 3].map((r) => (
-                <button
-                  key={r}
-                  onClick={() => { setRound(r); setActiveTeamId(null); }}
-                  className={`px-3 py-1 rounded text-sm font-semibold transition ${round === r ? 'bg-sky-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
-                >
-                  R{r}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-xs uppercase tracking-wider text-slate-400">Progress</div>
-            <div className="font-bold text-lg">{scoredTeamIds.size} / {teams.length}</div>
-          </div>
-          <button onClick={logout} className="text-sm text-slate-400 hover:text-white">Sign out</button>
+        <div className="text-right">
+          <div className="text-xs uppercase tracking-wider text-slate-400">Progress · Round {round}</div>
+          <div className="font-bold text-lg">{scoredTeamIds.size} <span className="text-slate-500 font-normal text-base">/ {teams.length} teams scored</span></div>
         </div>
       </div>
 
