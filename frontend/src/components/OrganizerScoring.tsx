@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Team, Judge, RubricAxis, LeaderboardData } from '../types';
-import { fetchRubric, fetchJudges, createJudge, submitJudgeScore, fetchLeaderboard, fetchJudgeScores } from '../api';
+import { fetchRubric, fetchJudges, createJudge, submitJudgeScore, fetchLeaderboard, fetchJudgeScores, advanceTeams, resetRoundAdvancements, setWinners } from '../api';
 
 interface Props {
   teams: Team[];
+  onReload?: () => void;
 }
 
 type Tab = 'leaderboard' | 'manual';
 
-export function OrganizerScoring({ teams }: Props) {
+export function OrganizerScoring({ teams, onReload }: Props) {
   const [tab, setTab] = useState<Tab>('leaderboard');
   const [round, setRound] = useState<number>(1);
   const [axes, setAxes] = useState<RubricAxis[]>([]);
@@ -83,11 +84,19 @@ export function OrganizerScoring({ teams }: Props) {
       {err && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded p-3 text-sm">{err}</div>}
 
       {tab === 'leaderboard' && leaderboard && (
-        <Leaderboard
-          data={leaderboard}
-          expandedTeamId={expandedTeamId}
-          onToggleExpand={(id) => setExpandedTeamId(expandedTeamId === id ? null : id)}
-        />
+        <>
+          <AdvancementPanel
+            round={round}
+            leaderboard={leaderboard}
+            teams={teams}
+            onAdvanced={() => { onReload?.(); reloadLeaderboard(); }}
+          />
+          <Leaderboard
+            data={leaderboard}
+            expandedTeamId={expandedTeamId}
+            onToggleExpand={(id) => setExpandedTeamId(expandedTeamId === id ? null : id)}
+          />
+        </>
       )}
 
       {tab === 'manual' && (
@@ -404,3 +413,299 @@ function ManualEntry({ teams, judges, axes, round, onRefreshJudges, onSaved }: M
     </div>
   );
 }
+
+
+// ===== Tournament advancement subcomponent =====
+//
+// Per-round panel that ranks the leaderboard, lets the organizer select
+// which teams advance, and writes the new advanced_to_round to the DB.
+// For Round 3, instead of "advance", the panel offers a Crown Winners
+// flow that sets final_position = 1/2/3 on the picked teams.
+
+interface AdvancementPanelProps {
+  round: number;
+  leaderboard: LeaderboardData;
+  teams: Team[];
+  onAdvanced: () => void;
+}
+
+const DEFAULT_ADVANCE_COUNT: Record<number, number> = { 1: 20, 2: 10, 3: 3 };
+
+function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: AdvancementPanelProps) {
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [winnerOpen, setWinnerOpen] = useState(false);
+
+  const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
+
+  // Pre-select the top N teams by score on every round/leaderboard change
+  const rankedRows = useMemo(
+    () => leaderboard.rows.filter((r) => r.judge_count > 0),
+    [leaderboard]
+  );
+
+  useEffect(() => {
+    const defaultN = DEFAULT_ADVANCE_COUNT[round] ?? 0;
+    setSelected(new Set(rankedRows.slice(0, defaultN).map((r) => r.team_id)));
+  }, [round, rankedRows]);
+
+  const alreadyAdvancedCount = useMemo(() => {
+    const next = round + 1;
+    return teams.filter((t) => (t.advanced_to_round ?? 1) >= next).length;
+  }, [teams, round]);
+
+  const toggle = (teamId: number) => {
+    setSelected((s) => {
+      const next = new Set(s);
+      if (next.has(teamId)) next.delete(teamId);
+      else next.add(teamId);
+      return next;
+    });
+  };
+
+  const handleAdvance = async () => {
+    if (selected.size === 0) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await advanceTeams(round, Array.from(selected));
+      onAdvanced();
+    } catch (e: any) {
+      setErr(e.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!confirm(`Reset advancement past Round ${round}? Any teams currently advanced beyond Round ${round} will be moved back.`)) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await resetRoundAdvancements(round);
+      onAdvanced();
+    } catch (e: any) {
+      setErr(e.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Round 3 → Winners flow
+  if (round === 3) {
+    return (
+      <>
+        <div className="bg-gradient-to-br from-amber-500/15 to-rose-500/10 border border-amber-500/40 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h3 className="font-bold text-amber-200">🏆 Crown the Winners</h3>
+            <p className="text-xs text-slate-300 mt-0.5">After Round 3 finishes, pick 1st / 2nd / 3rd place from the leaderboard.</p>
+          </div>
+          <button
+            onClick={() => setWinnerOpen(true)}
+            disabled={rankedRows.length === 0}
+            className="bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg transition"
+          >
+            Crown Winners…
+          </button>
+        </div>
+        {winnerOpen && (
+          <CrownWinnersModal
+            rows={rankedRows}
+            teamById={teamById}
+            onClose={() => setWinnerOpen(false)}
+            onSaved={() => { setWinnerOpen(false); onAdvanced(); }}
+          />
+        )}
+      </>
+    );
+  }
+
+  // Round 1 + Round 2 → standard advancement flow
+  const nextRound = round + 1;
+  const nextRoundLabel = nextRound === 3 ? 'Round 3 (Final)' : `Round ${nextRound}`;
+
+  return (
+    <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 space-y-3">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="font-bold text-slate-100">
+            Advance teams to {nextRoundLabel}
+          </h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Pick the teams that move on from Round {round}.
+            {alreadyAdvancedCount > 0 && (
+              <span className="text-lime-300"> · {alreadyAdvancedCount} already advanced</span>
+            )}
+            {rankedRows.length === 0 && (
+              <span className="text-amber-300"> · no scores submitted yet</span>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {alreadyAdvancedCount > 0 && (
+            <button
+              onClick={handleReset}
+              disabled={busy}
+              className="text-xs px-3 py-1.5 rounded bg-ink-900 border border-slate-700/40 text-slate-300 hover:border-rose-500/40 hover:text-rose-300 transition"
+            >
+              Undo advancement
+            </button>
+          )}
+          <button
+            onClick={handleAdvance}
+            disabled={busy || selected.size === 0}
+            className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
+          >
+            {busy ? 'Advancing…' : `Advance ${selected.size} team${selected.size === 1 ? '' : 's'} to ${nextRoundLabel}`}
+          </button>
+        </div>
+      </div>
+
+      {err && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded p-2 text-xs">{err}</div>}
+
+      {rankedRows.length > 0 && (
+        <div className="border-t border-slate-700/40 pt-3">
+          <div className="max-h-72 overflow-y-auto pr-1 space-y-1">
+            {rankedRows.map((row, idx) => {
+              const team = teamById.get(row.team_id);
+              const alreadyAdvanced = team && (team.advanced_to_round ?? 1) >= nextRound;
+              const checked = selected.has(row.team_id);
+              return (
+                <label
+                  key={row.team_id}
+                  className={`flex items-center gap-3 px-3 py-1.5 rounded cursor-pointer transition ${
+                    checked ? 'bg-sky-500/10 border border-sky-500/40' : 'bg-ink-900/40 border border-transparent hover:bg-ink-900/70'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(row.team_id)}
+                    className="w-4 h-4 accent-sky-400"
+                  />
+                  <span className="text-sm font-bold text-slate-500 w-7 tabular-nums shrink-0">#{idx + 1}</span>
+                  <span className="flex-1 text-sm text-slate-100 truncate">{row.team_name}</span>
+                  {alreadyAdvanced && (
+                    <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-lime-500/15 text-lime-300 border border-lime-500/40">
+                      ✓ Advanced
+                    </span>
+                  )}
+                  <span className="text-sm font-bold text-lime-300 tabular-nums w-12 text-right shrink-0">{row.total_sum}</span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ===== Crown Winners modal =====
+
+interface CrownWinnersModalProps {
+  rows: LeaderboardData['rows'];
+  teamById: Map<number, Team>;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function CrownWinnersModal({ rows, teamById, onClose, onSaved }: CrownWinnersModalProps) {
+  // Pre-fill 1st / 2nd / 3rd with the top three scorers
+  const [first, setFirst] = useState<number | ''>(rows[0]?.team_id ?? '');
+  const [second, setSecond] = useState<number | ''>(rows[1]?.team_id ?? '');
+  const [third, setThird] = useState<number | ''>(rows[2]?.team_id ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const positions: Record<string, number> = {};
+      if (first) positions['1'] = Number(first);
+      if (second) positions['2'] = Number(second);
+      if (third) positions['3'] = Number(third);
+      await setWinners(positions);
+      onSaved();
+    } catch (e: any) {
+      setErr(e.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleClear = async () => {
+    if (!confirm('Clear all winner positions?')) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await setWinners({});
+      onSaved();
+    } catch (e: any) {
+      setErr(e.message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dropdown = (value: number | '', onChange: (v: number | '') => void, label: string) => (
+    <div>
+      <label className="text-xs uppercase tracking-wider text-slate-400">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : '')}
+        className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 mt-1 text-sm focus:outline-none focus:border-amber-500/60"
+      >
+        <option value="">— Not set —</option>
+        {rows.map((r) => (
+          <option key={r.team_id} value={r.team_id}>
+            {r.team_name} ({r.total_sum})
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-ink-800 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
+        <div className="bg-gradient-to-br from-amber-500/25 to-rose-500/15 p-4 border-b border-amber-500/40">
+          <h3 className="font-bold text-amber-200">🏆 Crown the Winners</h3>
+          <p className="text-xs text-slate-300 mt-0.5">Pre-filled with the top 3 from the leaderboard — adjust if needed.</p>
+        </div>
+        <div className="p-5 space-y-3">
+          {dropdown(first, setFirst, '🥇 1st place')}
+          {dropdown(second, setSecond, '🥈 2nd place')}
+          {dropdown(third, setThird, '🥉 3rd place')}
+          {err && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded p-2 text-xs">{err}</div>}
+        </div>
+        <div className="px-5 pb-5 flex items-center justify-between gap-2 flex-wrap">
+          <button onClick={handleClear} disabled={busy} className="text-xs text-slate-400 hover:text-rose-300">
+            Clear all positions
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="text-sm text-slate-300 hover:text-white px-3 py-2">
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={busy}
+              className="bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
+            >
+              {busy ? 'Saving…' : 'Save winners'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// We reference Team here via teamById; silences unused-import lint if Team
+// wasn't otherwise read.
+type _TeamRef = Team;
+const _teamRef: _TeamRef | null = null;
+void _teamRef;

@@ -35,6 +35,14 @@ class Team(Base):
     repo_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     repo_check_notes: Mapped[str | None] = mapped_column(Text)
 
+    # Tournament progression. advanced_to_round is the highest round this team
+    # is eligible for — defaults to 1 (registered for Round 1). Set to 2 when
+    # the organizer advances them past Round 1, 3 when past Round 2, 4 when
+    # past Round 3 (i.e. in the winners pool). final_position is 1/2/3 for
+    # the podium after Round 3, null otherwise.
+    advanced_to_round: Mapped[int] = mapped_column(Integer, default=1)
+    final_position: Mapped[int | None] = mapped_column(Integer, default=None)
+
     members: Mapped[list["Member"]] = relationship(back_populates="team", cascade="all, delete-orphan")
 
 

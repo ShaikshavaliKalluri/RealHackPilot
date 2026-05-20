@@ -46,6 +46,7 @@ from .schemas import (
     CommLogOut, TeamChannelCreateRequest, TeamMessageRequest, BroadcastRequest,
     CommLogCreateRequest, RepoCheckOut, ReadinessFlagsRequest,
     ChatRequest, ChatResponse,
+    RoundAdvanceRequest, WinnersSetRequest, RoundSummary,
 )
 
 
@@ -368,6 +369,92 @@ def ai_screen(force: bool = False) -> dict:
 def ai_screen_status() -> dict:
     """Current state of the most recent / in-flight AI screening job."""
     return _ai_screen_status_payload()
+
+
+# ---- Tournament progression (advance teams between rounds, crown winners) ----
+
+@app.post("/api/rounds/advance", response_model=dict)
+def advance_round(req: RoundAdvanceRequest, db: Session = Depends(get_db)) -> dict:
+    """Mark the listed teams as advanced past from_round into round from_round+1.
+
+    Teams NOT in the list keep their current advanced_to_round — they're
+    eliminated by being left behind, not by an explicit demotion. This means
+    you can call this endpoint multiple times safely (idempotent for the
+    same team_ids; cumulative across different calls).
+    """
+    if req.from_round not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="from_round must be 1, 2, or 3")
+    next_round = req.from_round + 1
+    teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
+    advanced_ids = []
+    for t in teams:
+        # Bump only if not already at or past the next round (don't accidentally regress)
+        if (t.advanced_to_round or 1) < next_round:
+            t.advanced_to_round = next_round
+            advanced_ids.append(t.id)
+    db.commit()
+    return {
+        "from_round": req.from_round,
+        "to_round": next_round,
+        "advanced_team_ids": advanced_ids,
+        "advanced_count": len(advanced_ids),
+    }
+
+
+@app.post("/api/rounds/reset/{round}", response_model=dict)
+def reset_round_advancements(round: int, db: Session = Depends(get_db)) -> dict:
+    """Undo: drop every team's advanced_to_round back to `round` if currently higher.
+
+    Useful when the organizer wants to re-pick the advancing teams for a round.
+    Doesn't touch final_position — that's reset via a separate winners call.
+    """
+    if round not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
+    teams = db.query(models.Team).filter(models.Team.advanced_to_round > round).all()
+    for t in teams:
+        t.advanced_to_round = round
+    db.commit()
+    return {"reset_to_round": round, "teams_reset": len(teams)}
+
+
+@app.post("/api/rounds/winners", response_model=dict)
+def set_winners(req: WinnersSetRequest, db: Session = Depends(get_db)) -> dict:
+    """Set 1st / 2nd / 3rd place team IDs. Pass empty positions {} to clear all."""
+    # Validate positions
+    for pos in req.positions.keys():
+        if pos not in ("1", "2", "3"):
+            raise HTTPException(status_code=400, detail=f"Position must be '1', '2', or '3'; got {pos}")
+
+    # Clear existing winners first
+    for t in db.query(models.Team).filter(models.Team.final_position.isnot(None)).all():
+        t.final_position = None
+
+    # Set new winners
+    for pos_str, team_id in req.positions.items():
+        team = db.query(models.Team).filter(models.Team.id == team_id).first()
+        if not team:
+            raise HTTPException(status_code=404, detail=f"Team {team_id} not found")
+        team.final_position = int(pos_str)
+        # Make sure they're at the winner level too
+        team.advanced_to_round = max(team.advanced_to_round or 1, 4)
+    db.commit()
+    return {"positions": req.positions}
+
+
+@app.get("/api/rounds/summary", response_model=list[RoundSummary])
+def round_summary(db: Session = Depends(get_db)) -> list[RoundSummary]:
+    """Per-round counts: how many teams eligible, how many already scored."""
+    out: list[RoundSummary] = []
+    for r in (1, 2, 3):
+        eligible = db.query(models.Team).filter(models.Team.advanced_to_round >= r).count()
+        scored = (
+            db.query(models.JudgeScore.team_id)
+            .filter(models.JudgeScore.round == r)
+            .distinct()
+            .count()
+        )
+        out.append(RoundSummary(round=r, eligible_team_count=eligible, scored_team_count=scored))
+    return out
 
 
 @app.post("/api/chat", response_model=ChatResponse)

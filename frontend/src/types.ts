@@ -159,6 +159,8 @@ export interface Team {
   presentation_uploaded: boolean;
   repo_ready: boolean;
   repo_check_notes: string | null;
+  advanced_to_round: number;
+  final_position: number | null;
 }
 
 export interface DashboardStats {

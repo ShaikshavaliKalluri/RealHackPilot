@@ -364,3 +364,43 @@ export async function fetchMe(): Promise<UserProfile> {
   if (!r.ok) throw new Error(`Profile fetch failed: ${r.status}`);
   return r.json();
 }
+
+// ===== Tournament progression =====
+
+export interface RoundSummary {
+  round: number;
+  eligible_team_count: number;
+  scored_team_count: number;
+}
+
+export async function advanceTeams(fromRound: number, teamIds: number[]): Promise<{ from_round: number; to_round: number; advanced_team_ids: number[]; advanced_count: number }> {
+  const r = await authFetch(`${BASE}/rounds/advance`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from_round: fromRound, team_ids: teamIds }),
+  });
+  if (!r.ok) throw new Error(`Advance failed: ${r.status}`);
+  return r.json();
+}
+
+export async function resetRoundAdvancements(round: number): Promise<{ reset_to_round: number; teams_reset: number }> {
+  const r = await authFetch(`${BASE}/rounds/reset/${round}`, { method: 'POST' });
+  if (!r.ok) throw new Error(`Reset failed: ${r.status}`);
+  return r.json();
+}
+
+export async function setWinners(positions: Record<string, number>): Promise<{ positions: Record<string, number> }> {
+  const r = await authFetch(`${BASE}/rounds/winners`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ positions }),
+  });
+  if (!r.ok) throw new Error(`Set winners failed: ${r.status}`);
+  return r.json();
+}
+
+export async function fetchRoundSummary(): Promise<RoundSummary[]> {
+  const r = await authFetch(`${BASE}/rounds/summary`);
+  if (!r.ok) throw new Error(`Round summary failed: ${r.status}`);
+  return r.json();
+}

@@ -64,6 +64,10 @@ def lightweight_migrate() -> None:
         additions.append("ALTER TABLE teams ADD COLUMN repo_ready BOOLEAN DEFAULT 0")
     if "repo_check_notes" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN repo_check_notes TEXT")
+    if "advanced_to_round" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN advanced_to_round INTEGER DEFAULT 1")
+    if "final_position" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN final_position INTEGER")
     if additions:
         with engine.begin() as conn:
             for sql in additions:

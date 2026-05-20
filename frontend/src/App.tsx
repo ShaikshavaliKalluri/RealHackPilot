@@ -15,6 +15,7 @@ import { ChatPanel } from './components/ChatPanel';
 import { Analytics } from './components/Analytics';
 import { LoginPage } from './components/LoginPage';
 import { UserBadge } from './components/UserBadge';
+import { WinnersBanner } from './components/WinnersBanner';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
 type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | null;
@@ -218,6 +219,8 @@ export default function App() {
 
       {mode === 'dashboard' && (
       <>
+      <WinnersBanner teams={teams} onJumpToTeam={jumpToTeam} />
+
       <section className="mb-6">
         <UploadCard onUploaded={reload} />
       </section>
@@ -413,7 +416,7 @@ export default function App() {
 
       {mode === 'judge' && user && <JudgeMode teams={teams} user={user} />}
 
-      {mode === 'scoring' && <OrganizerScoring teams={teams} />}
+      {mode === 'scoring' && <OrganizerScoring teams={teams} onReload={reload} />}
 
       {mode === 'analytics' && stats && (
         <Analytics teams={teams} stats={stats} onJumpToTeam={(id) => { setMode('dashboard'); setTimeout(() => jumpToTeam(id), 50); }} />

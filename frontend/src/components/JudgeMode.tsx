@@ -106,12 +106,24 @@ export function JudgeMode({ teams, user }: Props) {
         </div>
       </div>
 
-      {/* Team list */}
-      {!activeTeam && (
+      {/* Team list — round-aware: only show teams that advanced to (at least) this round */}
+      {!activeTeam && (() => {
+        const eligibleTeams = teams.filter((t) => (t.advanced_to_round ?? 1) >= round);
+        return (
         <div>
-          <h3 className="text-sm uppercase tracking-wider text-slate-400 mb-2">Teams to score · Round {round}</h3>
+          <h3 className="text-sm uppercase tracking-wider text-slate-400 mb-2">
+            Teams to score · Round {round}
+            <span className="ml-2 text-slate-500 normal-case font-normal">
+              ({eligibleTeams.length} eligible)
+            </span>
+          </h3>
+          {round > 1 && eligibleTeams.length === 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-4 text-sm text-amber-200 mb-3">
+              No teams have been advanced to Round {round} yet. Ask the organizer to pick advancing teams from the Scoring tab.
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {teams.map((t) => {
+            {eligibleTeams.map((t) => {
               const scored = scoredTeamIds.has(t.id);
               return (
                 <button
@@ -145,7 +157,8 @@ export function JudgeMode({ teams, user }: Props) {
             </div>
           )}
         </div>
-      )}
+        );
+      })()}
 
       {/* Active scorecard */}
       {activeTeam && (

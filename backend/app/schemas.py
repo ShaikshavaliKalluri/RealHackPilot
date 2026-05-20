@@ -37,6 +37,8 @@ class TeamOut(BaseModel):
     presentation_uploaded: bool = False
     repo_ready: bool = False
     repo_check_notes: str | None = None
+    advanced_to_round: int = 1
+    final_position: int | None = None
 
 
 class JudgeAIRequest(BaseModel):
@@ -207,6 +209,36 @@ class ChatResponse(BaseModel):
     provider: str | None = None
     model: str | None = None
     error: str | None = None
+
+
+# ---- Tournament progression (Round 1 -> 2 -> 3 -> Winners) ----
+
+class RoundAdvanceRequest(BaseModel):
+    """Move a specific set of team IDs forward to the next round.
+
+    `from_round` is the round just completed (1, 2 or 3). The chosen
+    team_ids will have their advanced_to_round bumped to from_round + 1.
+    Teams not in the list are NOT touched — they're eliminated by
+    omission, not by an explicit demotion.
+    """
+    from_round: int  # 1, 2, or 3
+    team_ids: list[int]
+
+
+class WinnersSetRequest(BaseModel):
+    """Crown the 1st / 2nd / 3rd place teams after Round 3.
+
+    Map keys are positions ('1', '2', '3'); values are team IDs. Any
+    omitted positions are cleared. Pass an empty positions dict to
+    unset all winners.
+    """
+    positions: dict[str, int]
+
+
+class RoundSummary(BaseModel):
+    round: int
+    eligible_team_count: int  # how many teams are in this round
+    scored_team_count: int    # how many of them have at least one judge score
 
 
 class EmailTemplateOut(BaseModel):
