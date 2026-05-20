@@ -54,6 +54,15 @@ def _normalize(s: str | None) -> str:
     return " ".join(s.strip().lower().split())
 
 
+def _normalize_compact(s: str | None) -> str:
+    """Lowercase + remove ALL whitespace. Catches cases like
+    'Shashi Tej Reddy' (team) vs 'Shashitejreddy Singareddy' (member) where
+    the same name is written with different spacing."""
+    if not s:
+        return ""
+    return "".join(s.strip().lower().split())
+
+
 def _email_issue(email: str | None) -> str | None:
     """Return None if the email looks fine; otherwise return a short reason.
 
@@ -102,16 +111,34 @@ def _team_flags(team: Team) -> list[str]:
         flags.append("missing_mentor")
 
     # Team-name-is-a-member-name: when filling the form, registrants sometimes
-    # paste a person's name into the team-name field by mistake. We catch this
-    # by checking if the (normalized) team name matches any member's name, or
-    # if it's a strict substring of one.
+    # paste a person's name into the team-name field by mistake. Two passes:
+    #   1) normalized (preserves single-space separators) — catches exact and
+    #      substring matches where formatting is consistent.
+    #   2) compact (all whitespace removed) — catches cases like
+    #      'Shashi Tej Reddy' (team) vs 'Shashitejreddy Singareddy' (member).
+    # We require min 6 chars on the compact check so very short team names
+    # ('AI', 'BI', etc.) don't false-positive against random member names.
     team_name_norm = _normalize(team.name)
+    team_name_compact = _normalize_compact(team.name)
     if team_name_norm:
         for m in team.members:
             mname_norm = _normalize(m.name)
+            mname_compact = _normalize_compact(m.name)
             if not mname_norm:
                 continue
-            if team_name_norm == mname_norm or team_name_norm in mname_norm or mname_norm in team_name_norm:
+            matches = (
+                team_name_norm == mname_norm
+                or team_name_norm in mname_norm
+                or mname_norm in team_name_norm
+                or (
+                    len(team_name_compact) >= 6 and len(mname_compact) >= 6 and (
+                        team_name_compact == mname_compact
+                        or team_name_compact in mname_compact
+                        or mname_compact in team_name_compact
+                    )
+                )
+            )
+            if matches:
                 flags.append(f"team_name_is_member:{m.name}")
                 break  # one is enough
 
