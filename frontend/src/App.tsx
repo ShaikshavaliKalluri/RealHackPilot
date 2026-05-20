@@ -12,7 +12,7 @@ import { CommsPanel } from './components/CommsPanel';
 import { BroadcastPanel } from './components/BroadcastPanel';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
-type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'flagged' | 'all_mentors' | 'all_participants' | null;
+type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | null;
 type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms';
 
 export default function App() {
@@ -244,7 +244,7 @@ export default function App() {
           }
         }
         return (
-        <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-6">
+        <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
           <StatCard label="Teams" value={stats.total_teams} />
           <StatCard
             label="Mentors"
@@ -264,6 +264,13 @@ export default function App() {
             tone="success"
             onClick={() => setStatsPanel(statsPanel === 'complete' ? null : 'complete')}
             active={statsPanel === 'complete'}
+          />
+          <StatCard
+            label="Incomplete"
+            value={stats.total_teams - stats.complete_teams}
+            tone="warn"
+            onClick={() => setStatsPanel(statsPanel === 'incomplete' ? null : 'incomplete')}
+            active={statsPanel === 'incomplete'}
           />
           <StatCard
             label="Flagged"

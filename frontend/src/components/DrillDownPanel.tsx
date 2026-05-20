@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Team } from '../types';
 
-type Mode = 'duplicates' | 'mentors' | 'complete' | 'flagged' | 'all_mentors' | 'all_participants';
+type Mode = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants';
 
 interface Props {
   mode: Mode;
@@ -95,11 +95,42 @@ function computeComplete(teams: Team[]): TeamRow[] {
     .sort((a, b) => b.completeness - a.completeness || a.name.localeCompare(b.name));
 }
 
+function computeIncomplete(teams: Team[]): TeamRow[] {
+  // Inverse of "complete" — anything under 0.8 completeness, OR with any flag.
+  // Sorted by lowest completeness first so the worst cases are at the top.
+  return teams
+    .filter((t) => t.completeness_score < 0.8 || (t.flags && t.flags.length > 0))
+    .map(toTeamRow)
+    .sort((a, b) => a.completeness - b.completeness || a.name.localeCompare(b.name));
+}
+
 function computeFlagged(teams: Team[]): TeamRow[] {
   return teams
     .filter((t) => t.flags && t.flags.length > 0)
     .map(toTeamRow)
     .sort((a, b) => b.flags.length - a.flags.length || a.name.localeCompare(b.name));
+}
+
+// Field-level reasons extracted from flags + completeness — used by the
+// Incomplete drill-down so the user sees exactly what's missing per team.
+const FIELD_LABELS: Record<string, string> = {
+  idea: 'Idea',
+  tools: 'Tech stack',
+  approach: 'Approach',
+  viability: 'Viability',
+  business_value: 'Business value',
+};
+
+function missingFieldsFromFlags(flags: string[]): string[] {
+  const missing: string[] = [];
+  for (const f of flags) {
+    if (f.startsWith('low_quality:')) {
+      const field = f.split(':')[1];
+      const label = FIELD_LABELS[field] || field;
+      if (!missing.includes(label)) missing.push(label);
+    }
+  }
+  return missing;
 }
 
 interface PersonRow {
@@ -150,6 +181,7 @@ const TITLES: Record<Mode, string> = {
   duplicates: 'Participants on multiple teams',
   mentors: 'Mentors with more than 2 teams',
   complete: 'Teams with complete, clean submissions',
+  incomplete: 'Teams that need follow-up',
   flagged: 'Teams with flags',
   all_mentors: 'All mentors (unique)',
   all_participants: 'All participants (unique)',
@@ -159,6 +191,7 @@ const TONES: Record<Mode, string> = {
   duplicates: 'text-rose-300',
   mentors: 'text-amber-300',
   complete: 'text-lime-300',
+  incomplete: 'text-orange-300',
   flagged: 'text-amber-300',
   all_mentors: 'text-sky-300',
   all_participants: 'text-sky-300',
@@ -197,6 +230,7 @@ export function DrillDownPanel({ mode, teams, onJumpToTeam, onClose }: Props) {
   const dups = useMemo(() => (mode === 'duplicates' ? computeDuplicates(teams) : []), [mode, teams]);
   const ments = useMemo(() => (mode === 'mentors' ? computeOverloadedMentors(teams) : []), [mode, teams]);
   const complete = useMemo(() => (mode === 'complete' ? computeComplete(teams) : []), [mode, teams]);
+  const incomplete = useMemo(() => (mode === 'incomplete' ? computeIncomplete(teams) : []), [mode, teams]);
   const flagged = useMemo(() => (mode === 'flagged' ? computeFlagged(teams) : []), [mode, teams]);
   const allMentors = useMemo(() => (mode === 'all_mentors' ? computeAllMentors(teams) : []), [mode, teams]);
   const allParticipants = useMemo(() => (mode === 'all_participants' ? computeAllParticipants(teams) : []), [mode, teams]);
@@ -212,6 +246,7 @@ export function DrillDownPanel({ mode, teams, onJumpToTeam, onClose }: Props) {
     mode === 'duplicates' ? dups.length
     : mode === 'mentors' ? ments.length
     : mode === 'complete' ? complete.length
+    : mode === 'incomplete' ? incomplete.length
     : mode === 'flagged' ? flagged.length
     : mode === 'all_mentors' ? allMentors.length
     : allParticipants.length;
@@ -278,38 +313,60 @@ export function DrillDownPanel({ mode, teams, onJumpToTeam, onClose }: Props) {
         </div>
       )}
 
-      {total > 0 && (mode === 'complete' || mode === 'flagged') && (
+      {total > 0 && (mode === 'complete' || mode === 'flagged' || mode === 'incomplete') && (
         <div className="space-y-2">
-          {(mode === 'complete' ? complete : flagged).map((row) => (
-            <button
-              key={row.id}
-              onClick={() => onJumpToTeam(row.id)}
-              className="w-full text-left bg-ink-900/50 hover:bg-lime-500/10 border border-transparent hover:border-lime-500/40 rounded px-3 py-2 flex items-center justify-between gap-3 transition"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="font-semibold text-slate-100 truncate">{row.name}</div>
-                <div className="text-xs text-slate-400 mt-0.5 truncate">
-                  Mentor: {row.mentor || '—'} · {row.memberCount} member{row.memberCount === 1 ? '' : 's'}
-                </div>
-              </div>
-              {mode === 'flagged' ? (
-                <div className="flex flex-wrap gap-1 justify-end max-w-[60%]">
-                  {flagSummary(row.flags).slice(0, 4).map((k, i) => (
-                    <span key={i} className="text-xs bg-ink-800 border border-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded">
-                      {labelForFlagKind(k)}
-                    </span>
-                  ))}
-                  {flagSummary(row.flags).length > 4 && (
-                    <span className="text-xs text-slate-400">+{flagSummary(row.flags).length - 4}</span>
+          {(mode === 'complete' ? complete : mode === 'incomplete' ? incomplete : flagged).map((row) => {
+            const missingFields = mode === 'incomplete' ? missingFieldsFromFlags(row.flags) : [];
+            const otherFlags = mode === 'incomplete'
+              ? flagSummary(row.flags).filter((k) => k !== 'low_quality')
+              : flagSummary(row.flags);
+            return (
+              <button
+                key={row.id}
+                onClick={() => onJumpToTeam(row.id)}
+                className="w-full text-left bg-ink-900/50 hover:bg-lime-500/10 border border-transparent hover:border-lime-500/40 rounded px-3 py-2 flex items-center justify-between gap-3 transition"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold text-slate-100 truncate">{row.name}</div>
+                  <div className="text-xs text-slate-400 mt-0.5 truncate">
+                    Mentor: {row.mentor || '—'} · {row.memberCount} member{row.memberCount === 1 ? '' : 's'}
+                  </div>
+                  {mode === 'incomplete' && (missingFields.length > 0 || otherFlags.length > 0) && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {missingFields.map((f, i) => (
+                        <span key={`f${i}`} className="text-xs bg-orange-500/15 border border-orange-500/40 text-orange-300 px-1.5 py-0.5 rounded">
+                          Missing: {f}
+                        </span>
+                      ))}
+                      {otherFlags.slice(0, 3).map((k, i) => (
+                        <span key={`o${i}`} className="text-xs bg-ink-800 border border-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded">
+                          {labelForFlagKind(k)}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
-              ) : (
-                <div className="text-lg font-extrabold text-lime-300 shrink-0">
-                  {Math.round(row.completeness * 100)}%
-                </div>
-              )}
-            </button>
-          ))}
+                {mode === 'flagged' ? (
+                  <div className="flex flex-wrap gap-1 justify-end max-w-[60%]">
+                    {flagSummary(row.flags).slice(0, 4).map((k, i) => (
+                      <span key={i} className="text-xs bg-ink-800 border border-amber-500/30 text-amber-300 px-1.5 py-0.5 rounded">
+                        {labelForFlagKind(k)}
+                      </span>
+                    ))}
+                    {flagSummary(row.flags).length > 4 && (
+                      <span className="text-xs text-slate-400">+{flagSummary(row.flags).length - 4}</span>
+                    )}
+                  </div>
+                ) : (
+                  <div className={`text-lg font-extrabold shrink-0 ${
+                    mode === 'incomplete' ? (row.completeness < 0.4 ? 'text-rose-300' : 'text-orange-300') : 'text-lime-300'
+                  }`}>
+                    {Math.round(row.completeness * 100)}%
+                  </div>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 
