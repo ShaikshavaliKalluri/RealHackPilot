@@ -66,27 +66,21 @@ def _normalize_compact(s: str | None) -> str:
 def _email_issue(email: str | None) -> str | None:
     """Return None if the email looks fine; otherwise return a short reason.
 
-    Used to flag emails that we expect to fail Microsoft Graph user-resolution
-    (so the organizer can fix them in the source before channel provisioning).
+    We deliberately only flag truly malformed addresses or wrong-domain ones.
+    Earlier versions also flagged "no first.last separator" and "too many dots"
+    as suspicious, but real-world RealPage AD has legitimate single-cap+
+    lowercase aliases (e.g. PPendekanti@RealPage.com) that share the same
+    shape as common typos (e.g. RRishitha@RealPage.com which doesn't resolve).
+    Format alone can't distinguish them — only Microsoft Graph can. Genuinely
+    unresolvable emails surface during channel provisioning's dry-run instead.
     """
     if not email:
-        return None  # empty handled by other checks; not "invalid" per se
+        return None
     addr = email.strip()
     if not _EMAIL_BASIC.match(addr):
         return "malformed"
-
-    local, _, _ = addr.partition("@")
     if not _REALPAGE_DOMAIN.search(addr):
         return "non_realpage_domain"
-
-    # Local-part patterns that almost never resolve in RealPage's AD:
-    dots = local.count(".")
-    if dots == 0:
-        # no separator — almost certainly a typo like VRAJKUMAR or SMahamkali
-        return "no_first_last_separator"
-    if dots > 2:
-        # 3+ dots — unusual; probably a typo merging multiple names
-        return "too_many_dots"
     return None
 
 
