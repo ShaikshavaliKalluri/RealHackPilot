@@ -63,7 +63,10 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [filter, setFilter] = useState<TeamFilter>('all');
-  const [overrideSelection, setOverrideSelection] = useState<Set<number> | null>(null);
+  // Selected team IDs — starts empty so the user always opts IN to recipients
+  // rather than opting out from "everyone." Filter buttons only change which
+  // teams appear in the list; they don't auto-select anyone.
+  const [selection, setSelection] = useState<Set<number>>(new Set());
   const [rendered, setRendered] = useState<RenderedEmail[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,13 +122,10 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
     fetchEmailTemplates().then(setTemplates).catch((e) => setError(e.message));
   }, [open]);
 
-  // Recompute candidate teams based on filter or override
-  const candidateTeams = useMemo(() => {
-    if (overrideSelection) {
-      return teams.filter((t) => overrideSelection.has(t.id));
-    }
-    return selectTeams(teams, filter);
-  }, [teams, filter, overrideSelection]);
+  // Filter pool — which teams appear in the picker list. Selection is
+  // tracked separately in `selection` so filter changes don't toggle
+  // anything on or off.
+  const candidateTeams = useMemo(() => selectTeams(teams, filter), [teams, filter]);
 
   const selectedTemplate = templates.find((t) => t.id === templateId) || null;
 
@@ -137,7 +137,13 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
     setSentTeams(new Set());
     setDuplicates({});
     try {
-      const ids = candidateTeams.map((t) => t.id);
+      // Render only the explicitly-selected teams.
+      const ids = Array.from(selection);
+      if (ids.length === 0) {
+        setError('No teams selected. Pick at least one team to render.');
+        setLoading(false);
+        return;
+      }
       const r = await renderEmails(templateId, ids);
       setRendered(r);
       // Probe for recent duplicates of this template per team
@@ -179,9 +185,10 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
   const reset = () => {
     setTemplateId(null);
     setRendered(null);
-    setOverrideSelection(null);
+    setSelection(new Set());
     setFilter('all');
     setPreviewIdx(null);
+    setTeamSearch('');
   };
 
   if (!open) return null;
@@ -192,8 +199,8 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
     : 'preview';
 
   return (
-    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-stretch justify-end">
-      <div className="bg-ink-950 border-l border-slate-700/40 w-full max-w-4xl h-full overflow-y-auto">
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-ink-950 border border-slate-700/40 rounded-2xl shadow-2xl shadow-black/60 w-full max-w-4xl max-h-[92vh] overflow-y-auto">
         <div className="sticky top-0 bg-ink-950/95 backdrop-blur border-b border-slate-700/40 px-6 py-4 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-extrabold">Compose email</h2>
@@ -244,8 +251,8 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                   (t.mentor_name && t.mentor_name.toLowerCase().includes(teamSearch.trim().toLowerCase())),
                 )
               : candidateTeams;
-            const isChecked = (id: number) => overrideSelection ? overrideSelection.has(id) : true;
-            const selectedCount = overrideSelection ? overrideSelection.size : candidateTeams.length;
+            const isChecked = (id: number) => selection.has(id);
+            const selectedCount = selection.size;
             return (
             <div className="space-y-4">
               <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4">
@@ -270,10 +277,10 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                           // right now, default-pick just 1 team so they can render
                           // a single test email immediately. Otherwise leave
                           // their current selection alone.
-                          if (turningOn && candidateTeams.length === 0 && teams.length > 0) {
-                            const first = teams[0];
-                            setFilter('all');
-                            setOverrideSelection(new Set([first.id]));
+                          // Auto-pick just the first team so test mode renders
+                          // a single email; user can adjust if they want more.
+                          if (turningOn && selection.size === 0 && teams.length > 0) {
+                            setSelection(new Set([teams[0].id]));
                           }
                         }}
                         className="accent-amber-400"
@@ -339,12 +346,9 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                   {(['all', 'flagged', 'incomplete', 'complete'] as TeamFilter[]).map((f) => (
                     <button
                       key={f}
-                      onClick={() => {
-                        setFilter(f);
-                        setOverrideSelection(null);
-                      }}
+                      onClick={() => setFilter(f)}
                       className={`px-3 py-1.5 rounded text-sm font-semibold transition ${
-                        !overrideSelection && filter === f
+                        filter === f
                           ? 'bg-lime-400 text-ink-950'
                           : 'bg-ink-800 border border-slate-700/40 text-slate-200 hover:border-lime-500/40'
                       }`}
@@ -362,13 +366,13 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                   </h4>
                   <div className="flex items-center gap-2 text-xs">
                     <button
-                      onClick={() => setOverrideSelection(new Set(candidateTeams.map((t) => t.id)))}
+                      onClick={() => setSelection(new Set(candidateTeams.map((t) => t.id)))}
                       className="px-2 py-1 rounded bg-ink-900 border border-slate-700/40 text-slate-300 hover:border-lime-500/40 hover:text-white transition"
                     >
                       Select all
                     </button>
                     <button
-                      onClick={() => setOverrideSelection(new Set())}
+                      onClick={() => setSelection(new Set())}
                       className="px-2 py-1 rounded bg-ink-900 border border-slate-700/40 text-slate-300 hover:border-rose-500/40 hover:text-rose-200 transition"
                     >
                       Select none
@@ -394,10 +398,10 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                         type="checkbox"
                         checked={isChecked(t.id)}
                         onChange={(e) => {
-                          const next = new Set(overrideSelection ?? new Set(candidateTeams.map((tt) => tt.id)));
+                          const next = new Set(selection);
                           if (e.target.checked) next.add(t.id);
                           else next.delete(t.id);
-                          setOverrideSelection(next);
+                          setSelection(next);
                         }}
                         className="accent-lime-400"
                       />
@@ -421,10 +425,10 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                 </button>
                 <button
                   onClick={doRender}
-                  disabled={loading || candidateTeams.length === 0}
+                  disabled={loading || selection.size === 0}
                   className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-5 py-2 rounded-lg text-sm transition"
                 >
-                  {loading ? 'Rendering…' : `Render ${candidateTeams.length} email${candidateTeams.length === 1 ? '' : 's'}`}
+                  {loading ? 'Rendering…' : selection.size === 0 ? 'Pick at least one team' : `Render ${selection.size} email${selection.size === 1 ? '' : 's'}`}
                 </button>
               </div>
             </div>
