@@ -72,3 +72,41 @@ def lightweight_migrate() -> None:
         with engine.begin() as conn:
             for sql in additions:
                 conn.execute(text(sql))
+
+    # ---- Cascade FK upgrade (Postgres only) ----
+    # Drop and re-add the team-referencing foreign keys with ON DELETE
+    # semantics so re-uploads (which wipe the teams table) don't fail
+    # with FK violations from existing members / judge scores / comm logs.
+    #   members.team_id           -> CASCADE  (orphaned members are useless)
+    #   judge_score_records.team_id -> CASCADE  (scores belong to a team)
+    #   judge_score_records.judge_id -> CASCADE
+    #   comm_log.team_id          -> SET NULL (preserve audit trail, null the team ref)
+    # The constraint names below are Postgres's default: <table>_<column>_fkey.
+    if engine.dialect.name == "postgresql":
+        cascade_migrations = [
+            # members.team_id -> teams.id ON DELETE CASCADE
+            "ALTER TABLE members DROP CONSTRAINT IF EXISTS members_team_id_fkey",
+            "ALTER TABLE members ADD CONSTRAINT members_team_id_fkey "
+            "FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE",
+            # judge_score_records.team_id -> teams.id ON DELETE CASCADE
+            "ALTER TABLE judge_score_records DROP CONSTRAINT IF EXISTS judge_score_records_team_id_fkey",
+            "ALTER TABLE judge_score_records ADD CONSTRAINT judge_score_records_team_id_fkey "
+            "FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE",
+            # judge_score_records.judge_id -> judges.id ON DELETE CASCADE
+            "ALTER TABLE judge_score_records DROP CONSTRAINT IF EXISTS judge_score_records_judge_id_fkey",
+            "ALTER TABLE judge_score_records ADD CONSTRAINT judge_score_records_judge_id_fkey "
+            "FOREIGN KEY (judge_id) REFERENCES judges(id) ON DELETE CASCADE",
+            # comm_log.team_id -> teams.id ON DELETE SET NULL
+            "ALTER TABLE comm_log DROP CONSTRAINT IF EXISTS comm_log_team_id_fkey",
+            "ALTER TABLE comm_log ADD CONSTRAINT comm_log_team_id_fkey "
+            "FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE SET NULL",
+        ]
+        with engine.begin() as conn:
+            for sql in cascade_migrations:
+                try:
+                    conn.execute(text(sql))
+                except Exception:  # pragma: no cover — best-effort migration
+                    # If the table doesn't exist yet (fresh DB) or the constraint
+                    # is already correct, skip silently. SQLAlchemy create_all will
+                    # set the right thing for fresh tables based on models.py.
+                    pass

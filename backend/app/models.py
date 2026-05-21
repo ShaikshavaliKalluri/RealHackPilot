@@ -50,7 +50,9 @@ class Member(Base):
     __tablename__ = "members"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
+    # ON DELETE CASCADE: when a Team is deleted (e.g. a re-upload wipes
+    # teams), its members go with it.
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(255), index=True)
     email: Mapped[str | None] = mapped_column(String(255), index=True)
     location: Mapped[str | None] = mapped_column(String(64))
@@ -79,8 +81,10 @@ class JudgeScore(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    judge_id: Mapped[int] = mapped_column(ForeignKey("judges.id"), index=True)
-    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id"), index=True)
+    judge_id: Mapped[int] = mapped_column(ForeignKey("judges.id", ondelete="CASCADE"), index=True)
+    # ON DELETE CASCADE: re-uploading teams wipes their scores too. Scores
+    # are always tied to a specific team; orphaned ones serve no purpose.
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
     round: Mapped[int] = mapped_column(Integer, index=True)  # 1 | 2 | 3
     scores: Mapped[dict] = mapped_column(JSON)  # {axis_key: int /10}
     comment: Mapped[str | None] = mapped_column(Text)
@@ -101,7 +105,11 @@ class CommLog(Base):
     __tablename__ = "comm_log"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"), index=True)
+    # ON DELETE SET NULL: when a Team is wiped (re-upload), we keep the
+    # audit trail of what was sent — just null out the team reference.
+    # Useful for compliance / post-event review even after the team rows
+    # are gone.
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id", ondelete="SET NULL"), index=True)
     kind: Mapped[str] = mapped_column(String(32), index=True)  # email | teams_message | teams_broadcast | teams_channel_create
     template_id: Mapped[str | None] = mapped_column(String(64))
     subject: Mapped[str | None] = mapped_column(Text)

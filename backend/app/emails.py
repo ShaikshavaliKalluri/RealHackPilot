@@ -162,6 +162,18 @@ TEMPLATES: list[EmailTemplate] = [
             "let us know so we can help the team find another mentor before the deadline.\n\n"
             "— RealHack Organizing Team"
         ),
+        body_html=_html_wrap(
+            "      <p>Hi <strong>{mentor_name}</strong>,</p>\n"
+            "      <p>Team <strong>{team_name}</strong> listed you as their mentor for RealHack 2026 (June 18–19).</p>\n"
+            "      <div class='info-block'>\n"
+            "        <p class='label'>Team members:</p>\n"
+            "        <p>{member_list}</p>\n"
+            "        <p class='label'>Idea on file:</p>\n"
+            "        <p>{idea_short}</p>\n"
+            "      </div>\n"
+            "      <p>Please reply to confirm you're available to mentor this team. If you can't, "
+            "let us know so we can help the team find another mentor before the deadline.</p>"
+        ),
     ),
     EmailTemplate(
         id="final_call",
@@ -177,6 +189,16 @@ TEMPLATES: list[EmailTemplate] = [
             "If any details still need updating, please update them today.\n\n"
             "— RealHack Organizing Team"
         ),
+        body_html=_html_wrap(
+            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "      <p>Quick reminder: <strong>RealHack 2026 registration closes on May 19, 2026</strong> "
+            "and the deadline will not be extended.</p>\n"
+            "      <div class='info-block'>\n"
+            "        <p class='label'>Status for team {team_name}:</p>\n"
+            "        <p>{status_summary}</p>\n"
+            "      </div>\n"
+            "      <p>If any details still need updating, please update them today.</p>"
+        ),
     ),
     EmailTemplate(
         id="channel_ready",
@@ -191,6 +213,18 @@ TEMPLATES: list[EmailTemplate] = [
             "Mentor and all members have been added. Please use this channel for "
             "coordination, code reviews, and any organizing-team announcements.\n\n"
             "— RealHack Organizing Team"
+        ),
+        body_html=_html_wrap(
+            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "      <p>Your private Teams channel for RealHack 2026 is now live.</p>\n"
+            "      <div class='info-block'>\n"
+            "        <p class='label'>Channel name</p>\n"
+            "        <p>2026 Team - {team_name}</p>\n"
+            "        <p class='label'>Members added</p>\n"
+            "        <p>Your mentor and all team members have already been added.</p>\n"
+            "      </div>\n"
+            "      <p>Use this channel for coordination, code reviews, and any "
+            "organizing-team announcements.</p>"
         ),
     ),
     EmailTemplate(
@@ -228,6 +262,27 @@ TEMPLATES: list[EmailTemplate] = [
             "your participation in RealHack 2026!\n\n"
             "Thanks,\n"
             "RealHack Team"
+        ),
+        body_html=_html_wrap(
+            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "      <p>Thank you for your interest in participating in <strong>RealHack 2026</strong>!</p>\n"
+            "      <p>If you're interested but don't currently have a <strong>problem statement, idea, "
+            "or team</strong>, you can still register as an individual.</p>\n"
+            "      <p><strong>Here's how to proceed:</strong></p>\n"
+            "      <p>Please click on the Individual Registration link: "
+            "<a href='&lt;INSERT_INDIVIDUAL_REGISTRATION_LINK_HERE&gt;'>Individual Registration</a></p>\n"
+            "      <p><strong>Then follow whichever option applies to you:</strong></p>\n"
+            "      <ul>\n"
+            "        <li><strong>If you already have an idea:</strong> Complete the Idea section "
+            "in the registration form along with the required basic details.</li>\n"
+            "        <li><strong>If you'd like to participate but don't have an idea or a team:</strong> "
+            "Fill in only the basic registration details (the first section of the form).</li>\n"
+            "      </ul>\n"
+            "      <p>The organizing committee will make every effort to help place individual "
+            "registrants into teams based on the information provided. However, please note that "
+            "<strong>team allocation and participation cannot be guaranteed</strong>.</p>\n"
+            "      <p>If you have any questions, feel free to reach out. We look forward to your "
+            "participation in RealHack 2026!</p>"
         ),
     ),
 ]
