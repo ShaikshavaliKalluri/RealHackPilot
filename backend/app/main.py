@@ -1120,6 +1120,7 @@ def backfill_mentor_locations(
     locations_set = 0
     tshirts_set = 0
     mentor_addresses_set = 0
+    member_locations_set = 0
     member_addresses_set = 0
     examined = 0
     for t in teams:
@@ -1136,8 +1137,6 @@ def backfill_mentor_locations(
             if ts:
                 t.mentor_tshirt_size = ts
                 tshirts_set += 1
-        # Mailing addresses — MS Forms uses unnamed repeated columns with
-        # numeric suffixes (no suffix = slot 0 = mentor; suffix N = member N).
         addr_slots = _raw_address_slots(t.raw)
         if not t.mentor_address:
             addr = addr_slots.get(0)
@@ -1145,12 +1144,20 @@ def backfill_mentor_locations(
                 t.mentor_address = addr
                 mentor_addresses_set += 1
         for m in t.members:
-            if m.address:
-                continue
-            addr = addr_slots.get(m.position)  # slot N = member N (1-indexed)
-            if addr:
-                m.address = addr
-                member_addresses_set += 1
+            pos = m.position
+            if not m.location:
+                loc = (
+                    _find_raw_value(t.raw, f"member {pos}", "location")
+                    or _find_raw_value(t.raw, f"member{pos}", "location")
+                )
+                if loc:
+                    m.location = loc
+                    member_locations_set += 1
+            if not m.address:
+                addr = addr_slots.get(pos)
+                if addr:
+                    m.address = addr
+                    member_addresses_set += 1
     db.commit()
     return {
         "teams_total": len(teams),
@@ -1158,6 +1165,7 @@ def backfill_mentor_locations(
         "mentor_locations_set": locations_set,
         "mentor_tshirt_sizes_set": tshirts_set,
         "mentor_addresses_set": mentor_addresses_set,
+        "member_locations_set": member_locations_set,
         "member_addresses_set": member_addresses_set,
         "performed_by": _signed_in_email(claims),
     }

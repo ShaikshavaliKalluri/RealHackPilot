@@ -142,10 +142,11 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
     setBackfillMsg(null);
     try {
       const r = await backfillMentorLocations();
-      setBackfillMsg(
-        `Recovered ${r.mentor_addresses_set ?? 0} mentor address${(r.mentor_addresses_set ?? 0) === 1 ? '' : 'es'} ` +
-        `and ${r.member_addresses_set ?? 0} member address${(r.member_addresses_set ?? 0) === 1 ? '' : 'es'} from form data.`,
-      );
+      const parts = [];
+      if ((r.member_locations_set ?? 0) > 0) parts.push(`${r.member_locations_set} member location${r.member_locations_set === 1 ? '' : 's'}`);
+      if ((r.mentor_addresses_set ?? 0) > 0) parts.push(`${r.mentor_addresses_set} mentor address${r.mentor_addresses_set === 1 ? '' : 'es'}`);
+      if ((r.member_addresses_set ?? 0) > 0) parts.push(`${r.member_addresses_set} member address${r.member_addresses_set === 1 ? '' : 'es'}`);
+      setBackfillMsg(parts.length ? `Recovered: ${parts.join(', ')}.` : 'Nothing new to recover.');
       if (onReload) onReload();
     } catch (e: unknown) {
       setBackfillMsg(`Failed: ${e instanceof Error ? e.message : String(e)}`);
