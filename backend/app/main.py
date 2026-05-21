@@ -209,6 +209,17 @@ async def upload_registrations(
         db.flush()
 
     teams = dicts_to_models(team_dicts)
+    # Deduplicate on external_id — MS Forms exports occasionally contain duplicate rows.
+    seen_ext_ids: set[str] = set()
+    unique_teams = []
+    for t in teams:
+        key = t.external_id or str(id(t))
+        if key not in seen_ext_ids:
+            seen_ext_ids.add(key)
+            unique_teams.append(t)
+        else:
+            skipped += 1
+    teams = unique_teams
     for t in teams:
         db.add(t)
     db.flush()
