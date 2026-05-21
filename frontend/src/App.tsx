@@ -155,70 +155,70 @@ export default function App() {
 
   return (
     <div className="min-h-screen p-8 max-w-7xl mx-auto">
-      <header className="mb-6 flex items-start justify-between gap-6">
-        <div className="min-w-0 flex-1">
+      <header className="mb-6">
+        <div className="flex items-center justify-between gap-6 mb-4">
           <img
             src="/realhack-logo.png"
             alt="RealHack 2026"
-            className="h-16 -ml-1 mb-2"
+            className="h-12 -ml-1"
           />
-          <h1 className="text-3xl font-extrabold tracking-tight">
-            {mode === 'dashboard' && <>Registration <span className="text-lime-300">Command Center</span></>}
-            {mode === 'judge' && <>Judge <span className="text-sky-300">Scorecard</span></>}
-            {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}
-            {mode === 'comms' && <>Teams <span className="text-violet-300">Channels &amp; Broadcast</span></>}
-            {mode === 'analytics' && <>Analytics <span className="text-teal-300">&amp; Reporting</span></>}
-          </h1>
-          <p className="text-slate-400 mt-2 text-sm max-w-3xl">
-            {mode === 'dashboard' && 'Upload the latest MS Forms export. Teams get scored on completeness, screened for duplicates and rule violations, and surfaced in one place.'}
-            {mode === 'judge' && 'Sign in, pick a round, score each team against the rubric. Each judge can submit once per team per round.'}
-            {mode === 'scoring' && 'Live leaderboard aggregating judge scores per round, plus manual entry for organizers to log scores on behalf of a judge.'}
-            {mode === 'comms' && 'Create per-team Microsoft Teams channels and broadcast announcements to every team at once.'}
-            {mode === 'analytics' && 'Location heat map, completeness distribution, AI score breakdown, top teams, flag analysis, and swag procurement summary.'}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={() => exportCsv().catch((e) => alert(`Export failed: ${e.message ?? e}`))}
-            className="bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold px-3 py-2 rounded-lg text-sm transition whitespace-nowrap"
-            title="Download teams + scores as CSV (opens in Excel)"
-          >
-            Export CSV
-          </button>
-          <div className="flex gap-1 bg-ink-800/60 border border-slate-700/40 rounded-lg p-1">
+          <div className="flex items-center gap-2 shrink-0">
             <button
-              onClick={() => setMode('dashboard')}
-              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'dashboard' ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+              onClick={() => exportCsv().catch((e) => alert(`Export failed: ${e.message ?? e}`))}
+              className="bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold px-3 py-2 rounded-lg text-sm transition whitespace-nowrap"
+              title="Download teams + scores as CSV (opens in Excel)"
             >
-              Dashboard
+              Export CSV
             </button>
-            <button
-              onClick={() => setMode('judge')}
-              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'judge' ? 'bg-sky-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
-            >
-              Judge mode
-            </button>
-            <button
-              onClick={() => setMode('scoring')}
-              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'scoring' ? 'bg-amber-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
-            >
-              Scoring
-            </button>
-            <button
-              onClick={() => setMode('comms')}
-              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'comms' ? 'bg-violet-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
-            >
-              Comms
-            </button>
-            <button
-              onClick={() => setMode('analytics')}
-              className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'analytics' ? 'bg-teal-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
-            >
-              Analytics
-            </button>
+            <div className="flex gap-1 bg-ink-800/60 border border-slate-700/40 rounded-lg p-1">
+              <button
+                onClick={() => setMode('dashboard')}
+                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'dashboard' ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+              >
+                Dashboard
+              </button>
+              <button
+                onClick={() => setMode('judge')}
+                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'judge' ? 'bg-sky-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+              >
+                Judge mode
+              </button>
+              <button
+                onClick={() => setMode('scoring')}
+                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'scoring' ? 'bg-amber-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+              >
+                Scoring
+              </button>
+              <button
+                onClick={() => setMode('comms')}
+                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'comms' ? 'bg-violet-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+              >
+                Comms
+              </button>
+              <button
+                onClick={() => setMode('analytics')}
+                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'analytics' ? 'bg-teal-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+              >
+                Analytics
+              </button>
+            </div>
+            {user && <UserBadge user={user} />}
           </div>
-          {user && <UserBadge user={user} />}
         </div>
+        <h1 className="text-3xl font-extrabold tracking-tight">
+          {mode === 'dashboard' && <>Registration <span className="text-lime-300">Command Center</span></>}
+          {mode === 'judge' && <>Judge <span className="text-sky-300">Scorecard</span></>}
+          {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}
+          {mode === 'comms' && <>Teams <span className="text-violet-300">Channels &amp; Broadcast</span></>}
+          {mode === 'analytics' && <>Analytics <span className="text-teal-300">&amp; Reporting</span></>}
+        </h1>
+        <p className="text-slate-400 mt-2 text-sm">
+          {mode === 'dashboard' && 'Upload the latest MS Forms export. Teams get scored on completeness, screened for duplicates and rule violations, and surfaced in one place.'}
+          {mode === 'judge' && 'Sign in, pick a round, score each team against the rubric. Each judge can submit once per team per round.'}
+          {mode === 'scoring' && 'Live leaderboard aggregating judge scores per round, plus manual entry for organizers to log scores on behalf of a judge.'}
+          {mode === 'comms' && 'Create per-team Microsoft Teams channels and broadcast announcements to every team at once.'}
+          {mode === 'analytics' && 'Location heat map, completeness distribution, AI score breakdown, top teams, flag analysis, and swag procurement summary.'}
+        </p>
       </header>
 
       {mode === 'dashboard' && (
