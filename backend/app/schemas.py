@@ -19,6 +19,8 @@ class TeamOut(BaseModel):
     name: str
     mentor_name: str | None = None
     mentor_email: str | None = None
+    mentor_location: str | None = None
+    mentor_tshirt_size: str | None = None
     idea: str | None = None
     tools: str | None = None
     approach: str | None = None
@@ -251,6 +253,8 @@ class TeamPatch(BaseModel):
     name: str | None = None
     mentor_name: str | None = None
     mentor_email: str | None = None
+    mentor_location: str | None = None
+    mentor_tshirt_size: str | None = None
     idea: str | None = None
     tools: str | None = None
     approach: str | None = None

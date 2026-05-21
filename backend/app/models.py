@@ -13,6 +13,10 @@ class Team(Base):
     name: Mapped[str] = mapped_column(String(255), index=True)
     mentor_name: Mapped[str | None] = mapped_column(String(255))
     mentor_email: Mapped[str | None] = mapped_column(String(255))
+    # Free-form so organizers can type in countries beyond the US/India/PH
+    # short-list when editing a team via the dashboard ("Other" → free text).
+    mentor_location: Mapped[str | None] = mapped_column(String(64))
+    mentor_tshirt_size: Mapped[str | None] = mapped_column(String(16))
     idea: Mapped[str | None] = mapped_column(Text)
     tools: Mapped[str | None] = mapped_column(Text)
     approach: Mapped[str | None] = mapped_column(Text)

@@ -851,8 +851,8 @@ def update_readiness(team_id: int, req: ReadinessFlagsRequest, db: Session = Dep
 # record of who edited what, when, and why.
 
 _EDITABLE_TEAM_FIELDS = (
-    "name", "mentor_name", "mentor_email", "idea", "tools",
-    "approach", "viability", "business_value", "repo_url",
+    "name", "mentor_name", "mentor_email", "mentor_location", "mentor_tshirt_size",
+    "idea", "tools", "approach", "viability", "business_value", "repo_url",
 )
 
 

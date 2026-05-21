@@ -382,6 +382,8 @@ export interface TeamEditPatch {
   name?: string;
   mentor_name?: string | null;
   mentor_email?: string | null;
+  mentor_location?: string | null;
+  mentor_tshirt_size?: string | null;
   idea?: string | null;
   tools?: string | null;
   approach?: string | null;

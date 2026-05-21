@@ -23,8 +23,64 @@ interface MemberDraft {
   original: Member | null;
 }
 
-const LOCATION_OPTIONS = ['', 'US', 'India', 'Philippines'];
+const KNOWN_LOCATIONS = ['US', 'India', 'Philippines'];
 const TSHIRT_OPTIONS = ['', 'XS', 'S', 'M', 'L', 'XL', 'XXL', '3XL'];
+
+/**
+ * Single source-of-truth for the location dropdown used in both the Mentor
+ * section and each member row. Renders a `<select>` with the standard
+ * countries + an "Other" option. When the current value isn't in the
+ * standard list (or "Other" is selected from blank), a text input appears
+ * for the organizer to type a country name.
+ *
+ * The component is fully controlled — value/onChange map directly to the
+ * backing string field, so callers don't need to track a separate
+ * "isOther" mode.
+ */
+function LocationField({
+  value, onChange, disabled, size = 'md',
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  disabled?: boolean;
+  size?: 'md' | 'sm';
+}) {
+  const isStandard = value === '' || KNOWN_LOCATIONS.includes(value);
+  const showOther = !isStandard;
+  const cls = size === 'sm' ? 'input-sm' : 'input';
+  return (
+    <div className="flex gap-2">
+      <select
+        value={showOther ? 'Other' : value}
+        onChange={(e) => {
+          const v = e.target.value;
+          // Switching INTO "Other" → blank the value so the text input is
+          // empty; switching back to a known country writes that country.
+          onChange(v === 'Other' ? '' : v);
+        }}
+        disabled={disabled}
+        className={cls}
+      >
+        <option value="">—</option>
+        {KNOWN_LOCATIONS.map((l) => (
+          <option key={l} value={l}>
+            {l}
+          </option>
+        ))}
+        <option value="Other">Other…</option>
+      </select>
+      {showOther && (
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          placeholder="Country name"
+          className={cls}
+        />
+      )}
+    </div>
+  );
+}
 
 function asDraft(m: Member): MemberDraft {
   return {
@@ -57,6 +113,8 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
   const [name, setName] = useState(team.name);
   const [mentorName, setMentorName] = useState(team.mentor_name ?? '');
   const [mentorEmail, setMentorEmail] = useState(team.mentor_email ?? '');
+  const [mentorLocation, setMentorLocation] = useState(team.mentor_location ?? '');
+  const [mentorTshirt, setMentorTshirt] = useState(team.mentor_tshirt_size ?? '');
   const [idea, setIdea] = useState(team.idea ?? '');
   const [tools, setTools] = useState(team.tools ?? '');
   const [approach, setApproach] = useState(team.approach ?? '');
@@ -108,6 +166,8 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
     const pairs: [keyof TeamEditPatch, string, string | null][] = [
       ['mentor_name', mentorName, team.mentor_name],
       ['mentor_email', mentorEmail, team.mentor_email],
+      ['mentor_location', mentorLocation, team.mentor_location],
+      ['mentor_tshirt_size', mentorTshirt, team.mentor_tshirt_size],
       ['idea', idea, team.idea],
       ['tools', tools, team.tools],
       ['approach', approach, team.approach],
@@ -262,6 +322,22 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
                   className="input"
                 />
               </Field>
+              <Field label="Mentor location / country">
+                <LocationField value={mentorLocation} onChange={setMentorLocation} />
+              </Field>
+              <Field label="Mentor T-shirt size">
+                <select
+                  value={mentorTshirt}
+                  onChange={(e) => setMentorTshirt(e.target.value)}
+                  className="input"
+                >
+                  {TSHIRT_OPTIONS.map((s) => (
+                    <option key={s || 'blank'} value={s}>
+                      {s || '—'}
+                    </option>
+                  ))}
+                </select>
+              </Field>
             </div>
           </section>
 
@@ -332,7 +408,7 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
               {members.map((m) => (
                 <div
                   key={m.id}
-                  className={`rounded-lg border p-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_110px_90px_auto] gap-2 items-center ${
+                  className={`rounded-lg border p-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_minmax(140px,1.2fr)_90px_auto] gap-2 items-center ${
                     m.isDeleted ? 'bg-rose-500/5 border-rose-500/30 opacity-60' : 'bg-ink-800/60 border-slate-700/40'
                   }`}
                 >
@@ -351,18 +427,12 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
                     disabled={m.isDeleted}
                     className="input-sm"
                   />
-                  <select
+                  <LocationField
                     value={m.location}
-                    onChange={(e) => updateRow(m.id, { location: e.target.value })}
+                    onChange={(loc) => updateRow(m.id, { location: loc })}
                     disabled={m.isDeleted}
-                    className="input-sm"
-                  >
-                    {LOCATION_OPTIONS.map((l) => (
-                      <option key={l || 'blank'} value={l}>
-                        {l || '—'}
-                      </option>
-                    ))}
-                  </select>
+                    size="sm"
+                  />
                   <select
                     value={m.tshirt_size}
                     onChange={(e) => updateRow(m.id, { tshirt_size: e.target.value })}

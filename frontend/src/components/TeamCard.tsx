@@ -70,12 +70,32 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
             )}
           </div>
           <div className="mt-4 pt-3 border-t border-slate-700/40 text-xs text-slate-400">
-            <div className="flex justify-between">
-              <span>{team.members.length} member{team.members.length === 1 ? '' : 's'}</span>
-              <span>
-                {team.members.filter((m) => m.location === 'US').length} US ·{' '}
-                {team.members.filter((m) => m.location === 'India').length} IN ·{' '}
-                {team.members.filter((m) => m.location === 'Philippines').length} PH
+            <div className="flex justify-between gap-3">
+              <span className="shrink-0">{team.members.length} member{team.members.length === 1 ? '' : 's'}</span>
+              <span className="text-right">
+                {(() => {
+                  const us = team.members.filter((m) => m.location === 'US').length;
+                  const india = team.members.filter((m) => m.location === 'India').length;
+                  const ph = team.members.filter((m) => m.location === 'Philippines').length;
+                  // Anything that isn't a standard country goes into "Others"
+                  // with the actual country names listed comma-separated so
+                  // organizers can see at a glance who's in scope.
+                  const others = team.members
+                    .map((m) => (m.location || '').trim())
+                    .filter((loc) => loc && !['US', 'India', 'Philippines'].includes(loc));
+                  const othersDedup = Array.from(new Set(others));
+                  return (
+                    <>
+                      {us} US · {india} IN · {ph} PH
+                      {others.length > 0 && (
+                        <>
+                          {' '}· {others.length} Others
+                          <span className="text-slate-500"> ({othersDedup.join(', ')})</span>
+                        </>
+                      )}
+                    </>
+                  );
+                })()}
               </span>
             </div>
           </div>

@@ -68,6 +68,10 @@ def lightweight_migrate() -> None:
         additions.append("ALTER TABLE teams ADD COLUMN advanced_to_round INTEGER DEFAULT 1")
     if "final_position" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN final_position INTEGER")
+    if "mentor_location" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN mentor_location VARCHAR(64)")
+    if "mentor_tshirt_size" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN mentor_tshirt_size VARCHAR(16)")
     if additions:
         with engine.begin() as conn:
             for sql in additions:
