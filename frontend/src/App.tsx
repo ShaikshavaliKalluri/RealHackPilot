@@ -26,7 +26,20 @@ export default function App() {
   const isAuthenticated = useIsAuthenticated();
   const { inProgress } = useMsal();
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [authError, setAuthError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(() => {
+    // Pick up any error stashed by main.tsx during MSAL bootstrap
+    // (e.g. AADSTS50105 when Entra blocks a user not in the security group).
+    try {
+      const stashed = sessionStorage.getItem('msal:bootstrap_error');
+      if (stashed) {
+        sessionStorage.removeItem('msal:bootstrap_error');
+        return stashed;
+      }
+    } catch {
+      // sessionStorage unavailable — ignore
+    }
+    return null;
+  });
 
   // ---- Dashboard state ----
   const [teams, setTeams] = useState<Team[]>([]);

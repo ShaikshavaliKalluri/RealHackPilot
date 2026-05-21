@@ -20,9 +20,17 @@ async function bootstrap() {
     if (result?.account) {
       msalInstance.setActiveAccount(result.account);
     }
-  } catch (e) {
+  } catch (e: unknown) {
     // eslint-disable-next-line no-console
     console.error('MSAL bootstrap failed:', e);
+    // Stash the error message so LoginPage can show a friendly panel
+    // (e.g. AADSTS50105 = user not assigned to app).
+    const message = e instanceof Error ? e.message : String(e);
+    try {
+      sessionStorage.setItem('msal:bootstrap_error', message);
+    } catch {
+      // sessionStorage unavailable (private mode etc) — silently swallow
+    }
   }
   createRoot(document.getElementById('root')!).render(
     <StrictMode>

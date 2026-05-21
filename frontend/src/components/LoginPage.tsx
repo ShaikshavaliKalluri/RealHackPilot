@@ -116,11 +116,38 @@ export function LoginPage({ error }: Props) {
             )}
           </button>
 
-          {error && (
-            <div className="mt-4 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3 text-xs text-rose-300">
-              <strong>Sign-in failed:</strong> {error}
-            </div>
-          )}
+          {error && (() => {
+            // AADSTS50105 = user authenticated successfully but isn't assigned
+            // to this app (i.e. not in the AGAa-RealHack-Pilot-Users group).
+            // Show a friendlier panel for this — it's the common case.
+            const isAccessDenied = /AADSTS50105|not.*assigned|access_denied/i.test(error);
+            if (isAccessDenied) {
+              return (
+                <div className="mt-5 bg-amber-500/10 border border-amber-500/40 rounded-xl p-4">
+                  <div className="flex items-start gap-3">
+                    <svg className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-amber-200 mb-1">Access required</div>
+                      <p className="text-xs text-amber-200/80 leading-relaxed">
+                        You're signed in, but your account isn't on the RealHack Pilot access list yet. To request access, email{' '}
+                        <a href="mailto:RealHack@realpage.com?subject=RealHack%20Pilot%20access%20request" className="text-amber-300 hover:text-amber-200 font-semibold underline">
+                          RealHack@realpage.com
+                        </a>
+                        {' '}and the organizers will add you.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div className="mt-4 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3 text-xs text-rose-300">
+                <strong>Sign-in failed:</strong> {error}
+              </div>
+            );
+          })()}
 
           <div className="mt-8 pt-6 border-t border-slate-800/80 text-xs text-slate-500 leading-relaxed">
             <p>

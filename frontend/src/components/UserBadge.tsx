@@ -32,11 +32,17 @@ export function UserBadge({ user }: Props) {
 
   const handleLogout = () => {
     setOpen(false);
-    // Pass `account` so Microsoft skips its "Pick an account to sign out of"
-    // picker and sends the user straight back to our login page.
+    // Microsoft only skips its "Pick an account to sign out of" picker when
+    // we pass a hint — `account` alone isn't enough. We pass both `logoutHint`
+    // (string form, used as the OIDC `logout_hint` query param) and `account`
+    // (which MSAL uses internally), preferring the `login_hint` ID-token claim
+    // when present and falling back to the account's UPN/username.
     const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0];
+    const claims = account?.idTokenClaims as { login_hint?: string } | undefined;
+    const logoutHint = claims?.login_hint ?? account?.username;
     instance.logoutRedirect({
       account,
+      logoutHint,
       postLogoutRedirectUri: window.location.origin,
     }).catch((e) => {
       console.error('Logout failed', e);
