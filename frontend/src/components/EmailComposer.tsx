@@ -80,6 +80,24 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
   // Step 2 team-list controls
   const [teamSearch, setTeamSearch] = useState('');
 
+  // Patch a single rendered email in place — used by the Step 3 editable
+  // subject/body inputs. Editing the body drops body_html for that email so
+  // the edited plain-text version is what actually gets sent (we don't have
+  // a frontend equivalent of _html_wrap so we can't safely regenerate HTML).
+  const patchRendered = (idx: number, patch: Partial<RenderedEmail>) => {
+    setRendered((prev) => {
+      if (!prev) return prev;
+      const next = [...prev];
+      const merged = { ...next[idx], ...patch };
+      if ('body' in patch) {
+        // Body was edited — drop HTML override so the new plain text is sent.
+        (merged as any).body_html = null;
+      }
+      next[idx] = merged;
+      return next;
+    });
+  };
+
   // Test mode auto-fills To with the signed-in user's address so nothing
   // accidentally goes to a real team during testing.
   const effectiveToOverride = useMemo(() => {
@@ -175,7 +193,7 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-stretch justify-end">
-      <div className="bg-ink-950 border-l border-slate-700/40 w-full max-w-2xl h-full overflow-y-auto">
+      <div className="bg-ink-950 border-l border-slate-700/40 w-full max-w-4xl h-full overflow-y-auto">
         <div className="sticky top-0 bg-ink-950/95 backdrop-blur border-b border-slate-700/40 px-6 py-4 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-extrabold">Compose email</h2>
@@ -245,7 +263,19 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                       <input
                         type="checkbox"
                         checked={testMode}
-                        onChange={(e) => setTestMode(e.target.checked)}
+                        onChange={(e) => {
+                          const turningOn = e.target.checked;
+                          setTestMode(turningOn);
+                          // When user enables test mode AND nothing is selected
+                          // right now, default-pick just 1 team so they can render
+                          // a single test email immediately. Otherwise leave
+                          // their current selection alone.
+                          if (turningOn && candidateTeams.length === 0 && teams.length > 0) {
+                            const first = teams[0];
+                            setFilter('all');
+                            setOverrideSelection(new Set([first.id]));
+                          }
+                        }}
                         className="accent-amber-400"
                       />
                       <span>Send to me only (test mode)</span>
@@ -531,12 +561,30 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                             </div>
                           )}
                           <div>
-                            <div className="text-xs uppercase tracking-wider text-slate-400">Subject</div>
-                            <div className="text-sm text-slate-100 font-semibold">{e.subject}</div>
+                            <div className="text-xs uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                              <span>Subject</span>
+                              <span className="text-[10px] text-slate-500 normal-case">editable — overrides template for this team only</span>
+                            </div>
+                            <input
+                              type="text"
+                              value={e.subject}
+                              onChange={(ev) => patchRendered(i, { subject: ev.target.value })}
+                              className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 text-sm text-slate-100 font-semibold mt-1 focus:outline-none focus:border-lime-500/60"
+                            />
                           </div>
                           <div>
-                            <div className="text-xs uppercase tracking-wider text-slate-400">Body</div>
-                            <pre className="text-sm text-slate-200 whitespace-pre-wrap font-sans bg-ink-900/50 rounded p-3 mt-1">{e.body}</pre>
+                            <div className="text-xs uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                              <span>Body</span>
+                              <span className="text-[10px] text-slate-500 normal-case">
+                                editable — note: editing here sends plain text (drops HTML formatting)
+                              </span>
+                            </div>
+                            <textarea
+                              value={e.body}
+                              onChange={(ev) => patchRendered(i, { body: ev.target.value })}
+                              rows={Math.min(20, Math.max(8, e.body.split('\n').length + 1))}
+                              className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 mt-1 text-sm text-slate-200 font-sans whitespace-pre-wrap focus:outline-none focus:border-lime-500/60 resize-y"
+                            />
                           </div>
                           <div className="flex gap-2">
                             <a
