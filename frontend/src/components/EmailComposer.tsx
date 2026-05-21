@@ -77,6 +77,9 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
   const [toOverrideRaw, setToOverrideRaw] = useState('');
   const [testMode, setTestMode] = useState(false);
 
+  // Step 2 team-list controls
+  const [teamSearch, setTeamSearch] = useState('');
+
   // Test mode auto-fills To with the signed-in user's address so nothing
   // accidentally goes to a real team during testing.
   const effectiveToOverride = useMemo(() => {
@@ -216,86 +219,23 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
           )}
 
           {/* STEP 2: pick teams */}
-          {stage === 'pickTeams' && selectedTemplate && (
+          {stage === 'pickTeams' && selectedTemplate && (() => {
+            const searchedTeams = teamSearch.trim()
+              ? candidateTeams.filter((t) =>
+                  t.name.toLowerCase().includes(teamSearch.trim().toLowerCase()) ||
+                  (t.mentor_name && t.mentor_name.toLowerCase().includes(teamSearch.trim().toLowerCase())),
+                )
+              : candidateTeams;
+            const isChecked = (id: number) => overrideSelection ? overrideSelection.has(id) : true;
+            const selectedCount = overrideSelection ? overrideSelection.size : candidateTeams.length;
+            return (
             <div className="space-y-4">
               <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4">
                 <div className="text-xs uppercase text-slate-400 tracking-wider">Template</div>
                 <div className="font-bold mt-0.5">{selectedTemplate.label}</div>
-                <div className="text-xs text-slate-500 mt-1">To: <span className="capitalize">{selectedTemplate.audience}</span></div>
+                <div className="text-xs text-slate-500 mt-1">Default audience: <span className="capitalize">{selectedTemplate.audience}</span></div>
               </div>
 
-              <div>
-                <h4 className="text-xs uppercase text-slate-400 tracking-wider mb-2">Quick filter</h4>
-                <div className="flex flex-wrap gap-2">
-                  {(['all', 'flagged', 'incomplete', 'complete'] as TeamFilter[]).map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => {
-                        setFilter(f);
-                        setOverrideSelection(null);
-                      }}
-                      className={`px-3 py-1.5 rounded text-sm font-semibold transition ${
-                        !overrideSelection && filter === f
-                          ? 'bg-lime-400 text-ink-950'
-                          : 'bg-ink-800 border border-slate-700/40 text-slate-200 hover:border-lime-500/40'
-                      }`}
-                    >
-                      {FILTER_LABEL[f]} ({selectTeams(teams, f).length})
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-xs uppercase text-slate-400 tracking-wider mb-2">
-                  Recipients ({candidateTeams.length})
-                </h4>
-                <div className="bg-ink-800/40 border border-slate-700/40 rounded-xl max-h-64 overflow-y-auto p-2 space-y-1">
-                  {candidateTeams.map((t) => (
-                    <label key={t.id} className="flex items-center gap-2 px-2 py-1 hover:bg-ink-800/60 rounded text-sm cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={overrideSelection ? overrideSelection.has(t.id) : true}
-                        onChange={(e) => {
-                          const next = new Set(overrideSelection ?? new Set(candidateTeams.map((tt) => tt.id)));
-                          if (e.target.checked) next.add(t.id);
-                          else next.delete(t.id);
-                          setOverrideSelection(next);
-                        }}
-                        className="accent-lime-400"
-                      />
-                      <span className="font-semibold text-slate-100 flex-1 truncate">{t.name}</span>
-                      <span className="text-xs text-slate-500">
-                        {selectedTemplate.audience === 'mentor'
-                          ? (t.mentor_email ? '✓ has email' : '✗ no mentor email')
-                          : `${t.members.filter((m) => m.email).length}/${t.members.length} emails`}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-between items-center pt-3 border-t border-slate-700/40">
-                <button
-                  onClick={reset}
-                  className="text-sm text-slate-400 hover:text-white"
-                >
-                  ← Back
-                </button>
-                <button
-                  onClick={doRender}
-                  disabled={loading || candidateTeams.length === 0}
-                  className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-5 py-2 rounded-lg text-sm transition"
-                >
-                  {loading ? 'Rendering…' : `Render ${candidateTeams.length} email${candidateTeams.length === 1 ? '' : 's'}`}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* STEP 3: preview */}
-          {stage === 'preview' && rendered && (
-            <div className="space-y-3">
               {/* Recipients control panel — applied to every email in the batch */}
               <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between gap-3">
@@ -339,7 +279,7 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                       type="text"
                       value={ccRaw}
                       onChange={(e) => setCcRaw(e.target.value)}
-                      placeholder="organizer1@realpage.com, organizer2@..."
+                      placeholder="organizer1@realpage.com, ..."
                       className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-lime-500/60"
                     />
                   </div>
@@ -361,6 +301,127 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                     {bccList.length > 0 && <span>BCC: <span className="text-slate-200">{bccList.length} address{bccList.length === 1 ? '' : 'es'}</span></span>}
                   </div>
                 )}
+              </div>
+
+              <div>
+                <h4 className="text-xs uppercase text-slate-400 tracking-wider mb-2">Quick filter</h4>
+                <div className="flex flex-wrap gap-2">
+                  {(['all', 'flagged', 'incomplete', 'complete'] as TeamFilter[]).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => {
+                        setFilter(f);
+                        setOverrideSelection(null);
+                      }}
+                      className={`px-3 py-1.5 rounded text-sm font-semibold transition ${
+                        !overrideSelection && filter === f
+                          ? 'bg-lime-400 text-ink-950'
+                          : 'bg-ink-800 border border-slate-700/40 text-slate-200 hover:border-lime-500/40'
+                      }`}
+                    >
+                      {FILTER_LABEL[f]} ({selectTeams(teams, f).length})
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <h4 className="text-xs uppercase text-slate-400 tracking-wider">
+                    Recipients · {selectedCount} of {candidateTeams.length} selected
+                  </h4>
+                  <div className="flex items-center gap-2 text-xs">
+                    <button
+                      onClick={() => setOverrideSelection(new Set(candidateTeams.map((t) => t.id)))}
+                      className="px-2 py-1 rounded bg-ink-900 border border-slate-700/40 text-slate-300 hover:border-lime-500/40 hover:text-white transition"
+                    >
+                      Select all
+                    </button>
+                    <button
+                      onClick={() => setOverrideSelection(new Set())}
+                      className="px-2 py-1 rounded bg-ink-900 border border-slate-700/40 text-slate-300 hover:border-rose-500/40 hover:text-rose-200 transition"
+                    >
+                      Select none
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="text"
+                  value={teamSearch}
+                  onChange={(e) => setTeamSearch(e.target.value)}
+                  placeholder="Search team name or mentor..."
+                  className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-1.5 text-sm mb-2 focus:outline-none focus:border-lime-500/60"
+                />
+                <div className="bg-ink-800/40 border border-slate-700/40 rounded-xl max-h-64 overflow-y-auto p-2 space-y-1">
+                  {searchedTeams.length === 0 && (
+                    <div className="text-xs text-slate-500 italic px-2 py-3 text-center">
+                      No teams match "{teamSearch}".
+                    </div>
+                  )}
+                  {searchedTeams.map((t) => (
+                    <label key={t.id} className="flex items-center gap-2 px-2 py-1 hover:bg-ink-800/60 rounded text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isChecked(t.id)}
+                        onChange={(e) => {
+                          const next = new Set(overrideSelection ?? new Set(candidateTeams.map((tt) => tt.id)));
+                          if (e.target.checked) next.add(t.id);
+                          else next.delete(t.id);
+                          setOverrideSelection(next);
+                        }}
+                        className="accent-lime-400"
+                      />
+                      <span className="font-semibold text-slate-100 flex-1 truncate">{t.name}</span>
+                      <span className="text-xs text-slate-500">
+                        {selectedTemplate.audience === 'mentor'
+                          ? (t.mentor_email ? '✓ has email' : '✗ no mentor email')
+                          : `${t.members.filter((m) => m.email).length}/${t.members.length} emails`}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center pt-3 border-t border-slate-700/40">
+                <button
+                  onClick={reset}
+                  className="text-sm text-slate-400 hover:text-white"
+                >
+                  ← Back
+                </button>
+                <button
+                  onClick={doRender}
+                  disabled={loading || candidateTeams.length === 0}
+                  className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-5 py-2 rounded-lg text-sm transition"
+                >
+                  {loading ? 'Rendering…' : `Render ${candidateTeams.length} email${candidateTeams.length === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            </div>
+            );
+          })()}
+
+          {/* STEP 3: preview */}
+          {stage === 'preview' && rendered && (
+            <div className="space-y-3">
+              {/* Read-only recipients summary — edited back in Step 2 */}
+              <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-3 text-xs flex flex-wrap items-center gap-x-4 gap-y-1 text-slate-400">
+                <span className="text-slate-500 uppercase tracking-wider text-[10px] font-semibold">Recipients</span>
+                {testMode ? (
+                  <span className="text-amber-300">Test mode · all emails go to {userEmail}</span>
+                ) : effectiveToOverride && effectiveToOverride.length > 0 ? (
+                  <span>To override: <span className="text-slate-200">{effectiveToOverride.join(', ')}</span></span>
+                ) : (
+                  <span>To: <span className="text-slate-200">each team's members</span></span>
+                )}
+                {ccList.length > 0 && <span>CC: <span className="text-slate-200">{ccList.join(', ')}</span></span>}
+                {bccList.length > 0 && <span>BCC: <span className="text-slate-200">{bccList.join(', ')}</span></span>}
+                <button
+                  onClick={() => { setRendered(null); }}
+                  className="ml-auto text-lime-300 hover:text-lime-200 underline-offset-2 hover:underline"
+                >
+                  ← Edit recipients
+                </button>
               </div>
 
               <div className="flex flex-wrap gap-2 items-center">
