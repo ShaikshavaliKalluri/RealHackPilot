@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Team } from '../types';
 
-type Mode = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants';
+type Mode = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | 'unique_people';
 
 interface Props {
   mode: Mode;
@@ -179,6 +179,54 @@ function computeAllParticipants(teams: Team[]): PersonRow[] {
   return rows;
 }
 
+interface CountryRow {
+  country: string;
+  count: number;
+  members: number;
+  mentors: number;
+}
+
+function prettyCountry(loc: string | null | undefined): string {
+  const v = (loc ?? '').trim().toLowerCase();
+  if (!v) return 'Unknown';
+  if (v === 'us') return 'United States';
+  if (v === 'uk') return 'United Kingdom';
+  return v.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function computeUniquePeopleByCountry(teams: Team[]): { rows: CountryRow[]; total: number } {
+  const seen = new Map<string, { location: string | null; role: 'member' | 'mentor' | 'both' }>();
+
+  for (const t of teams) {
+    for (const m of t.members) {
+      const key = (m.email || `m:${t.id}:${m.name}`).toLowerCase();
+      if (!seen.has(key)) seen.set(key, { location: m.location, role: 'member' });
+    }
+    const mentorKey = (t.mentor_email || `mentor:${t.mentor_name}`).toLowerCase();
+    if (mentorKey && !seen.has(mentorKey)) {
+      seen.set(mentorKey, { location: t.mentor_location, role: 'mentor' });
+    } else if (mentorKey && seen.has(mentorKey)) {
+      seen.get(mentorKey)!.role = 'both';
+    }
+  }
+
+  const countryMap = new Map<string, { count: number; members: number; mentors: number }>();
+  for (const { location, role } of seen.values()) {
+    const country = prettyCountry(location);
+    if (!countryMap.has(country)) countryMap.set(country, { count: 0, members: 0, mentors: 0 });
+    const entry = countryMap.get(country)!;
+    entry.count++;
+    if (role === 'member' || role === 'both') entry.members++;
+    if (role === 'mentor' || role === 'both') entry.mentors++;
+  }
+
+  const rows: CountryRow[] = Array.from(countryMap.entries())
+    .map(([country, { count, members, mentors }]) => ({ country, count, members, mentors }))
+    .sort((a, b) => b.count - a.count);
+
+  return { rows, total: seen.size };
+}
+
 const TITLES: Record<Mode, string> = {
   duplicates: 'Participants on multiple teams',
   mentors: 'Mentors with more than 2 teams',
@@ -187,6 +235,7 @@ const TITLES: Record<Mode, string> = {
   flagged: 'Teams with flags',
   all_mentors: 'All mentors (unique)',
   all_participants: 'All participants (unique)',
+  unique_people: 'Unique people by country',
 };
 
 const TONES: Record<Mode, string> = {
@@ -197,6 +246,7 @@ const TONES: Record<Mode, string> = {
   flagged: 'text-amber-300',
   all_mentors: 'text-sky-300',
   all_participants: 'text-sky-300',
+  unique_people: 'text-emerald-300',
 };
 
 const flagSummary = (flags: string[]): string[] => {
@@ -236,6 +286,7 @@ export function DrillDownPanel({ mode, teams, onJumpToTeam, onClose }: Props) {
   const flagged = useMemo(() => (mode === 'flagged' ? computeFlagged(teams) : []), [mode, teams]);
   const allMentors = useMemo(() => (mode === 'all_mentors' ? computeAllMentors(teams) : []), [mode, teams]);
   const allParticipants = useMemo(() => (mode === 'all_participants' ? computeAllParticipants(teams) : []), [mode, teams]);
+  const uniquePeople = useMemo(() => (mode === 'unique_people' ? computeUniquePeopleByCountry(teams) : { rows: [], total: 0 }), [mode, teams]);
 
   const peopleRows = mode === 'all_mentors' ? allMentors : mode === 'all_participants' ? allParticipants : [];
   const filteredPeople = useMemo(() => {
@@ -251,7 +302,8 @@ export function DrillDownPanel({ mode, teams, onJumpToTeam, onClose }: Props) {
     : mode === 'incomplete' ? incomplete.length
     : mode === 'flagged' ? flagged.length
     : mode === 'all_mentors' ? allMentors.length
-    : allParticipants.length;
+    : mode === 'all_participants' ? allParticipants.length
+    : uniquePeople.total;
 
   return (
     <div className="bg-ink-800/80 border border-slate-700/40 rounded-xl p-5 mb-6">
@@ -369,6 +421,38 @@ export function DrillDownPanel({ mode, teams, onJumpToTeam, onClose }: Props) {
               </button>
             );
           })}
+        </div>
+      )}
+
+      {mode === 'unique_people' && uniquePeople.rows.length > 0 && (
+        <div className="space-y-2.5">
+          {uniquePeople.rows.map((row) => {
+            const pct = uniquePeople.total > 0 ? Math.round((row.count / uniquePeople.total) * 100) : 0;
+            const barColor =
+              row.country === 'India' ? 'bg-amber-500/60'
+              : row.country === 'United States' ? 'bg-sky-500/60'
+              : row.country === 'Philippines' ? 'bg-violet-500/60'
+              : row.country === 'Unknown' ? 'bg-slate-600/40'
+              : 'bg-emerald-500/60';
+            return (
+              <div key={row.country} className="flex items-center gap-3">
+                <div className="w-32 text-xs text-slate-300 text-right truncate">{row.country}</div>
+                <div className="flex-1 bg-ink-900 rounded-full h-4 overflow-hidden">
+                  <div className={`h-full ${barColor} rounded-full transition-all duration-700`} style={{ width: `${pct}%` }} />
+                </div>
+                <div className="w-32 text-right text-xs text-slate-400">
+                  {row.count}
+                  <span className="text-slate-600 ml-1">({pct}%)</span>
+                  <span className="text-slate-600 ml-1.5">
+                    {row.members > 0 && row.mentors > 0
+                      ? `${row.members}M / ${row.mentors}mentor`
+                      : row.members > 0 ? `${row.members} members` : `${row.mentors} mentors`}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          <div className="text-xs text-slate-500 mt-1 text-right">{uniquePeople.total} unique people total</div>
         </div>
       )}
 

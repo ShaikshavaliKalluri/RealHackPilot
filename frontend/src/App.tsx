@@ -18,7 +18,7 @@ import { UserBadge } from './components/UserBadge';
 import { WinnersBanner } from './components/WinnersBanner';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
-type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | null;
+type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | 'unique_people' | null;
 type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics';
 
 export default function App() {
@@ -333,6 +333,8 @@ export default function App() {
           <StatCard
             label="Unique people"
             value={stats.total_unique_people}
+            onClick={() => setStatsPanel(statsPanel === 'unique_people' ? null : 'unique_people')}
+            active={statsPanel === 'unique_people'}
           />
           <StatCard
             label="Complete"
