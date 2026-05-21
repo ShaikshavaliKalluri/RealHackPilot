@@ -360,13 +360,15 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
     }
     const flagTypes = Object.entries(flagTypeCounts).sort((a, b) => b[1] - a[1]);
 
-    // Top 10 teams by AI score
+    // Top 10 teams by AI score; tiebreak by sum of axis scores
+    const AXIS_KEYS = ['genuineness', 'solution_clarity', 'business_value', 'novelty'] as const;
+    const axisSum = (t: Team) =>
+      AXIS_KEYS.reduce((s, k) => s + (Number((t.ai_scores as any)?.[k]?.score) || 0), 0);
     const top10 = [...teams]
       .filter((t) => (t.ai_scores?.overall as any)?.score != null)
       .sort((a, b) => {
-        const aScore = (a.ai_scores?.overall as any)?.score ?? 0;
-        const bScore = (b.ai_scores?.overall as any)?.score ?? 0;
-        return Number(bScore) - Number(aScore);
+        const diff = Number((b.ai_scores?.overall as any)?.score ?? 0) - Number((a.ai_scores?.overall as any)?.score ?? 0);
+        return diff !== 0 ? diff : axisSum(b) - axisSum(a);
       })
       .slice(0, 10);
 
