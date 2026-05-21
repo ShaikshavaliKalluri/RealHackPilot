@@ -16,6 +16,7 @@ import io
 from fastapi import FastAPI, File, HTTPException, UploadFile, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -204,8 +205,7 @@ async def upload_registrations(
 
     skipped = 0
     if replace:
-        db.query(models.Member).delete()
-        db.query(models.Team).delete()
+        db.execute(text("TRUNCATE TABLE members, teams RESTART IDENTITY CASCADE"))
         db.flush()
 
     teams = dicts_to_models(team_dicts)
