@@ -5,16 +5,15 @@
  * Outlook, which stripped HTML and dropped our CID-inlined logo. This module
  * gives the composer a real "Send" path: it acquires a Mail.Send scoped
  * access token via MSAL, attaches the branded wordmark PNG as a CID inline
- * attachment, and POSTs to graph.microsoft.com/.../sendMail.
+ * attachment, and POSTs to graph.microsoft.com/me/sendMail.
  *
- * The shared mailbox path (/users/RealHack@realpage.com/sendMail) is used
- * when sendAs is provided — the signed-in user must hold Send-As permission
- * on that mailbox at the Exchange layer. Falling back to /me/sendMail when
- * sendAs is null sends the email as the signed-in user themselves.
+ * Sender identity: emails go out from the signed-in user (e.g. the organizer
+ * running the composer). Sending via the RealHack@realpage.com shared mailbox
+ * would require the Mail.Send.Shared delegated scope, which our tenant
+ * doesn't grant on this app, so /me/sendMail is the path we use.
  */
 import { getGraphSendToken } from './auth';
 
-export const REALHACK_SEND_AS = 'RealHack@realpage.com';
 export const LOGO_CID = 'realhack-logo';
 
 let _logoBase64Cache: string | null = null;
@@ -59,8 +58,6 @@ export interface GraphSendOpts {
   to: string[];
   cc?: string[];
   bcc?: string[];
-  /** Shared mailbox to send AS. If null, sends from /me. */
-  sendAs?: string | null;
   /** Optional Reply-To override. */
   replyTo?: string[];
 }
@@ -107,9 +104,7 @@ export async function sendEmailViaGraph(opts: GraphSendOpts): Promise<void> {
     }
   }
 
-  const url = opts.sendAs
-    ? `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(opts.sendAs)}/sendMail`
-    : 'https://graph.microsoft.com/v1.0/me/sendMail';
+  const url = 'https://graph.microsoft.com/v1.0/me/sendMail';
 
   const r = await fetch(url, {
     method: 'POST',

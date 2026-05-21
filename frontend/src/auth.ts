@@ -28,12 +28,12 @@ const msalConfig: Configuration = {
 export const msalInstance = new PublicClientApplication(msalConfig);
 
 // Scopes we need at sign-in time. User.Read lets us call Graph /me to fetch
-// jobTitle/department for the header badge. Mail.Send is consented at login
-// so the dashboard can call Graph /sendMail directly for branded HTML emails
-// (with the CID-inlined RealHack wordmark) instead of handing off to Outlook
-// via mailto: links. Send-As on RealHack@realpage.com is enforced at the
-// Exchange layer for the signed-in user — Mail.Send just gives us a token
-// the browser can use to POST to /users/<shared>/sendMail.
+// jobTitle/department for the header badge. Mail.Send lets the dashboard
+// call Graph /me/sendMail directly for branded HTML emails (with the
+// CID-inlined RealHack wordmark). NOTE: Mail.Send only authorises sending
+// as the signed-in user — sending AS a shared mailbox would require
+// Mail.Send.Shared, which our tenant won't grant for this app, so the
+// dashboard sends from the organizer personally instead.
 export const loginRequest = {
   scopes: ['User.Read', 'Mail.Send'],
 };

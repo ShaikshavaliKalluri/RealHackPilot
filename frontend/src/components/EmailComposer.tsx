@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchEmailTemplates, renderEmails, appendCommLog, checkDuplicate, type EmailTemplate, type RenderedEmail } from '../api';
-import { sendEmailViaGraph, REALHACK_SEND_AS } from '../graphSend';
+import { sendEmailViaGraph } from '../graphSend';
 import type { Team } from '../types';
 
 interface Props {
@@ -222,7 +222,6 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
           to,
           cc: ccList.length ? ccList : undefined,
           bcc: bccList.length ? bccList : undefined,
-          sendAs: REALHACK_SEND_AS,
         });
         await logSend(email);
       } catch (e: unknown) {
@@ -529,12 +528,12 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                   onClick={sendAllViaGraph}
                   disabled={sending !== null}
                   className="text-xs px-3 py-1.5 rounded bg-sky-400 hover:bg-sky-300 disabled:opacity-50 disabled:cursor-not-allowed text-ink-950 font-bold transition flex items-center gap-1.5"
-                  title={`Send via Graph as ${REALHACK_SEND_AS} (branded HTML + logo)`}
+                  title="Send branded HTML email (with RealHack logo) from your account, via Graph"
                 >
                   <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
                     <path d="M2.94 4.94a1.5 1.5 0 011.78-.28l13.5 5.4a1.5 1.5 0 010 2.78l-13.5 5.4a1.5 1.5 0 01-2.14-1.66l1.5-5.4a.5.5 0 01.42-.37l7.31-1.04a.5.5 0 000-.99L4.5 7.74a.5.5 0 01-.42-.37l-1.5-5.4a1.5 1.5 0 01.36-1.43z" />
                   </svg>
-                  Send via RealHack
+                  Send branded
                 </button>
                 <button
                   onClick={() => {
@@ -578,7 +577,7 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                 <div className="bg-sky-500/10 border border-sky-500/30 rounded-lg p-3 text-xs space-y-1.5">
                   <div className="flex items-center justify-between text-slate-200">
                     <span className="font-semibold">
-                      Sending via RealHack@realpage.com — {sending.done} / {sending.total}
+                      Sending branded emails — {sending.done} / {sending.total}
                     </span>
                     {sending.done === sending.total && sending.errors.length === 0 && (
                       <span className="text-lime-300">All sent ✓</span>
