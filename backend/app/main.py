@@ -205,6 +205,25 @@ async def upload_registrations(
 
     skipped = 0
     if replace:
+        # Preserve AI scores and organizer-set fields keyed by external_id so
+        # they survive the re-upload (TRUNCATE wipes the table but the scores
+        # from a previous AI screening run should not be lost).
+        preserved: dict[str, dict] = {}
+        for existing in db.query(models.Team).all():
+            if existing.external_id:
+                preserved[existing.external_id] = {
+                    "ai_scores": existing.ai_scores,
+                    "judge_scores": existing.judge_scores,
+                    "advanced_to_round": existing.advanced_to_round,
+                    "final_position": existing.final_position,
+                    "presentation_uploaded": existing.presentation_uploaded,
+                    "repo_url": existing.repo_url,
+                    "repo_ready": existing.repo_ready,
+                    "repo_check_notes": existing.repo_check_notes,
+                    "has_teams_channel": existing.has_teams_channel,
+                    "teams_channel_id": existing.teams_channel_id,
+                    "teams_channel_created_at": existing.teams_channel_created_at,
+                }
         db.execute(text("TRUNCATE TABLE members, teams RESTART IDENTITY CASCADE"))
         db.flush()
 
@@ -220,6 +239,26 @@ async def upload_registrations(
         else:
             skipped += 1
     teams = unique_teams
+
+    # Restore preserved fields onto matching teams before inserting.
+    if replace and preserved:
+        for t in teams:
+            snap = preserved.get(t.external_id or "")
+            if snap:
+                if snap["ai_scores"]:
+                    t.ai_scores = snap["ai_scores"]
+                if snap["judge_scores"]:
+                    t.judge_scores = snap["judge_scores"]
+                t.advanced_to_round = snap["advanced_to_round"]
+                t.final_position = snap["final_position"]
+                t.presentation_uploaded = snap["presentation_uploaded"]
+                t.repo_url = snap["repo_url"]
+                t.repo_ready = snap["repo_ready"]
+                t.repo_check_notes = snap["repo_check_notes"]
+                t.has_teams_channel = snap["has_teams_channel"]
+                t.teams_channel_id = snap["teams_channel_id"]
+                t.teams_channel_created_at = snap["teams_channel_created_at"]
+
     for t in teams:
         db.add(t)
     db.flush()
