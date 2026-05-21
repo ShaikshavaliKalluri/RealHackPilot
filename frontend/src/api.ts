@@ -375,6 +375,28 @@ export async function fetchMe(): Promise<UserProfile> {
   return r.json();
 }
 
+/**
+ * Download the CSV export of all teams. Browser <a href> can't carry the
+ * MSAL Bearer token, so we authFetch as a blob and trigger a client-side
+ * download via a synthetic <a> click.
+ */
+export async function exportCsv(): Promise<void> {
+  const r = await authFetch(`${BASE}/export.csv`);
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    throw new Error(`Export failed (${r.status}): ${t.slice(0, 200)}`);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `realhack-teams-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // ===== Tournament progression =====
 
 export interface RoundSummary {

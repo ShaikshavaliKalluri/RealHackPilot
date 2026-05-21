@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
-import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, type LLMHealth, type AIScreenStatus, type UserProfile } from './api';
+import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, type LLMHealth, type AIScreenStatus, type UserProfile } from './api';
 import type { Team, DashboardStats } from './types';
 import { StatCard } from './components/StatCard';
 import { TeamCard } from './components/TeamCard';
@@ -178,13 +178,13 @@ export default function App() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <a
-            href="/api/export.csv"
+          <button
+            onClick={() => exportCsv().catch((e) => alert(`Export failed: ${e.message ?? e}`))}
             className="bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold px-3 py-2 rounded-lg text-sm transition whitespace-nowrap"
             title="Download teams + scores as CSV (opens in Excel)"
           >
             Export CSV
-          </a>
+          </button>
           <div className="flex gap-1 bg-ink-800/60 border border-slate-700/40 rounded-lg p-1">
             <button
               onClick={() => setMode('dashboard')}
