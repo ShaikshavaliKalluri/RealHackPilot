@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import type { Team } from '../types';
 import { FlagBadge } from './FlagBadge';
 import { AIScoreBlock } from './AIScoreBlock';
 import { TeamReadiness } from './TeamReadiness';
+import { TeamEditModal } from './TeamEditModal';
 
 interface Props {
   team: Team;
@@ -12,11 +14,13 @@ interface Props {
 }
 
 export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Props) {
+  const [editOpen, setEditOpen] = useState(false);
   const pct = Math.round(team.completeness_score * 100);
   const completenessTone =
     pct >= 80 ? 'text-lime-300' : pct >= 50 ? 'text-amber-400' : 'text-rose-400';
 
   return (
+    <>
     <div
       onClick={onToggle}
       className={`bg-ink-800/60 border rounded-xl p-5 cursor-pointer transition select-none ${
@@ -80,6 +84,22 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
 
       {expanded && (
         <div className="mt-4 pt-4 border-t border-slate-700/40 space-y-4" onClick={(e) => e.stopPropagation()}>
+
+          <div className="flex justify-end">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditOpen(true);
+              }}
+              className="text-xs px-3 py-1 rounded-md border border-sky-500/40 hover:bg-sky-500/10 text-sky-200 transition flex items-center gap-1.5"
+              title="Update idea, mentor, or members (audit-logged)"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Edit team
+            </button>
+          </div>
 
           {team.ai_scores?.summary && (
             <div className="bg-lime-500/5 border border-lime-500/20 rounded-lg p-3">
@@ -188,5 +208,15 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
         </div>
       )}
     </div>
+    {editOpen && (
+      <TeamEditModal
+        team={team}
+        onClose={() => setEditOpen(false)}
+        onSaved={() => {
+          if (onReload) onReload();
+        }}
+      />
+    )}
+    </>
   );
 }

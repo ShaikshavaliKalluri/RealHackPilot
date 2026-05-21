@@ -241,6 +241,41 @@ class RoundSummary(BaseModel):
     scored_team_count: int    # how many of them have at least one judge score
 
 
+class TeamPatch(BaseModel):
+    """Partial-update payload for a team. Every field is optional — only
+    keys present in the request body are written. Audit log records the
+    optional `edit_reason`. Computed fields (completeness_score, flags,
+    ai_scores, advanced_to_round, final_position) are not editable here;
+    they have their own dedicated flows.
+    """
+    name: str | None = None
+    mentor_name: str | None = None
+    mentor_email: str | None = None
+    idea: str | None = None
+    tools: str | None = None
+    approach: str | None = None
+    viability: str | None = None
+    business_value: str | None = None
+    repo_url: str | None = None
+    edit_reason: str | None = None
+
+
+class MemberCreate(BaseModel):
+    name: str
+    email: str | None = None
+    location: str | None = None
+    tshirt_size: str | None = None
+    edit_reason: str | None = None
+
+
+class MemberPatch(BaseModel):
+    name: str | None = None
+    email: str | None = None
+    location: str | None = None
+    tshirt_size: str | None = None
+    edit_reason: str | None = None
+
+
 class EmailTemplateOut(BaseModel):
     id: str
     label: str

@@ -1,4 +1,4 @@
-import type { Team, DashboardStats, UploadResult } from './types';
+import type { Team, DashboardStats, UploadResult, Member } from './types';
 import { getAccessToken } from './auth';
 
 const BASE = '/api';
@@ -370,6 +370,74 @@ export async function updateReadiness(teamId: number, patch: { presentation_uplo
   });
   if (!r.ok) throw new Error(`Readiness update failed: ${r.status}`);
   return r.json();
+}
+
+// ===== Team / member edit (post-registration change requests) =====
+
+export interface TeamEditPatch {
+  name?: string;
+  mentor_name?: string | null;
+  mentor_email?: string | null;
+  idea?: string | null;
+  tools?: string | null;
+  approach?: string | null;
+  viability?: string | null;
+  business_value?: string | null;
+  repo_url?: string | null;
+  edit_reason?: string | null;
+}
+
+export interface MemberEditPayload {
+  name?: string;
+  email?: string | null;
+  location?: string | null;
+  tshirt_size?: string | null;
+  edit_reason?: string | null;
+}
+
+async function readErr(r: Response, fallback: string): Promise<string> {
+  try {
+    const body = await r.json();
+    if (body && typeof body.detail === 'string') return body.detail;
+  } catch {
+    /* not JSON — fall through */
+  }
+  return `${fallback} (${r.status})`;
+}
+
+export async function updateTeam(teamId: number, patch: TeamEditPatch): Promise<Team> {
+  const r = await authFetch(`${BASE}/teams/${teamId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) throw new Error(await readErr(r, 'Team update failed'));
+  return r.json();
+}
+
+export async function addTeamMember(teamId: number, payload: MemberEditPayload & { name: string }): Promise<Member> {
+  const r = await authFetch(`${BASE}/teams/${teamId}/members`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) throw new Error(await readErr(r, 'Add member failed'));
+  return r.json();
+}
+
+export async function updateMember(memberId: number, patch: MemberEditPayload): Promise<Member> {
+  const r = await authFetch(`${BASE}/members/${memberId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) throw new Error(await readErr(r, 'Member update failed'));
+  return r.json();
+}
+
+export async function deleteMember(memberId: number): Promise<void> {
+  const r = await authFetch(`${BASE}/members/${memberId}`, { method: 'DELETE' });
+  if (!r.ok) throw new Error(await readErr(r, 'Member delete failed'));
 }
 
 // ===== Auth (current user profile) =====

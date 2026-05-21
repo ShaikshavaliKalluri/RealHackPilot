@@ -47,6 +47,7 @@ from .schemas import (
     CommLogCreateRequest, RepoCheckOut, ReadinessFlagsRequest,
     ChatRequest, ChatResponse,
     RoundAdvanceRequest, WinnersSetRequest, RoundSummary,
+    TeamPatch, MemberCreate, MemberPatch, MemberOut,
 )
 
 
@@ -841,3 +842,170 @@ def update_readiness(team_id: int, req: ReadinessFlagsRequest, db: Session = Dep
     db.commit()
     db.refresh(team)
     return team
+
+
+# ===== Team / member edit (post-registration change requests) =====
+# Organizers use these to apply approved change requests against teams
+# whose MS Forms entry has already been finalized. Every change writes an
+# audit row via comms.log() with kind="team_edit" so we have a permanent
+# record of who edited what, when, and why.
+
+_EDITABLE_TEAM_FIELDS = (
+    "name", "mentor_name", "mentor_email", "idea", "tools",
+    "approach", "viability", "business_value", "repo_url",
+)
+
+
+def _signed_in_email(claims: dict) -> str | None:
+    return claims.get("preferred_username") or claims.get("upn") or claims.get("email")
+
+
+def _audit_team_edit(
+    db: Session, *, team_id: int, summary: str, reason: str | None, editor_email: str | None,
+) -> None:
+    body = summary if not reason else f"{summary}\nReason: {reason}"
+    comms.log(
+        db, team_id=team_id, kind="team_edit",
+        subject="Team data edited via dashboard",
+        body=body,
+        status="sent",
+        sent_by_email=editor_email,
+    )
+
+
+@app.patch("/api/teams/{team_id}", response_model=TeamOut)
+def patch_team(
+    team_id: int,
+    req: TeamPatch,
+    db: Session = Depends(get_db),
+    claims: dict = Depends(require_auth),
+) -> models.Team:
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+
+    changes: list[str] = []
+    for field in _EDITABLE_TEAM_FIELDS:
+        new_val = getattr(req, field)
+        if new_val is None:
+            continue
+        old_val = getattr(team, field)
+        # Normalise empty string → None for nullable text fields (everything
+        # except name, which is required).
+        normalised = new_val if field == "name" else (new_val or None)
+        if normalised != old_val:
+            old_display = old_val if old_val is not None else "(empty)"
+            new_display = normalised if normalised is not None else "(empty)"
+            changes.append(f"{field}: {old_display!r} -> {new_display!r}")
+            setattr(team, field, normalised)
+
+    if not changes:
+        # No-op patch: nothing changed, don't write an audit row.
+        return team
+
+    db.commit()
+    db.refresh(team)
+    _audit_team_edit(
+        db, team_id=team.id,
+        summary="Updated fields: " + "; ".join(changes),
+        reason=req.edit_reason,
+        editor_email=_signed_in_email(claims),
+    )
+    db.commit()
+    return team
+
+
+@app.post("/api/teams/{team_id}/members", response_model=MemberOut)
+def add_member(
+    team_id: int,
+    req: MemberCreate,
+    db: Session = Depends(get_db),
+    claims: dict = Depends(require_auth),
+) -> models.Member:
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+    if not (req.name or "").strip():
+        raise HTTPException(status_code=400, detail="name is required")
+
+    next_pos = max((m.position for m in team.members), default=-1) + 1
+    member = models.Member(
+        team_id=team.id,
+        name=req.name.strip(),
+        email=(req.email or "").strip() or None,
+        location=(req.location or "").strip() or None,
+        tshirt_size=(req.tshirt_size or "").strip() or None,
+        position=next_pos,
+    )
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+    _audit_team_edit(
+        db, team_id=team.id,
+        summary=f"Added member: {member.name} <{member.email or 'no-email'}>",
+        reason=req.edit_reason,
+        editor_email=_signed_in_email(claims),
+    )
+    db.commit()
+    return member
+
+
+@app.patch("/api/members/{member_id}", response_model=MemberOut)
+def patch_member(
+    member_id: int,
+    req: MemberPatch,
+    db: Session = Depends(get_db),
+    claims: dict = Depends(require_auth),
+) -> models.Member:
+    member = db.query(models.Member).get(member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="member not found")
+
+    changes: list[str] = []
+    for field in ("name", "email", "location", "tshirt_size"):
+        new_val = getattr(req, field)
+        if new_val is None:
+            continue
+        new_val = new_val.strip()
+        normalised = new_val if field == "name" else (new_val or None)
+        if field == "name" and not normalised:
+            raise HTTPException(status_code=400, detail="name cannot be blank")
+        old_val = getattr(member, field)
+        if normalised != old_val:
+            changes.append(f"{field}: {old_val!r} -> {normalised!r}")
+            setattr(member, field, normalised)
+
+    if not changes:
+        return member
+
+    db.commit()
+    db.refresh(member)
+    _audit_team_edit(
+        db, team_id=member.team_id,
+        summary=f"Updated member #{member.id} ({member.name}): " + "; ".join(changes),
+        reason=req.edit_reason,
+        editor_email=_signed_in_email(claims),
+    )
+    db.commit()
+    return member
+
+
+@app.delete("/api/members/{member_id}")
+def delete_member(
+    member_id: int,
+    db: Session = Depends(get_db),
+    claims: dict = Depends(require_auth),
+) -> dict:
+    member = db.query(models.Member).get(member_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="member not found")
+    team_id = member.team_id
+    summary = f"Removed member #{member.id} ({member.name} <{member.email or 'no-email'}>)"
+    db.delete(member)
+    db.commit()
+    _audit_team_edit(
+        db, team_id=team_id, summary=summary, reason=None,
+        editor_email=_signed_in_email(claims),
+    )
+    db.commit()
+    return {"deleted": True, "member_id": member_id}
