@@ -1034,6 +1034,35 @@ def _find_raw_value(raw: dict, *needles: str) -> str | None:
     return None
 
 
+def _raw_address_slots(raw: dict) -> list[str | None]:
+    """Return the mailing address columns from a raw row, sorted by their
+    MS Forms numeric suffix.
+
+    MS Forms names these columns:
+      "Enter your mailing address if you opted for US or PH as location"  → slot 0 (mentor)
+      "Enter your mailing address if you opted for US or PH as location2" → slot 1 (member 1)
+      "Enter your mailing address if you opted for US or PH as location6" → slot 5 (member 5)
+
+    Returns a list where index 0 = mentor, index N = member N (1-indexed position).
+    """
+    import re as _re
+
+    def _norm(s: str) -> str:
+        return _re.sub(r"\s+", " ", str(s or "").strip().lower())
+
+    found: list[tuple[int, str | None]] = []
+    for k, v in raw.items():
+        nk = _norm(k)
+        if ("mailing" in nk and "address" in nk) or "opted for us or ph" in nk:
+            m = _re.search(r"(\d+)\s*$", k.strip())
+            suffix = int(m.group(1)) if m else 1
+            val = str(v).strip() if v is not None else None
+            found.append((suffix, val if val else None))
+
+    found.sort(key=lambda x: x[0])
+    return [v for _, v in found]
+
+
 @app.post("/api/admin/backfill-mentor-locations")
 def backfill_mentor_locations(
     db: Session = Depends(get_db),
@@ -1069,26 +1098,30 @@ def backfill_mentor_locations(
             if ts:
                 t.mentor_tshirt_size = ts
                 tshirts_set += 1
+        # Mailing addresses — MS Forms uses unnamed repeated columns with
+        # numeric suffixes (no suffix = slot 0 = mentor; suffix N = member N).
+        addr_slots = _raw_address_slots(t.raw)
         if not t.mentor_address:
+            # Try explicit named column first, then slot 0
             addr = (
                 _find_raw_value(t.raw, "mentor", "mailing", "address")
                 or _find_raw_value(t.raw, "mentor", "address")
+                or (addr_slots[0] if addr_slots else None)
             )
             if addr:
                 t.mentor_address = addr
                 mentor_addresses_set += 1
-        # Per-member addresses — the raw blob has the whole row, with
-        # columns like "Member 1 mailing address" / "Member 2 mailing
-        # address". We match by position.
         for m in t.members:
             if m.address:
                 continue
-            pos = m.position
+            pos = m.position  # 1-indexed slot
+            # Try named column first, then positional slot
             addr = (
                 _find_raw_value(t.raw, f"member {pos}", "mailing", "address")
                 or _find_raw_value(t.raw, f"member{pos}", "mailing", "address")
                 or _find_raw_value(t.raw, f"member {pos}", "address")
                 or _find_raw_value(t.raw, f"member{pos}", "address")
+                or (addr_slots[pos] if pos < len(addr_slots) else None)
             )
             if addr:
                 m.address = addr

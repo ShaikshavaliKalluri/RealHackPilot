@@ -57,13 +57,21 @@ def parse_workbook(path: str) -> list[dict]:
     col_mentor_email = _find_col(headers, "mentor", "email")
     col_mentor_location = _find_col(headers, "mentor", "location")
     col_mentor_tshirt = _find_col(headers, "mentor", "shirt")
-    # Mailing address — captured by the MS Forms column
-    # "Enter your mailing address if you opted for US or PH as location"
-    # (and a mentor-tagged variant when the form includes it).
+    # Mailing address — MS Forms repeats the question once per slot with
+    # numeric suffixes: no suffix = mentor slot, "2" = member 1, "6" = member 5.
+    # Primary: try an explicitly tagged column; fallback: first "opted" column.
     col_mentor_address = (
         _find_col(headers, "mentor", "mailing", "address")
         or _find_col(headers, "mentor", "address")
     )
+    if col_mentor_address is None:
+        # Take the column immediately after the mentor tshirt or location col,
+        # if it looks like an address field.
+        _ref = col_mentor_tshirt or col_mentor_location
+        if _ref is not None and _ref + 1 < len(headers):
+            _ch = _norm(headers[_ref + 1])
+            if "address" in _ch or "mailing" in _ch or "opted" in _ch:
+                col_mentor_address = _ref + 1
 
     # Idea/approach fields
     col_idea = _find_col(headers, "idea") or _find_col(headers, "problem statement")
@@ -103,6 +111,14 @@ def parse_workbook(path: str) -> list[dict]:
             or _find_col(headers, f"member {n}", "address")
             or _find_col(headers, f"member{n}", "address")
         )
+        # Positional fallback: the address column sits immediately after the
+        # location column ("Enter your mailing address if you opted for US or PH").
+        if address_idx is None and location_idx is not None:
+            _candidate = location_idx + 1
+            if _candidate < len(headers):
+                _ch = _norm(headers[_candidate])
+                if "address" in _ch or "mailing" in _ch or "opted" in _ch:
+                    address_idx = _candidate
 
         # 2024 fallback: columns immediately after the teammate name are
         # Location and T-shirt Size for that teammate.
