@@ -171,16 +171,11 @@ export default function App() {
       <header className="mb-6 pb-5 border-b border-slate-800/60">
         <div className="flex items-center justify-between gap-6 mb-5">
           {/* Brand: official RealHack wordmark */}
-          <div className="flex items-center gap-3">
-            <img
-              src="/realhack-logo.png"
-              alt="RealHack 2026"
-              className="h-10 -ml-1"
-            />
-            <span className="hidden md:inline-block text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 bg-slate-800/60 border border-slate-700/40 rounded-md text-slate-400">
-              Internal Tool
-            </span>
-          </div>
+          <img
+            src="/realhack-logo.png"
+            alt="RealHack 2026"
+            className="h-14 -ml-1"
+          />
 
           {/* Controls */}
           <div className="flex items-center gap-2 shrink-0">
