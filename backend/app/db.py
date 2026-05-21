@@ -72,6 +72,14 @@ def lightweight_migrate() -> None:
         additions.append("ALTER TABLE teams ADD COLUMN mentor_location VARCHAR(64)")
     if "mentor_tshirt_size" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN mentor_tshirt_size VARCHAR(16)")
+    if "mentor_address" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN mentor_address TEXT")
+
+    # Members table — same idempotent shape.
+    if "members" in insp.get_table_names():
+        member_existing = {c["name"] for c in insp.get_columns("members")}
+        if "address" not in member_existing:
+            additions.append("ALTER TABLE members ADD COLUMN address TEXT")
     if additions:
         with engine.begin() as conn:
             for sql in additions:

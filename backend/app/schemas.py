@@ -9,6 +9,7 @@ class MemberOut(BaseModel):
     email: str | None = None
     location: str | None = None
     tshirt_size: str | None = None
+    address: str | None = None
     position: int = 0
 
 
@@ -21,6 +22,7 @@ class TeamOut(BaseModel):
     mentor_email: str | None = None
     mentor_location: str | None = None
     mentor_tshirt_size: str | None = None
+    mentor_address: str | None = None
     idea: str | None = None
     tools: str | None = None
     approach: str | None = None
@@ -255,6 +257,7 @@ class TeamPatch(BaseModel):
     mentor_email: str | None = None
     mentor_location: str | None = None
     mentor_tshirt_size: str | None = None
+    mentor_address: str | None = None
     idea: str | None = None
     tools: str | None = None
     approach: str | None = None
@@ -269,6 +272,7 @@ class MemberCreate(BaseModel):
     email: str | None = None
     location: str | None = None
     tshirt_size: str | None = None
+    address: str | None = None
     edit_reason: str | None = None
 
 
@@ -277,6 +281,7 @@ class MemberPatch(BaseModel):
     email: str | None = None
     location: str | None = None
     tshirt_size: str | None = None
+    address: str | None = None
     edit_reason: str | None = None
 
 

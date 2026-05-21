@@ -57,6 +57,13 @@ def parse_workbook(path: str) -> list[dict]:
     col_mentor_email = _find_col(headers, "mentor", "email")
     col_mentor_location = _find_col(headers, "mentor", "location")
     col_mentor_tshirt = _find_col(headers, "mentor", "shirt")
+    # Mailing address — captured by the MS Forms column
+    # "Enter your mailing address if you opted for US or PH as location"
+    # (and a mentor-tagged variant when the form includes it).
+    col_mentor_address = (
+        _find_col(headers, "mentor", "mailing", "address")
+        or _find_col(headers, "mentor", "address")
+    )
 
     # Idea/approach fields
     col_idea = _find_col(headers, "idea") or _find_col(headers, "problem statement")
@@ -90,6 +97,12 @@ def parse_workbook(path: str) -> list[dict]:
             _find_col(headers, f"member {n}", "location")
             or _find_col(headers, f"member{n}", "location")
         )
+        address_idx = (
+            _find_col(headers, f"member {n}", "mailing", "address")
+            or _find_col(headers, f"member{n}", "mailing", "address")
+            or _find_col(headers, f"member {n}", "address")
+            or _find_col(headers, f"member{n}", "address")
+        )
 
         # 2024 fallback: columns immediately after the teammate name are
         # Location and T-shirt Size for that teammate.
@@ -105,7 +118,13 @@ def parse_workbook(path: str) -> list[dict]:
                     tshirt_idx = candidate
 
         members_meta.append(
-            {"name": name_idx, "email": email_idx, "tshirt": tshirt_idx, "location": location_idx}
+            {
+                "name": name_idx,
+                "email": email_idx,
+                "tshirt": tshirt_idx,
+                "location": location_idx,
+                "address": address_idx,
+            }
         )
 
     out: list[dict] = []
@@ -128,6 +147,7 @@ def parse_workbook(path: str) -> list[dict]:
                     "email": _val(r, meta["email"]),
                     "location": _val(r, meta["location"]),
                     "tshirt_size": _val(r, meta["tshirt"]),
+                    "address": _val(r, meta["address"]),
                     "position": slot,
                 }
             )
@@ -144,6 +164,9 @@ def parse_workbook(path: str) -> list[dict]:
                 "name": str(team_name),
                 "mentor_name": _val(r, col_mentor_name),
                 "mentor_email": _val(r, col_mentor_email),
+                "mentor_location": _val(r, col_mentor_location),
+                "mentor_tshirt_size": _val(r, col_mentor_tshirt),
+                "mentor_address": _val(r, col_mentor_address),
                 "idea": _val(r, col_idea),
                 "tools": _val(r, col_tools),
                 "approach": _val(r, col_approach),
@@ -165,6 +188,9 @@ def dicts_to_models(team_dicts: Iterable[dict]) -> list[Team]:
             name=d["name"],
             mentor_name=d.get("mentor_name"),
             mentor_email=d.get("mentor_email"),
+            mentor_location=d.get("mentor_location"),
+            mentor_tshirt_size=d.get("mentor_tshirt_size"),
+            mentor_address=d.get("mentor_address"),
             idea=d.get("idea"),
             tools=d.get("tools"),
             approach=d.get("approach"),
@@ -180,6 +206,7 @@ def dicts_to_models(team_dicts: Iterable[dict]) -> list[Team]:
                     email=m.get("email"),
                     location=m.get("location"),
                     tshirt_size=m.get("tshirt_size"),
+                    address=m.get("address"),
                     position=m.get("position", 0),
                 )
             )

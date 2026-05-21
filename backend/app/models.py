@@ -17,6 +17,10 @@ class Team(Base):
     # short-list when editing a team via the dashboard ("Other" → free text).
     mentor_location: Mapped[str | None] = mapped_column(String(64))
     mentor_tshirt_size: Mapped[str | None] = mapped_column(String(16))
+    # Mailing address for swag shipping (US/PH members only — India members
+    # receive swag at the office). Captured by the MS Forms column
+    # "Enter your mailing address if you opted for US or PH as location".
+    mentor_address: Mapped[str | None] = mapped_column(Text)
     idea: Mapped[str | None] = mapped_column(Text)
     tools: Mapped[str | None] = mapped_column(Text)
     approach: Mapped[str | None] = mapped_column(Text)
@@ -61,6 +65,9 @@ class Member(Base):
     email: Mapped[str | None] = mapped_column(String(255), index=True)
     location: Mapped[str | None] = mapped_column(String(64))
     tshirt_size: Mapped[str | None] = mapped_column(String(16))
+    # Mailing address for swag shipping (US/PH members only). Long-text so
+    # it can hold multi-line postal addresses without truncation.
+    address: Mapped[str | None] = mapped_column(Text)
     position: Mapped[int] = mapped_column(default=0)
 
     team: Mapped["Team"] = relationship(back_populates="members")

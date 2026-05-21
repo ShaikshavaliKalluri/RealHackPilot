@@ -852,6 +852,7 @@ def update_readiness(team_id: int, req: ReadinessFlagsRequest, db: Session = Dep
 
 _EDITABLE_TEAM_FIELDS = (
     "name", "mentor_name", "mentor_email", "mentor_location", "mentor_tshirt_size",
+    "mentor_address",
     "idea", "tools", "approach", "viability", "business_value", "repo_url",
 )
 
@@ -935,6 +936,7 @@ def add_member(
         email=(req.email or "").strip() or None,
         location=(req.location or "").strip() or None,
         tshirt_size=(req.tshirt_size or "").strip() or None,
+        address=(req.address or "").strip() or None,
         position=next_pos,
     )
     db.add(member)
@@ -962,7 +964,7 @@ def patch_member(
         raise HTTPException(status_code=404, detail="member not found")
 
     changes: list[str] = []
-    for field in ("name", "email", "location", "tshirt_size"):
+    for field in ("name", "email", "location", "tshirt_size", "address"):
         new_val = getattr(req, field)
         if new_val is None:
             continue
@@ -988,6 +990,95 @@ def patch_member(
     )
     db.commit()
     return member
+
+
+def _find_raw_value(raw: dict, *needles: str) -> str | None:
+    """Backfill helper — find the first JSON value whose key contains ALL
+    given substrings (case-insensitive). Mirrors importer._find_col so the
+    same matching logic applies post-hoc to the stored `raw` blob.
+    """
+    import re as _re
+    def _norm(s: str) -> str:
+        return _re.sub(r"\s+", " ", str(s or "").strip().lower())
+    for k, v in raw.items():
+        nk = _norm(k)
+        if all(_norm(n) in nk for n in needles):
+            if v is None:
+                return None
+            s = str(v).strip()
+            return s if s else None
+    return None
+
+
+@app.post("/api/admin/backfill-mentor-locations")
+def backfill_mentor_locations(
+    db: Session = Depends(get_db),
+    claims: dict = Depends(require_auth),
+) -> dict:
+    """One-shot: read each Team.raw and populate mentor_location /
+    mentor_tshirt_size / mentor_address / member.address for records
+    where those columns are blank.
+
+    Useful after the importer fix lands: older registrations imported
+    before these fields were captured still have NULL in the columns,
+    but the original Excel row sits in the `raw` JSON blob — so we can
+    recover the values without a re-upload (which would wipe organizer
+    edits made on the dashboard).
+    """
+    teams = db.query(models.Team).all()
+    locations_set = 0
+    tshirts_set = 0
+    mentor_addresses_set = 0
+    member_addresses_set = 0
+    examined = 0
+    for t in teams:
+        if not isinstance(t.raw, dict) or not t.raw:
+            continue
+        examined += 1
+        if not t.mentor_location:
+            loc = _find_raw_value(t.raw, "mentor", "location")
+            if loc:
+                t.mentor_location = loc
+                locations_set += 1
+        if not t.mentor_tshirt_size:
+            ts = _find_raw_value(t.raw, "mentor", "shirt")
+            if ts:
+                t.mentor_tshirt_size = ts
+                tshirts_set += 1
+        if not t.mentor_address:
+            addr = (
+                _find_raw_value(t.raw, "mentor", "mailing", "address")
+                or _find_raw_value(t.raw, "mentor", "address")
+            )
+            if addr:
+                t.mentor_address = addr
+                mentor_addresses_set += 1
+        # Per-member addresses — the raw blob has the whole row, with
+        # columns like "Member 1 mailing address" / "Member 2 mailing
+        # address". We match by position.
+        for m in t.members:
+            if m.address:
+                continue
+            pos = m.position
+            addr = (
+                _find_raw_value(t.raw, f"member {pos}", "mailing", "address")
+                or _find_raw_value(t.raw, f"member{pos}", "mailing", "address")
+                or _find_raw_value(t.raw, f"member {pos}", "address")
+                or _find_raw_value(t.raw, f"member{pos}", "address")
+            )
+            if addr:
+                m.address = addr
+                member_addresses_set += 1
+    db.commit()
+    return {
+        "teams_total": len(teams),
+        "teams_with_raw": examined,
+        "mentor_locations_set": locations_set,
+        "mentor_tshirt_sizes_set": tshirts_set,
+        "mentor_addresses_set": mentor_addresses_set,
+        "member_addresses_set": member_addresses_set,
+        "performed_by": _signed_in_email(claims),
+    }
 
 
 @app.delete("/api/members/{member_id}")

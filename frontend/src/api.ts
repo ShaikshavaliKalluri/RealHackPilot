@@ -446,6 +446,20 @@ export async function deleteMember(memberId: number): Promise<void> {
   if (!r.ok) throw new Error(await readErr(r, 'Member delete failed'));
 }
 
+export interface BackfillMentorResult {
+  teams_total: number;
+  teams_with_raw: number;
+  mentor_locations_set: number;
+  mentor_tshirt_sizes_set: number;
+  performed_by: string | null;
+}
+
+export async function backfillMentorLocations(): Promise<BackfillMentorResult> {
+  const r = await authFetch(`${BASE}/admin/backfill-mentor-locations`, { method: 'POST' });
+  if (!r.ok) throw new Error(await readErr(r, 'Backfill failed'));
+  return r.json();
+}
+
 // ===== Auth (current user profile) =====
 
 export interface UserProfile {

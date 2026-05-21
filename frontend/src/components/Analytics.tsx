@@ -1,10 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { Team, DashboardStats } from '../types';
+import { backfillMentorLocations } from '../api';
 
 interface Props {
   teams: Team[];
   stats: DashboardStats;
   onJumpToTeam: (teamId: number) => void;
+  onReload?: () => void;
 }
 
 // Pretty-print the location field used internally (lowercase enum-ish) for
@@ -133,7 +135,28 @@ function LocationBars({
   );
 }
 
-export function Analytics({ teams, stats, onJumpToTeam }: Props) {
+export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
+  // One-shot backfill: pull mentor_location / mentor_tshirt_size from each
+  // team's stored `raw` JSON for teams imported before those columns were
+  // captured. Reloads the parent on success so the chart re-renders.
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
+  const handleBackfill = async () => {
+    setBackfillBusy(true);
+    setBackfillMsg(null);
+    try {
+      const r = await backfillMentorLocations();
+      setBackfillMsg(
+        `Recovered ${r.mentor_locations_set} mentor location${r.mentor_locations_set === 1 ? '' : 's'} ` +
+        `and ${r.mentor_tshirt_sizes_set} t-shirt size${r.mentor_tshirt_sizes_set === 1 ? '' : 's'} from form data.`,
+      );
+      if (onReload) onReload();
+    } catch (e: unknown) {
+      setBackfillMsg(`Backfill failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
   const derived = useMemo(() => {
     // ===== Dual-role detection =====
     // First pass: build an email -> first matching member row, used as the
@@ -407,6 +430,19 @@ export function Analytics({ teams, stats, onJumpToTeam }: Props) {
               ⚠ {derived.dualRoleEmails.size} mentor{derived.dualRoleEmails.size === 1 ? '' : 's'} also listed as a team member.
             </div>
           )}
+          <div className="mt-3 pt-3 border-t border-slate-700/30 flex flex-col gap-1">
+            <button
+              onClick={handleBackfill}
+              disabled={backfillBusy}
+              className="self-start text-[11px] px-2.5 py-1 rounded-md border border-sky-500/40 hover:bg-sky-500/10 text-sky-300 disabled:opacity-50 transition"
+              title="Read mentor location + t-shirt from each team's original form data (one-shot, safe to re-run)"
+            >
+              {backfillBusy ? 'Backfilling…' : 'Backfill from form data'}
+            </button>
+            {backfillMsg && (
+              <div className="text-[11px] text-slate-400">{backfillMsg}</div>
+            )}
+          </div>
         </Section>
 
         <Section title="Team member location distribution">
