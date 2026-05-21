@@ -69,6 +69,15 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 # Pace between sends — see module docstring.
 INTER_SEND_DELAY_SEC = 1.5
 
+# Organizer mailboxes that get CC'd on every team-facing email so the
+# RealHack team has a shared audit trail in Outlook. Skipped in --to test
+# mode so previews don't spam them. Disable with --no-organizer-cc.
+ORGANIZER_CC = [
+    "RealHack@realpage.com",
+    "Suneel.Nallu@RealPage.com",
+    "bhaskar.jaddu@RealPage.com",
+]
+
 
 # ===== Output helpers =====
 
@@ -208,6 +217,22 @@ def main() -> int:
         action="store_true",
         help="CC the signed-in organizer on each send for audit trail.",
     )
+    parser.add_argument(
+        "--to",
+        default="",
+        help=(
+            "Override recipient address(es) — comma-separated. Sends every "
+            "rendered message to this address instead of the real team members. "
+            "Useful for previewing a template against your own inbox before a "
+            "bulk send. CommLog rows are NOT written in this mode and the "
+            "ORGANIZER_CC list is suppressed."
+        ),
+    )
+    parser.add_argument(
+        "--no-organizer-cc",
+        action="store_true",
+        help="Suppress the default ORGANIZER_CC list (RealHack@, Suneel, Bhaskar).",
+    )
     args = parser.parse_args()
 
     template = next((t for t in TEMPLATES if t.id == args.template), None)
@@ -217,12 +242,15 @@ def main() -> int:
         return 1
 
     only_names = [s.strip() for s in args.only.split(",") if s.strip()] if args.only else None
+    to_override = [s.strip() for s in args.to.split(",") if s.strip()] if args.to else None
 
     print()
     hr("#")
     print(f"# RealHack Pilot — email send: {template.label}")
     if args.dry_run:
         print("# DRY RUN — no Graph calls, no CommLog writes")
+    if to_override:
+        print(f"# TEST MODE (--to) — recipients overridden; no CommLog writes")
     hr("#")
     print()
     info(f"Template:  {template.id}")
@@ -231,10 +259,20 @@ def main() -> int:
         info(f"From:      {MAIL_FROM}   (Send-As; requires Exchange permission on this mailbox)")
     else:
         info("From:      signed-in user (GRAPH_MAIL_FROM is empty)")
+    # Decide the standing CC list once for the whole run.
+    organizer_cc_active = bool(ORGANIZER_CC) and not args.no_organizer_cc and not to_override
+    if organizer_cc_active:
+        info(f"CC:        {', '.join(ORGANIZER_CC)}   (standing organizer list)")
+    elif to_override:
+        info("CC:        (suppressed in --to test mode)")
+    elif args.no_organizer_cc:
+        info("CC:        (suppressed via --no-organizer-cc)")
     if args.cc_organizer:
-        info("CC:        signed-in organizer on every message")
+        info("CC:        + signed-in organizer on every message")
     if only_names:
         info(f"Filter:    {only_names}")
+    if to_override:
+        info(f"To override: {to_override}   (real team recipients replaced)")
 
     # Render
     with SessionLocal() as s:
@@ -277,8 +315,12 @@ def main() -> int:
         for r in rendered:
             hr("-")
             print(f"Team: {r['team_name']}  (audience: {r['audience']})")
-            recipients = [e for e in r["to"] if e]
-            info(f"To:       {', '.join(recipients) if recipients else '(none)'}")
+            real_recipients = [e for e in r["to"] if e]
+            recipients = to_override if to_override else real_recipients
+            if to_override:
+                info(f"To:       {', '.join(recipients)}   (override; real → {', '.join(real_recipients) or '(none)'})")
+            else:
+                info(f"To:       {', '.join(recipients) if recipients else '(none)'}")
             info(f"Subject:  {r['subject']}")
 
             if not recipients:
@@ -314,15 +356,18 @@ def main() -> int:
 
             if status in (200, 202, 204):
                 ok(f"sent ({status})")
-                write_log(
-                    team_id=r["team_id"],
-                    template_id=template.id,
-                    subject=r["subject"],
-                    body=r["body"],
-                    recipients=recipients,
-                    status="sent",
-                    sent_by_email=signed_in_email,
-                )
+                if not to_override:
+                    # Skip audit log writes in --to test mode so previews
+                    # don't pollute the team's communication history.
+                    write_log(
+                        team_id=r["team_id"],
+                        template_id=template.id,
+                        subject=r["subject"],
+                        body=r["body"],
+                        recipients=real_recipients,
+                        status="sent",
+                        sent_by_email=signed_in_email,
+                    )
                 sent += 1
             else:
                 err(f"send failed for '{r['team_name']}' ({status}): {resp_text}")
