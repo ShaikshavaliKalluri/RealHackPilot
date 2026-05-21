@@ -32,7 +32,11 @@ export function UserBadge({ user }: Props) {
 
   const handleLogout = () => {
     setOpen(false);
+    // Pass `account` so Microsoft skips its "Pick an account to sign out of"
+    // picker and sends the user straight back to our login page.
+    const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0];
     instance.logoutRedirect({
+      account,
       postLogoutRedirectUri: window.location.origin,
     }).catch((e) => {
       console.error('Logout failed', e);
