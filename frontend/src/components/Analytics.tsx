@@ -245,10 +245,16 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
     // ===== T-shirt sizing — dedupe by email, members + mentors, everyone
     //       included (people who didn't fill in a size get "No response").
     //       Chart counts are computed here too so they match the CSV exactly.
+    const SHIPPING_LOCS = new Set(['us', 'united states', 'philippines']);
+    const isShipping = (loc: string | null | undefined) =>
+      SHIPPING_LOCS.has((loc ?? '').trim().toLowerCase());
+
     const tshirtCsvRows: (string | number | null | undefined)[][] = [];
     const tshirtSeen = new Set<string>();
     const tshirtSizeMap: Record<string, number> = {};
     let tshirtNoResponse = 0;
+    let missingAddressCount = 0;
+    const missingAddressSeen = new Set<string>();
     for (const t of teams) {
       for (const m of t.members) {
         const key = (m.email || `${t.id}:${m.name}`).toLowerCase();
@@ -259,6 +265,12 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
         } else {
           tshirtSizeMap[m.tshirt_size] = (tshirtSizeMap[m.tshirt_size] || 0) + 1;
         }
+        const needsAddr = isShipping(m.location);
+        const missingAddr = needsAddr && !(m.address && m.address.trim());
+        if (missingAddr && !missingAddressSeen.has(key)) {
+          missingAddressSeen.add(key);
+          missingAddressCount++;
+        }
         tshirtCsvRows.push([
           t.name,
           m.name,
@@ -268,6 +280,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
           prettyLocation(m.location),
           m.tshirt_size || 'No response',
           'Member',
+          missingAddr ? 'Yes' : '',
         ]);
       }
       const mentorKey = (t.mentor_email || t.mentor_name || '').trim().toLowerCase();
@@ -278,6 +291,12 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
         } else {
           tshirtSizeMap[t.mentor_tshirt_size] = (tshirtSizeMap[t.mentor_tshirt_size] || 0) + 1;
         }
+        const mentorNeedsAddr = isShipping(t.mentor_location);
+        const mentorMissingAddr = mentorNeedsAddr && !(t.mentor_address && t.mentor_address.trim());
+        if (mentorMissingAddr && !missingAddressSeen.has(mentorKey)) {
+          missingAddressSeen.add(mentorKey);
+          missingAddressCount++;
+        }
         tshirtCsvRows.push([
           t.name,
           t.mentor_name ?? '',
@@ -287,6 +306,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
           prettyLocation(t.mentor_location),
           t.mentor_tshirt_size || 'No response',
           'Mentor',
+          mentorMissingAddr ? 'Yes' : '',
         ]);
       }
     }
@@ -381,7 +401,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
       locations, locationTotal,
       memberLocations, memberLocationTotal, memberCsvRows,
       mentorLocations, mentorLocationTotal, mentorCsvRows,
-      tshirtCsvRows, tshirtNoResponse,
+      tshirtCsvRows, tshirtNoResponse, missingAddressCount,
       tshirtSizesFromData, tshirtTotalFromData,
       dualRoleEmails,
       compBuckets,
@@ -472,7 +492,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
             label="Export to Excel"
             onClick={() => downloadCsv(
               'realhack-2026_tshirt-sizes.csv',
-              ['Team Name', 'Name', 'Email', 'Location', 'Address', 'Country', 'T-shirt Size', 'Role'],
+              ['Team Name', 'Name', 'Email', 'Location', 'Address', 'Country', 'T-shirt Size', 'Role', 'Missing Address (US/PH)'],
               derived.tshirtCsvRows,
             )}
           />
@@ -489,6 +509,11 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
               <div className="text-xs text-slate-500 mt-1 text-right">
                 {derived.tshirtTotalFromData + derived.tshirtNoResponse} total · {derived.tshirtNoResponse} no response
               </div>
+              {derived.missingAddressCount > 0 && (
+                <div className="text-[11px] text-amber-300 mt-1.5">
+                  ⚠ {derived.missingAddressCount} US/Philippines participant{derived.missingAddressCount === 1 ? '' : 's'} missing shipping address — check &quot;Export to Excel&quot; for details.
+                </div>
+              )}
             </div>
           )}
           <div className="mt-3 pt-3 border-t border-slate-700/30 flex flex-col gap-1">

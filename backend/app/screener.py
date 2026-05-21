@@ -26,6 +26,8 @@ PLACEHOLDERS = {"", "tbd", "na", "n/a", "none", "-", "pending", "to be decided",
 VALID_LOCATIONS = {"us", "india", "philippines", "canada", "uk", "romania", "mexico"}
 VALID_TSHIRT = {"s", "m", "l", "xl", "xxl", "xxxl"}
 MENTOR_MAX_TEAMS = 2
+# Locations where the MS Forms asked participants to supply a mailing address.
+SHIPPING_LOCATIONS = {"us", "philippines"}
 
 # Email-shape rules. We don't try to enforce strict RFC 5322 — we just catch
 # the patterns that empirically don't resolve in RealPage's AD:
@@ -145,14 +147,19 @@ def _team_flags(team: Team) -> list[str]:
             flags.append(f"missing_location:{m.name}")
         elif m.location.strip().lower() not in VALID_LOCATIONS:
             flags.append(f"bad_location:{m.name}")
+        elif m.location.strip().lower() in SHIPPING_LOCATIONS and not (m.address and m.address.strip()):
+            flags.append(f"missing_address:{m.name}")
         if m.tshirt_size and m.tshirt_size.strip().upper() not in {x.upper() for x in VALID_TSHIRT}:
             flags.append(f"bad_tshirt:{m.name}")
 
-    # Mentor email too
+    # Mentor email + missing address check
     if team.mentor_email:
         issue = _email_issue(team.mentor_email)
         if issue:
             flags.append(f"bad_mentor_email:{issue}:{team.mentor_email}")
+    if team.mentor_location and team.mentor_location.strip().lower() in SHIPPING_LOCATIONS:
+        if not (team.mentor_address and team.mentor_address.strip()):
+            flags.append(f"missing_address:{team.mentor_name or 'mentor'}")
 
     return flags
 

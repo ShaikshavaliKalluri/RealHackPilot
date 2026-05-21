@@ -8,6 +8,7 @@ const toneFor = (flag: string): string => {
   if (flag.startsWith('low_quality')) return 'bg-orange-500/15 text-orange-300 border-orange-500/40';
   if (flag.startsWith('missing_location')) return 'bg-sky-500/15 text-sky-300 border-sky-500/40';
   if (flag.startsWith('bad_location')) return 'bg-sky-500/15 text-sky-300 border-sky-500/40';
+  if (flag.startsWith('missing_address')) return 'bg-amber-500/15 text-amber-300 border-amber-500/40';
   if (flag.startsWith('bad_tshirt')) return 'bg-violet-500/15 text-violet-300 border-violet-500/40';
   if (flag.startsWith('team_too_')) return 'bg-rose-500/15 text-rose-300 border-rose-500/40';
   if (flag.startsWith('team_name_is_member')) return 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/40';
@@ -45,6 +46,7 @@ const labelFor = (flag: string): string => {
     case 'mentor_overloaded': return `Mentor overloaded (${detail})`;
     case 'missing_location': return `Missing location: ${detail}`;
     case 'bad_location': return `Bad location: ${detail}`;
+    case 'missing_address': return `Missing shipping address: ${detail}`;
     case 'bad_tshirt': return `Bad t-shirt: ${detail}`;
     case 'team_too_small': return `Team too small (${detail})`;
     case 'team_too_large': return `Team too large (${detail})`;
