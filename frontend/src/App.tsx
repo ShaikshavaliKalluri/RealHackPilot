@@ -316,7 +316,7 @@ export default function App() {
         const completeCount = teams.filter((t) => t.completeness_score >= 0.8).length;
         const incompleteCount = teams.length - completeCount;
         return (
-        <section className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4 mb-6">
+        <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-4 mb-6">
           <StatCard label="Teams" value={stats.total_teams} />
           <StatCard
             label="Mentors"
@@ -329,6 +329,10 @@ export default function App() {
             value={uniqueMembers.size}
             onClick={() => setStatsPanel(statsPanel === 'all_participants' ? null : 'all_participants')}
             active={statsPanel === 'all_participants'}
+          />
+          <StatCard
+            label="Unique people"
+            value={stats.total_unique_people}
           />
           <StatCard
             label="Complete"

@@ -139,8 +139,20 @@ def stats(db: Session = Depends(get_db)) -> DashboardStats:
 
     locations: Counter[str] = Counter()
     sizes: Counter[str] = Counter()
+    # Deduped people: lowercased email if available, else lowercased name.
+    # This is what the dashboard's "Total unique people" tile reports — a
+    # person who appears as both a mentor and a team member only counts once.
+    unique_people: set[str] = set()
     for t in teams:
+        if t.mentor_email:
+            unique_people.add(t.mentor_email.strip().lower())
+        elif t.mentor_name:
+            unique_people.add(t.mentor_name.strip().lower())
         for m in t.members:
+            if m.email:
+                unique_people.add(m.email.strip().lower())
+            elif m.name:
+                unique_people.add(m.name.strip().lower())
             if m.location:
                 locations[str(m.location).strip()] += 1
             if m.tshirt_size:
@@ -164,6 +176,7 @@ def stats(db: Session = Depends(get_db)) -> DashboardStats:
         multi_team_mentors=multi_mentor_count,
         locations=dict(locations),
         tshirt_sizes=dict(sizes),
+        total_unique_people=len(unique_people),
     )
 
 

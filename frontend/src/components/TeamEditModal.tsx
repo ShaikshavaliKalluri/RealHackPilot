@@ -17,6 +17,7 @@ interface MemberDraft {
   email: string;
   location: string;
   tshirt_size: string;
+  address: string;
   // Tracking
   isNew: boolean;
   isDeleted: boolean;
@@ -100,6 +101,7 @@ function asDraft(m: Member): MemberDraft {
     email: m.email ?? '',
     location: m.location ?? '',
     tshirt_size: m.tshirt_size ?? '',
+    address: m.address ?? '',
     isNew: false,
     isDeleted: false,
     original: m,
@@ -113,6 +115,7 @@ function blankDraft(tempId: number): MemberDraft {
     email: '',
     location: '',
     tshirt_size: '',
+    address: '',
     isNew: true,
     isDeleted: false,
     original: null,
@@ -126,6 +129,7 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
   const [mentorEmail, setMentorEmail] = useState(team.mentor_email ?? '');
   const [mentorLocation, setMentorLocation] = useState(team.mentor_location ?? '');
   const [mentorTshirt, setMentorTshirt] = useState(team.mentor_tshirt_size ?? '');
+  const [mentorAddress, setMentorAddress] = useState(team.mentor_address ?? '');
   const [idea, setIdea] = useState(team.idea ?? '');
   const [tools, setTools] = useState(team.tools ?? '');
   const [approach, setApproach] = useState(team.approach ?? '');
@@ -179,6 +183,7 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
       ['mentor_email', mentorEmail, team.mentor_email],
       ['mentor_location', mentorLocation, team.mentor_location],
       ['mentor_tshirt_size', mentorTshirt, team.mentor_tshirt_size],
+      ['mentor_address', mentorAddress, team.mentor_address],
       ['idea', idea, team.idea],
       ['tools', tools, team.tools],
       ['approach', approach, team.approach],
@@ -203,7 +208,8 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
       d.name.trim() !== d.original.name ||
       (d.email.trim() || null) !== (d.original.email ?? null) ||
       (d.location.trim() || null) !== (d.original.location ?? null) ||
-      (d.tshirt_size.trim() || null) !== (d.original.tshirt_size ?? null)
+      (d.tshirt_size.trim() || null) !== (d.original.tshirt_size ?? null) ||
+      (d.address.trim() || null) !== (d.original.address ?? null)
     );
   };
 
@@ -237,6 +243,7 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
             email: d.email.trim() || null,
             location: d.location.trim() || null,
             tshirt_size: d.tshirt_size.trim() || null,
+            address: d.address.trim() || null,
             ...reasonPayload,
           });
         }
@@ -250,6 +257,7 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
             email: d.email.trim() || null,
             location: d.location.trim() || null,
             tshirt_size: d.tshirt_size.trim() || null,
+            address: d.address.trim() || null,
             ...reasonPayload,
           });
         }
@@ -349,6 +357,17 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
                   ))}
                 </select>
               </Field>
+              <div className="md:col-span-2">
+                <Field label="Mentor mailing address (US/PH only — for swag shipping)">
+                  <textarea
+                    value={mentorAddress}
+                    onChange={(e) => setMentorAddress(e.target.value)}
+                    rows={2}
+                    placeholder="Leave blank for India (collected at the office)"
+                    className="input"
+                  />
+                </Field>
+              </div>
             </div>
           </section>
 
@@ -416,63 +435,84 @@ export function TeamEditModal({ team, onClose, onSaved }: Props) {
               {members.length === 0 && (
                 <p className="text-sm text-slate-500 italic">No members yet — click "Add member".</p>
               )}
-              {members.map((m) => (
+              {members.map((m) => {
+                // Show the address textarea only when shipping applies
+                // (US or Philippines) OR when the member already has one
+                // on file (so existing values stay editable even if
+                // location changes).
+                const wantsAddress = m.location === 'US' || m.location === 'Philippines' || !!m.address;
+                return (
                 <div
                   key={m.id}
-                  className={`rounded-lg border p-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_minmax(140px,1.2fr)_90px_auto] gap-2 items-center ${
+                  className={`rounded-lg border p-3 ${
                     m.isDeleted ? 'bg-rose-500/5 border-rose-500/30 opacity-60' : 'bg-ink-800/60 border-slate-700/40'
                   }`}
                 >
-                  <input
-                    value={m.name}
-                    onChange={(e) => updateRow(m.id, { name: e.target.value })}
-                    placeholder="Name"
-                    disabled={m.isDeleted}
-                    className="input-sm"
-                  />
-                  <input
-                    value={m.email}
-                    onChange={(e) => updateRow(m.id, { email: e.target.value })}
-                    placeholder="email@realpage.com"
-                    type="email"
-                    disabled={m.isDeleted}
-                    className="input-sm"
-                  />
-                  <LocationField
-                    value={m.location}
-                    onChange={(loc) => updateRow(m.id, { location: loc })}
-                    disabled={m.isDeleted}
-                    size="sm"
-                  />
-                  <select
-                    value={m.tshirt_size}
-                    onChange={(e) => updateRow(m.id, { tshirt_size: e.target.value })}
-                    disabled={m.isDeleted}
-                    className="input-sm"
-                  >
-                    {TSHIRT_OPTIONS.map((s) => (
-                      <option key={s || 'blank'} value={s}>
-                        {s || '—'}
-                      </option>
-                    ))}
-                  </select>
-                  {m.isDeleted ? (
-                    <button
-                      onClick={() => undoRemove(m.id)}
-                      className="text-xs px-2 py-1 rounded border border-slate-600 hover:bg-ink-700 text-slate-200"
+                  <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_minmax(140px,1.2fr)_90px_auto] gap-2 items-center">
+                    <input
+                      value={m.name}
+                      onChange={(e) => updateRow(m.id, { name: e.target.value })}
+                      placeholder="Name"
+                      disabled={m.isDeleted}
+                      className="input-sm"
+                    />
+                    <input
+                      value={m.email}
+                      onChange={(e) => updateRow(m.id, { email: e.target.value })}
+                      placeholder="email@realpage.com"
+                      type="email"
+                      disabled={m.isDeleted}
+                      className="input-sm"
+                    />
+                    <LocationField
+                      value={m.location}
+                      onChange={(loc) => updateRow(m.id, { location: loc })}
+                      disabled={m.isDeleted}
+                      size="sm"
+                    />
+                    <select
+                      value={m.tshirt_size}
+                      onChange={(e) => updateRow(m.id, { tshirt_size: e.target.value })}
+                      disabled={m.isDeleted}
+                      className="input-sm"
                     >
-                      Undo
-                    </button>
-                  ) : (
-                    <button
-                      onClick={() => removeRow(m.id)}
-                      className="text-xs px-2 py-1 rounded border border-rose-500/40 hover:bg-rose-500/10 text-rose-300"
-                    >
-                      Remove
-                    </button>
+                      {TSHIRT_OPTIONS.map((s) => (
+                        <option key={s || 'blank'} value={s}>
+                          {s || '—'}
+                        </option>
+                      ))}
+                    </select>
+                    {m.isDeleted ? (
+                      <button
+                        onClick={() => undoRemove(m.id)}
+                        className="text-xs px-2 py-1 rounded border border-slate-600 hover:bg-ink-700 text-slate-200"
+                      >
+                        Undo
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => removeRow(m.id)}
+                        className="text-xs px-2 py-1 rounded border border-rose-500/40 hover:bg-rose-500/10 text-rose-300"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  {wantsAddress && (
+                    <div className="mt-2">
+                      <textarea
+                        value={m.address}
+                        onChange={(e) => updateRow(m.id, { address: e.target.value })}
+                        placeholder="Mailing address for swag (US/PH only)"
+                        rows={2}
+                        disabled={m.isDeleted}
+                        className="input-sm w-full"
+                      />
+                    </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           </section>
 

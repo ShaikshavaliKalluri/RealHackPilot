@@ -189,6 +189,11 @@ class DashboardStats(BaseModel):
     multi_team_mentors: int
     locations: dict[str, int]
     tshirt_sizes: dict[str, int]
+    # Unique people = set(mentor identities) ∪ set(member identities).
+    # Identity is the lowercased email when present, else the lowercased
+    # name as fallback. A person who is both a mentor and a team member
+    # only counts once.
+    total_unique_people: int = 0
 
 
 class AIScreenResult(BaseModel):

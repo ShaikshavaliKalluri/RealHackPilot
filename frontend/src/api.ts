@@ -384,6 +384,7 @@ export interface TeamEditPatch {
   mentor_email?: string | null;
   mentor_location?: string | null;
   mentor_tshirt_size?: string | null;
+  mentor_address?: string | null;
   idea?: string | null;
   tools?: string | null;
   approach?: string | null;
@@ -398,6 +399,7 @@ export interface MemberEditPayload {
   email?: string | null;
   location?: string | null;
   tshirt_size?: string | null;
+  address?: string | null;
   edit_reason?: string | null;
 }
 

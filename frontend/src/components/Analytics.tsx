@@ -201,7 +201,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
           m.name,
           m.email ?? '',
           prettyLocation(m.location),
-          '', // Address — not captured
+          m.address ?? '',
           prettyLocation(m.location),
           m.tshirt_size ?? '',
           dual ? 'Yes (also a mentor)' : '',
@@ -233,7 +233,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
         t.mentor_name ?? '',
         t.mentor_email ?? '',
         prettyLocation(mentorLoc),
-        '', // Address — not captured
+        t.mentor_address ?? '',
         prettyLocation(mentorLoc),
         t.mentor_tshirt_size ?? '',
         dual ? 'Yes (also on a team)' : '',
@@ -258,7 +258,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
           m.name,
           m.email ?? '',
           prettyLocation(m.location),
-          '', // Address — not captured
+          m.address ?? '',
           prettyLocation(m.location),
           m.tshirt_size,
           'Member',
@@ -273,7 +273,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
             t.mentor_name ?? '',
             t.mentor_email,
             prettyLocation(t.mentor_location),
-            '',
+            t.mentor_address ?? '',
             prettyLocation(t.mentor_location),
             t.mentor_tshirt_size,
             'Mentor',

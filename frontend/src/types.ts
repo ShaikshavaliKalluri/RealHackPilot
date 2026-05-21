@@ -4,6 +4,8 @@ export interface Member {
   email: string | null;
   location: string | null;
   tshirt_size: string | null;
+  /** Mailing address for swag shipping (US/PH only). */
+  address: string | null;
   position: number;
 }
 
@@ -143,6 +145,8 @@ export interface Team {
   mentor_email: string | null;
   mentor_location: string | null;
   mentor_tshirt_size: string | null;
+  /** Mailing address for the mentor (US/PH only). */
+  mentor_address: string | null;
   idea: string | null;
   tools: string | null;
   approach: string | null;
@@ -173,6 +177,8 @@ export interface DashboardStats {
   multi_team_mentors: number;
   locations: Record<string, number>;
   tshirt_sizes: Record<string, number>;
+  /** Unique mentors+members deduped by email (fallback name). */
+  total_unique_people: number;
 }
 
 export interface UploadResult {
