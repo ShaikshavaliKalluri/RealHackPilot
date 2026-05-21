@@ -7,6 +7,46 @@ interface Props {
   onJumpToTeam: (teamId: number) => void;
 }
 
+// Pretty-print the location field used internally (lowercase enum-ish) for
+// the CSV exports and chart labels. Our data doesn't have separate city/
+// country fields — location IS the country — so the exports populate
+// "Country" with the same value and leave "Address" empty.
+function prettyLocation(loc: string | null | undefined): string {
+  const v = (loc ?? '').trim();
+  if (!v) return 'Unknown';
+  const lower = v.toLowerCase();
+  if (lower === 'us') return 'United States';
+  if (lower === 'uk') return 'United Kingdom';
+  return v.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Quote a CSV cell per RFC 4180.
+function csvCell(v: string | number | null | undefined): string {
+  const s = v === null || v === undefined ? '' : String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+// Trigger a client-side CSV download. Excel opens .csv natively; users
+// can Save-As .xlsx inside Excel if they want a real workbook. We prefix
+// with a UTF-8 BOM so Excel renders non-ASCII names correctly.
+function downloadCsv(
+  filename: string,
+  header: string[],
+  rows: (string | number | null | undefined)[][],
+): void {
+  const lines = [header.map(csvCell).join(','), ...rows.map((r) => r.map(csvCell).join(','))];
+  const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // ---- Reusable horizontal bar ----
 function HBar({
   label, count, total, color = 'bg-lime-500/60',
@@ -29,10 +69,12 @@ function HBar({
 }
 
 // ---- Section wrapper ----
+// `relative` is needed so ExportButton (absolutely-positioned top-right)
+// anchors to the section box and not the viewport.
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-5">
-      <h3 className="font-bold text-slate-100 mb-4">{title}</h3>
+    <div className="relative bg-ink-800/60 border border-slate-700/40 rounded-xl p-5">
+      <h3 className="font-bold text-slate-100 mb-4 pr-32">{title}</h3>
       {children}
     </div>
   );
@@ -48,19 +90,180 @@ function Tile({ label, value, tone = 'text-slate-100' }: { label: string; value:
   );
 }
 
+// ---- Small "Export to Excel" link rendered top-right of a Section ----
+function ExportButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="absolute top-4 right-4 text-[11px] px-2.5 py-1 rounded-md border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 transition flex items-center gap-1"
+      title="Download as a .csv (opens in Excel)"
+    >
+      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+      </svg>
+      {label}
+    </button>
+  );
+}
+
+// ---- Location bar list reused by the mentor + member charts ----
+function LocationBars({
+  entries, total, emptyLabel,
+}: { entries: [string, number][]; total: number; emptyLabel: string }) {
+  if (entries.length === 0) return <p className="text-sm text-slate-400 italic">{emptyLabel}</p>;
+  return (
+    <div className="space-y-2.5">
+      {entries.map(([loc, count]) => (
+        <HBar
+          key={loc}
+          label={loc === 'us' ? 'United States' : loc === 'india' ? 'India' : loc === 'philippines' ? 'Philippines' : loc === 'unknown' ? 'Unknown' : loc}
+          count={count}
+          total={total}
+          color={
+            loc === 'india' ? 'bg-amber-500/60'
+            : loc === 'us' ? 'bg-sky-500/60'
+            : loc === 'philippines' ? 'bg-violet-500/60'
+            : loc === 'unknown' ? 'bg-slate-600/40'
+            : 'bg-emerald-500/60'
+          }
+        />
+      ))}
+      <div className="text-xs text-slate-500 mt-1 text-right">{total} total</div>
+    </div>
+  );
+}
+
 export function Analytics({ teams, stats, onJumpToTeam }: Props) {
   const derived = useMemo(() => {
-    // Location distribution
-    const locCounts: Record<string, number> = {};
-    let locationTotal = 0;
+    // ===== Dual-role detection =====
+    // First pass: build an email -> first matching member row, used as the
+    // fallback for mentor location when the mentor record has no location
+    // of its own (legacy registrations from before the field existed).
+    const memberByEmail = new Map<string, { name: string; location: string | null; tshirt: string | null }>();
     for (const t of teams) {
       for (const m of t.members) {
-        const loc = (m.location || 'unknown').trim().toLowerCase() || 'unknown';
-        locCounts[loc] = (locCounts[loc] || 0) + 1;
-        locationTotal++;
+        if (m.email) {
+          const k = m.email.toLowerCase();
+          if (!memberByEmail.has(k)) {
+            memberByEmail.set(k, { name: m.name, location: m.location, tshirt: m.tshirt_size });
+          }
+        }
       }
     }
-    const locations = Object.entries(locCounts).sort((a, b) => b[1] - a[1]);
+    const mentorEmails = new Set<string>();
+    for (const t of teams) {
+      if (t.mentor_email) mentorEmails.add(t.mentor_email.trim().toLowerCase());
+    }
+    // Dual-role: an email that appears both as a team member AND as somebody's
+    // mentor somewhere. Flagged on the charts and tagged in the CSV exports.
+    const dualRoleEmails = new Set<string>();
+    for (const [memberEmail] of memberByEmail) {
+      if (mentorEmails.has(memberEmail)) dualRoleEmails.add(memberEmail);
+    }
+
+    // ===== Team member location distribution (deduped by email) =====
+    const memberSeen = new Set<string>();
+    const memberLocCounts: Record<string, number> = {};
+    const memberCsvRows: (string | number | null | undefined)[][] = [];
+    for (const t of teams) {
+      for (const m of t.members) {
+        const key = (m.email || `${t.id}:${m.name}`).toLowerCase();
+        if (memberSeen.has(key)) continue;
+        memberSeen.add(key);
+        const locLower = (m.location || 'unknown').trim().toLowerCase() || 'unknown';
+        memberLocCounts[locLower] = (memberLocCounts[locLower] || 0) + 1;
+        const dual = m.email && dualRoleEmails.has(m.email.toLowerCase());
+        memberCsvRows.push([
+          t.name,
+          m.name,
+          m.email ?? '',
+          prettyLocation(m.location),
+          '', // Address — not captured
+          prettyLocation(m.location),
+          m.tshirt_size ?? '',
+          dual ? 'Yes (also a mentor)' : '',
+        ]);
+      }
+    }
+    const memberLocations = Object.entries(memberLocCounts).sort((a, b) => b[1] - a[1]);
+    const memberLocationTotal = Object.values(memberLocCounts).reduce((s, c) => s + c, 0);
+
+    // ===== Mentor location distribution (deduped by mentor email) =====
+    // Prefer the mentor's own mentor_location field; fall back to looking
+    // them up in the member roster by email (in case they happen to also be
+    // on a team — common for senior engineers).
+    const mentorSeen = new Set<string>();
+    const mentorLocCounts: Record<string, number> = {};
+    const mentorCsvRows: (string | number | null | undefined)[][] = [];
+    for (const t of teams) {
+      const key = (t.mentor_email || t.mentor_name || '').trim().toLowerCase();
+      if (!key) continue;
+      if (mentorSeen.has(key)) continue;
+      mentorSeen.add(key);
+      const matched = t.mentor_email ? memberByEmail.get(t.mentor_email.toLowerCase()) : undefined;
+      const mentorLoc = t.mentor_location || matched?.location || null;
+      const locLower = (mentorLoc || 'unknown').trim().toLowerCase() || 'unknown';
+      mentorLocCounts[locLower] = (mentorLocCounts[locLower] || 0) + 1;
+      const dual = t.mentor_email && memberByEmail.has(t.mentor_email.toLowerCase());
+      mentorCsvRows.push([
+        t.name,
+        t.mentor_name ?? '',
+        t.mentor_email ?? '',
+        prettyLocation(mentorLoc),
+        '', // Address — not captured
+        prettyLocation(mentorLoc),
+        t.mentor_tshirt_size ?? '',
+        dual ? 'Yes (also on a team)' : '',
+      ]);
+    }
+    const mentorLocations = Object.entries(mentorLocCounts).sort((a, b) => b[1] - a[1]);
+    const mentorLocationTotal = Object.values(mentorLocCounts).reduce((s, c) => s + c, 0);
+
+    // ===== T-shirt sizing — one row per member (not deduped: a person might
+    //       belong to multiple teams, but for swag procurement we still only
+    //       buy one shirt; dedupe by email here too). Mentors included.
+    const tshirtCsvRows: (string | number | null | undefined)[][] = [];
+    const tshirtSeen = new Set<string>();
+    for (const t of teams) {
+      for (const m of t.members) {
+        const key = (m.email || `${t.id}:${m.name}`).toLowerCase();
+        if (tshirtSeen.has(key)) continue;
+        tshirtSeen.add(key);
+        if (!m.tshirt_size) continue;
+        tshirtCsvRows.push([
+          t.name,
+          m.name,
+          m.email ?? '',
+          prettyLocation(m.location),
+          '', // Address — not captured
+          prettyLocation(m.location),
+          m.tshirt_size,
+          'Member',
+        ]);
+      }
+      if (t.mentor_email && t.mentor_tshirt_size) {
+        const key = t.mentor_email.toLowerCase();
+        if (!tshirtSeen.has(key)) {
+          tshirtSeen.add(key);
+          tshirtCsvRows.push([
+            t.name,
+            t.mentor_name ?? '',
+            t.mentor_email,
+            prettyLocation(t.mentor_location),
+            '',
+            prettyLocation(t.mentor_location),
+            t.mentor_tshirt_size,
+            'Mentor',
+          ]);
+        }
+      }
+    }
+
+    // Keep `locations`/`locationTotal` referencing the member view for any
+    // legacy chart that still uses it (we're removing the inline chart below
+    // and replacing with the new top-row layout).
+    const locations = memberLocations;
+    const locationTotal = memberLocationTotal;
 
     // Completeness buckets
     const compBuckets = [
@@ -140,6 +343,10 @@ export function Analytics({ teams, stats, onJumpToTeam }: Props) {
 
     return {
       locations, locationTotal,
+      memberLocations, memberLocationTotal, memberCsvRows,
+      mentorLocations, mentorLocationTotal, mentorCsvRows,
+      tshirtCsvRows,
+      dualRoleEmails,
       compBuckets,
       aiScoreBuckets, aiScreened,
       axisAvgs,
@@ -179,32 +386,73 @@ export function Analytics({ teams, stats, onJumpToTeam }: Props) {
         </div>
       </Section>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Location distribution */}
-        <Section title="Location distribution">
-          {derived.locations.length === 0 ? (
-            <p className="text-sm text-slate-400 italic">No location data available.</p>
-          ) : (
-            <div className="space-y-2.5">
-              {derived.locations.map(([loc, count]) => (
-                <HBar
-                  key={loc}
-                  label={loc === 'us' ? 'United States' : loc === 'india' ? 'India' : loc === 'philippines' ? 'Philippines' : loc}
-                  count={count}
-                  total={derived.locationTotal}
-                  color={
-                    loc === 'india' ? 'bg-amber-500/60'
-                    : loc === 'us' ? 'bg-sky-500/60'
-                    : loc === 'philippines' ? 'bg-violet-500/60'
-                    : 'bg-slate-500/60'
-                  }
-                />
-              ))}
-              <div className="text-xs text-slate-500 mt-1 text-right">{derived.locationTotal} total responses</div>
+      {/* === Top row: mentor / member locations + tshirt sizing — with Excel exports === */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Section title="Mentor location distribution">
+          <ExportButton
+            label="Export to Excel"
+            onClick={() => downloadCsv(
+              'realhack-2026_mentor-locations.csv',
+              ['Team Name', 'Mentor Name', 'Mentor Email', 'Location', 'Address', 'Country', 'T-shirt Size', 'Dual-Role'],
+              derived.mentorCsvRows,
+            )}
+          />
+          <LocationBars
+            entries={derived.mentorLocations}
+            total={derived.mentorLocationTotal}
+            emptyLabel="No mentor data."
+          />
+          {derived.dualRoleEmails.size > 0 && (
+            <div className="text-[11px] text-amber-300 mt-2">
+              ⚠ {derived.dualRoleEmails.size} mentor{derived.dualRoleEmails.size === 1 ? '' : 's'} also listed as a team member.
             </div>
           )}
         </Section>
 
+        <Section title="Team member location distribution">
+          <ExportButton
+            label="Export to Excel"
+            onClick={() => downloadCsv(
+              'realhack-2026_team-member-locations.csv',
+              ['Team Name', 'Team Member Name', 'Member Email', 'Location', 'Address', 'Country', 'T-shirt Size', 'Dual-Role'],
+              derived.memberCsvRows,
+            )}
+          />
+          <LocationBars
+            entries={derived.memberLocations}
+            total={derived.memberLocationTotal}
+            emptyLabel="No member location data available."
+          />
+          {derived.dualRoleEmails.size > 0 && (
+            <div className="text-[11px] text-amber-300 mt-2">
+              ⚠ {derived.dualRoleEmails.size} member{derived.dualRoleEmails.size === 1 ? '' : 's'} also listed as a mentor on another team.
+            </div>
+          )}
+        </Section>
+
+        <Section title="T-shirt sizes (for swag procurement)">
+          <ExportButton
+            label="Export to Excel"
+            onClick={() => downloadCsv(
+              'realhack-2026_tshirt-sizes.csv',
+              ['Team Name', 'Name', 'Email', 'Location', 'Address', 'Country', 'T-shirt Size', 'Role'],
+              derived.tshirtCsvRows,
+            )}
+          />
+          {derived.tshirtSizes.length === 0 ? (
+            <p className="text-sm text-slate-400 italic">No size data yet.</p>
+          ) : (
+            <div className="space-y-2.5">
+              {derived.tshirtSizes.map(([size, count]) => (
+                <HBar key={size} label={size.toUpperCase()} count={count} total={derived.tshirtTotal} color="bg-violet-500/60" />
+              ))}
+              <div className="text-xs text-slate-500 mt-1 text-right">{derived.tshirtTotal} total size responses</div>
+            </div>
+          )}
+        </Section>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Completeness distribution */}
         <Section title="Submission completeness">
           <div className="space-y-2.5">
@@ -277,17 +525,6 @@ export function Analytics({ teams, stats, onJumpToTeam }: Props) {
           </Section>
         )}
 
-        {/* T-shirt size breakdown */}
-        {derived.tshirtSizes.length > 0 && (
-          <Section title="T-shirt sizes (for swag procurement)">
-            <div className="space-y-2.5">
-              {derived.tshirtSizes.map(([size, count]) => (
-                <HBar key={size} label={size.toUpperCase()} count={count} total={derived.tshirtTotal} color="bg-violet-500/60" />
-              ))}
-            </div>
-            <div className="text-xs text-slate-500 mt-2">{derived.tshirtTotal} total size responses</div>
-          </Section>
-        )}
       </div>
 
       {/* Top 10 teams by AI score */}

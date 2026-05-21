@@ -45,8 +45,13 @@ function LocationField({
   disabled?: boolean;
   size?: 'md' | 'sm';
 }) {
-  const isStandard = value === '' || KNOWN_LOCATIONS.includes(value);
-  const showOther = !isStandard;
+  // `forceOther` tracks "user explicitly picked Other from the dropdown but
+  // hasn't typed a country yet". Without it the text input would vanish the
+  // instant the value is blank — including the moment after picking Other —
+  // and the user could never enter a custom country.
+  const [forceOther, setForceOther] = useState(false);
+  const isCustomValue = value !== '' && !KNOWN_LOCATIONS.includes(value);
+  const showOther = forceOther || isCustomValue;
   const cls = size === 'sm' ? 'input-sm' : 'input';
   return (
     <div className="flex gap-2">
@@ -54,9 +59,14 @@ function LocationField({
         value={showOther ? 'Other' : value}
         onChange={(e) => {
           const v = e.target.value;
-          // Switching INTO "Other" → blank the value so the text input is
-          // empty; switching back to a known country writes that country.
-          onChange(v === 'Other' ? '' : v);
+          if (v === 'Other') {
+            // Stay in Other mode until they pick a different option; don't
+            // clobber `value` so any in-progress text survives the toggle.
+            setForceOther(true);
+          } else {
+            setForceOther(false);
+            onChange(v);
+          }
         }}
         disabled={disabled}
         className={cls}
@@ -76,6 +86,7 @@ function LocationField({
           disabled={disabled}
           placeholder="Country name"
           className={cls}
+          autoFocus={forceOther && !value}
         />
       )}
     </div>
