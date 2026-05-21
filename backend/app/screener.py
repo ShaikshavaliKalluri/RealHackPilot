@@ -141,7 +141,9 @@ def _team_flags(team: Team) -> list[str]:
         issue = _email_issue(m.email)
         if issue:
             flags.append(f"bad_email:{issue}:{m.email or m.name}")
-        if m.location and m.location.strip().lower() not in VALID_LOCATIONS:
+        if not m.location:
+            flags.append(f"missing_location:{m.name}")
+        elif m.location.strip().lower() not in VALID_LOCATIONS:
             flags.append(f"bad_location:{m.name}")
         if m.tshirt_size and m.tshirt_size.strip().upper() not in {x.upper() for x in VALID_TSHIRT}:
             flags.append(f"bad_tshirt:{m.name}")
