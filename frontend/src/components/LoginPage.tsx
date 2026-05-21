@@ -34,17 +34,12 @@ export function LoginPage({ error }: Props) {
         <div className="absolute top-1/3 right-1/4 w-72 h-72 bg-violet-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative max-w-xl w-full">
-          {/* Typographic logo (replaces wordmark image) */}
-          <div className="flex items-center gap-3 mb-10">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-sky-400 to-sky-600 flex items-center justify-center shadow-lg shadow-sky-500/40">
-              <svg viewBox="0 0 24 24" className="w-5 h-5 fill-white">
-                <polygon points="8,5 8,19 19,12" />
-              </svg>
-            </div>
-            <div className="text-2xl font-extrabold tracking-tight">
-              RealHack <span className="text-sky-400">&apos;26</span>
-            </div>
-          </div>
+          {/* Official RealHack wordmark */}
+          <img
+            src="/realhack-logo.png"
+            alt="RealHack 2026"
+            className="h-12 mb-10 -ml-1"
+          />
 
           {/* Hero headline */}
           <h1 className="text-5xl lg:text-6xl font-black tracking-tighter leading-[1.05] mb-6">

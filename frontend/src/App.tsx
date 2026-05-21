@@ -170,16 +170,13 @@ export default function App() {
     <div className="min-h-screen p-8 max-w-7xl mx-auto">
       <header className="mb-6 pb-5 border-b border-slate-800/60">
         <div className="flex items-center justify-between gap-6 mb-5">
-          {/* Brand mark — typographic, matches LoginPage */}
+          {/* Brand: official RealHack wordmark */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-sky-400 to-sky-600 flex items-center justify-center shadow-md shadow-sky-500/30">
-              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
-                <polygon points="8,5 8,19 19,12" />
-              </svg>
-            </div>
-            <div className="text-xl font-extrabold tracking-tight">
-              RealHack <span className="text-sky-400">&apos;26</span>
-            </div>
+            <img
+              src="/realhack-logo.png"
+              alt="RealHack 2026"
+              className="h-10 -ml-1"
+            />
             <span className="hidden md:inline-block text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 bg-slate-800/60 border border-slate-700/40 rounded-md text-slate-400">
               Internal Tool
             </span>
