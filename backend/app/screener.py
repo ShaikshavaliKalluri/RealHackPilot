@@ -23,7 +23,7 @@ from .models import Team, Member
 CRITICAL_FIELDS = ("idea", "tools", "approach", "viability", "business_value")
 MIN_FIELD_CHARS = 20
 PLACEHOLDERS = {"", "tbd", "na", "n/a", "none", "-", "pending", "to be decided", "not applicable"}
-VALID_LOCATIONS = {"us", "india", "philippines"}
+VALID_LOCATIONS = {"us", "india", "philippines", "canada", "uk", "romania", "mexico"}
 VALID_TSHIRT = {"s", "m", "l", "xl", "xxl", "xxxl"}
 MENTOR_MAX_TEAMS = 2
 
