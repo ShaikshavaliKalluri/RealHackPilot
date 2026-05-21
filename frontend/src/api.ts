@@ -4,16 +4,29 @@ import { getAccessToken } from './auth';
 const BASE = '/api';
 
 /**
- * Wrapper around `fetch` that auto-injects the MSAL access token as
- * `Authorization: Bearer ...` for every API call. Falls through to plain
- * fetch if the user isn't signed in (the backend will then return 401 and
- * the UI redirects to the login page).
+ * Wrapper around `fetch` that auto-injects the MSAL ID token as
+ * `Authorization: Bearer ...` on every API call.
+ *
+ * If the first attempt returns 401 (almost always because the ID token
+ * has expired — they have a ~1 hour lifetime), we force a silent
+ * re-auth via MSAL's ssoSilent and retry once with the new token. If
+ * the retry also 401s, the caller surfaces the error and the user
+ * needs to sign in again.
  */
 async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const token = await getAccessToken();
-  const headers = new Headers(init.headers || {});
-  if (token) headers.set('Authorization', `Bearer ${token}`);
-  return fetch(input, { ...init, headers });
+  const attempt = async (forceRefresh: boolean): Promise<Response> => {
+    const token = await getAccessToken({ forceRefresh });
+    const headers = new Headers(init.headers || {});
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    return fetch(input, { ...init, headers });
+  };
+
+  let r = await attempt(false);
+  if (r.status === 401) {
+    // Likely an expired ID token — force a silent refresh and retry once.
+    r = await attempt(true);
+  }
+  return r;
 }
 
 export async function fetchTeams(): Promise<Team[]> {

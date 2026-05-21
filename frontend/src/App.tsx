@@ -160,9 +160,9 @@ export default function App() {
           <img
             src="/realhack-logo.png"
             alt="RealHack 2026"
-            className="h-10 mb-3"
+            className="h-16 -ml-1 mb-2"
           />
-          <h1 className="text-4xl font-extrabold mt-1 tracking-tight">
+          <h1 className="text-3xl font-extrabold tracking-tight">
             {mode === 'dashboard' && <>Registration <span className="text-lime-300">Command Center</span></>}
             {mode === 'judge' && <>Judge <span className="text-sky-300">Scorecard</span></>}
             {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}

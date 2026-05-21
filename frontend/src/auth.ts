@@ -43,21 +43,44 @@ export const loginRequest = {
  * audience. The access token returned for the User.Read scope has
  * Microsoft Graph as its audience and would fail backend validation.
  *
+ * ID tokens have a ~1 hour lifetime. When `forceRefresh` is true we use
+ * ssoSilent to round-trip Microsoft via a hidden iframe and get a fresh
+ * ID token — important after a 401-expired response from the backend.
+ *
  * (If/when we expose a custom API scope like `api://<clientId>/access`,
  * we can switch to a properly-scoped access token. Until then ID-token-as-
  * auth is fine for an internal app and is the simplest path.)
  */
-export async function getAccessToken(): Promise<string | null> {
+export async function getAccessToken(opts: { forceRefresh?: boolean } = {}): Promise<string | null> {
   const accounts = msalInstance.getAllAccounts();
   if (accounts.length === 0) return null;
+  const account = accounts[0];
+  // First try acquireTokenSilent with forceRefresh if requested. This
+  // sometimes — but not always — yields a fresh ID token.
   try {
     const result = await msalInstance.acquireTokenSilent({
       scopes: loginRequest.scopes,
-      account: accounts[0],
+      account,
+      forceRefresh: opts.forceRefresh ?? false,
     });
+    if (opts.forceRefresh) {
+      // forceRefresh requested but acquireTokenSilent might still hand
+      // back the cached ID token. Fall through to ssoSilent which always
+      // round-trips Microsoft and returns a fresh idToken.
+      try {
+        const sso = await msalInstance.ssoSilent({
+          scopes: loginRequest.scopes,
+          account,
+          loginHint: account.username,
+        });
+        return sso.idToken || result.idToken;
+      } catch {
+        return result.idToken;
+      }
+    }
     return result.idToken;
   } catch {
-    // Silent acquire failed — the caller should redirect to login
+    // Silent acquire failed entirely — caller will handle via redirect.
     return null;
   }
 }
