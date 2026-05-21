@@ -1073,33 +1073,32 @@ def _find_raw_value(raw: dict, *needles: str) -> str | None:
     return None
 
 
-def _raw_address_slots(raw: dict) -> list[str | None]:
-    """Return the mailing address columns from a raw row, sorted by their
-    MS Forms numeric suffix.
+def _raw_address_slots(raw: dict) -> dict[int, str | None]:
+    """Return mailing address values from a raw row keyed by slot index.
 
-    MS Forms names these columns:
+    MS Forms column naming:
       "Enter your mailing address if you opted for US or PH as location"  → slot 0 (mentor)
-      "Enter your mailing address if you opted for US or PH as location2" → slot 1 (member 1)
-      "Enter your mailing address if you opted for US or PH as location6" → slot 5 (member 5)
+      "Enter your mailing address if you opted for US or PH as location1" → slot 1 (member 1)
+      "Enter your mailing address if you opted for US or PH as location2" → slot 2 (member 2)
+      ...
+      "Enter your mailing address if you opted for US or PH as location5" → slot 5 (member 5)
 
-    Returns a list where index 0 = mentor, index N = member N (1-indexed position).
+    No trailing digit → slot 0 (mentor).  Trailing digit N → slot N (member N).
     """
     import re as _re
 
     def _norm(s: str) -> str:
         return _re.sub(r"\s+", " ", str(s or "").strip().lower())
 
-    found: list[tuple[int, str | None]] = []
+    slots: dict[int, str | None] = {}
     for k, v in raw.items():
         nk = _norm(k)
         if ("mailing" in nk and "address" in nk) or "opted for us or ph" in nk:
             m = _re.search(r"(\d+)\s*$", k.strip())
-            suffix = int(m.group(1)) if m else 1
+            slot = int(m.group(1)) if m else 0  # no digit = mentor slot 0
             val = str(v).strip() if v is not None else None
-            found.append((suffix, val if val else None))
-
-    found.sort(key=lambda x: x[0])
-    return [v for _, v in found]
+            slots[slot] = val if val else None
+    return slots
 
 
 @app.post("/api/admin/backfill-mentor-locations")
@@ -1141,27 +1140,14 @@ def backfill_mentor_locations(
         # numeric suffixes (no suffix = slot 0 = mentor; suffix N = member N).
         addr_slots = _raw_address_slots(t.raw)
         if not t.mentor_address:
-            # Try explicit named column first, then slot 0
-            addr = (
-                _find_raw_value(t.raw, "mentor", "mailing", "address")
-                or _find_raw_value(t.raw, "mentor", "address")
-                or (addr_slots[0] if addr_slots else None)
-            )
+            addr = addr_slots.get(0)
             if addr:
                 t.mentor_address = addr
                 mentor_addresses_set += 1
         for m in t.members:
             if m.address:
                 continue
-            pos = m.position  # 1-indexed slot
-            # Try named column first, then positional slot
-            addr = (
-                _find_raw_value(t.raw, f"member {pos}", "mailing", "address")
-                or _find_raw_value(t.raw, f"member{pos}", "mailing", "address")
-                or _find_raw_value(t.raw, f"member {pos}", "address")
-                or _find_raw_value(t.raw, f"member{pos}", "address")
-                or (addr_slots[pos] if pos < len(addr_slots) else None)
-            )
+            addr = addr_slots.get(m.position)  # slot N = member N (1-indexed)
             if addr:
                 m.address = addr
                 member_addresses_set += 1

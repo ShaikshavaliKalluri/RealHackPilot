@@ -1,5 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { Team, DashboardStats } from '../types';
+import { backfillMentorLocations } from '../api';
 
 interface Props {
   teams: Team[];
@@ -133,7 +134,25 @@ function LocationBars({
   );
 }
 
-export function Analytics({ teams, stats, onJumpToTeam }: Props) {
+export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { onReload?: () => void }) {
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
+  const handleBackfill = async () => {
+    setBackfillBusy(true);
+    setBackfillMsg(null);
+    try {
+      const r = await backfillMentorLocations();
+      setBackfillMsg(
+        `Recovered ${r.mentor_addresses_set ?? 0} mentor address${(r.mentor_addresses_set ?? 0) === 1 ? '' : 'es'} ` +
+        `and ${r.member_addresses_set ?? 0} member address${(r.member_addresses_set ?? 0) === 1 ? '' : 'es'} from form data.`,
+      );
+      if (onReload) onReload();
+    } catch (e: unknown) {
+      setBackfillMsg(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
   // One-shot backfill: pull mentor_location / mentor_tshirt_size from each
   // team's stored `raw` JSON for teams imported before those columns were
   // captured. Reloads the parent on success so the chart re-renders.
@@ -469,6 +488,17 @@ export function Analytics({ teams, stats, onJumpToTeam }: Props) {
               </div>
             </div>
           )}
+          <div className="mt-3 pt-3 border-t border-slate-700/30 flex flex-col gap-1">
+            <button
+              onClick={handleBackfill}
+              disabled={backfillBusy}
+              className="self-start text-[11px] px-2.5 py-1 rounded-md border border-sky-500/40 hover:bg-sky-500/10 text-sky-300 disabled:opacity-50 transition"
+              title="Recover mailing addresses from the original form data for existing teams"
+            >
+              {backfillBusy ? 'Recovering…' : 'Recover addresses from form data'}
+            </button>
+            {backfillMsg && <div className="text-[11px] text-slate-400">{backfillMsg}</div>}
+          </div>
         </Section>
       </div>
 

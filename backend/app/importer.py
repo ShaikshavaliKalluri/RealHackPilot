@@ -57,21 +57,22 @@ def parse_workbook(path: str) -> list[dict]:
     col_mentor_email = _find_col(headers, "mentor", "email")
     col_mentor_location = _find_col(headers, "mentor", "location")
     col_mentor_tshirt = _find_col(headers, "mentor", "shirt")
-    # Mailing address — MS Forms repeats the question once per slot with
-    # numeric suffixes: no suffix = mentor slot, "2" = member 1, "6" = member 5.
-    # Primary: try an explicitly tagged column; fallback: first "opted" column.
+    # Mailing address — MS Forms column naming:
+    #   no suffix  → mentor   ("Enter your mailing address if you opted for US or PH as location")
+    #   suffix "1" → member 1 ("...location1")
+    #   suffix "N" → member N ("...locationN")
     col_mentor_address = (
         _find_col(headers, "mentor", "mailing", "address")
         or _find_col(headers, "mentor", "address")
     )
     if col_mentor_address is None:
-        # Take the column immediately after the mentor tshirt or location col,
-        # if it looks like an address field.
-        _ref = col_mentor_tshirt or col_mentor_location
-        if _ref is not None and _ref + 1 < len(headers):
-            _ch = _norm(headers[_ref + 1])
-            if "address" in _ch or "mailing" in _ch or "opted" in _ch:
-                col_mentor_address = _ref + 1
+        # Find the "opted for US or PH" column that has NO trailing digit — that's the mentor slot.
+        for _i, _h in enumerate(headers):
+            _nh = _norm(_h)
+            if ("mailing" in _nh and "address" in _nh) or "opted for us or ph" in _nh:
+                if not re.search(r"\d+\s*$", _h.strip()):
+                    col_mentor_address = _i
+                    break
 
     # Idea/approach fields
     col_idea = _find_col(headers, "idea") or _find_col(headers, "problem statement")
@@ -111,8 +112,16 @@ def parse_workbook(path: str) -> list[dict]:
             or _find_col(headers, f"member {n}", "address")
             or _find_col(headers, f"member{n}", "address")
         )
-        # Positional fallback: the address column sits immediately after the
-        # location column ("Enter your mailing address if you opted for US or PH").
+        if address_idx is None:
+            # Direct match: "...locationN" where N == member slot number.
+            for _i, _h in enumerate(headers):
+                _nh = _norm(_h)
+                if ("mailing" in _nh and "address" in _nh) or "opted for us or ph" in _nh:
+                    _m = re.search(r"(\d+)\s*$", _h.strip())
+                    if _m and int(_m.group(1)) == n:
+                        address_idx = _i
+                        break
+        # Final positional fallback: column immediately after member N's location col.
         if address_idx is None and location_idx is not None:
             _candidate = location_idx + 1
             if _candidate < len(headers):
