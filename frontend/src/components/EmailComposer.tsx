@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchEmailTemplates, renderEmails, appendCommLog, checkDuplicate, type EmailTemplate, type RenderedEmail } from '../api';
+import { sendEmailViaGraph, REALHACK_SEND_AS } from '../graphSend';
 import type { Team } from '../types';
 
 interface Props {
@@ -73,6 +74,8 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
   const [duplicates, setDuplicates] = useState<Record<number, { duplicate: boolean; last_sent_at?: string }>>({});
   const [sentTeams, setSentTeams] = useState<Set<number>>(new Set());
+  // Live progress while sending a batch via Graph (vs. mailto hand-off).
+  const [sending, setSending] = useState<{ done: number; total: number; errors: string[] } | null>(null);
 
   // ---- CC / BCC / To-override controls (applied to every email in the batch) ----
   const [ccRaw, setCcRaw] = useState('');
@@ -179,6 +182,62 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
       setSentTeams((prev) => new Set(prev).add(em.team_id));
     } catch (e) {
       console.warn('Audit log append failed', e);
+    }
+  };
+
+  /**
+   * Send every rendered email via Graph /sendMail with the branded HTML
+   * body + CID-inlined RealHack wordmark. Emails go out from
+   * RealHack@realpage.com (Send-As). Each successful send writes an audit
+   * row via logSend. Errors are collected per-team so one failure doesn't
+   * stop the rest of the batch.
+   */
+  const sendAllViaGraph = async () => {
+    if (!rendered || rendered.length === 0) return;
+
+    // Same recipient resolution rule the mailto path uses.
+    const eligible = rendered
+      .map((e) => {
+        const effectiveTo = effectiveToOverride && effectiveToOverride.length > 0 ? effectiveToOverride : e.to;
+        return { email: e, to: effectiveTo };
+      })
+      .filter((row) => row.to.length > 0);
+
+    if (eligible.length === 0) {
+      setError('No recipients to send to — every team is missing an email and no override is set.');
+      return;
+    }
+
+    setError(null);
+    setSending({ done: 0, total: eligible.length, errors: [] });
+    const errs: string[] = [];
+
+    for (let i = 0; i < eligible.length; i++) {
+      const { email, to } = eligible[i];
+      try {
+        await sendEmailViaGraph({
+          subject: email.subject,
+          bodyHtml: email.body_html,
+          bodyText: email.body,
+          to,
+          cc: ccList.length ? ccList : undefined,
+          bcc: bccList.length ? bccList : undefined,
+          sendAs: REALHACK_SEND_AS,
+        });
+        await logSend(email);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        errs.push(`${email.team_name}: ${msg}`);
+      }
+      setSending({ done: i + 1, total: eligible.length, errors: [...errs] });
+      // Light pacing so we stay under any per-minute Graph throttles
+      // (sendMail caps at ~30/min/mailbox; we send well under that).
+      if (i < eligible.length - 1) await new Promise((r) => setTimeout(r, 600));
+    }
+
+    if (errs.length === 0) {
+      // All clean — leave the success state visible briefly, then close.
+      setTimeout(() => setSending(null), 1500);
     }
   };
 
@@ -467,6 +526,17 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                 </button>
                 <span className="text-sm text-slate-500">·</span>
                 <button
+                  onClick={sendAllViaGraph}
+                  disabled={sending !== null}
+                  className="text-xs px-3 py-1.5 rounded bg-sky-400 hover:bg-sky-300 disabled:opacity-50 disabled:cursor-not-allowed text-ink-950 font-bold transition flex items-center gap-1.5"
+                  title={`Send via Graph as ${REALHACK_SEND_AS} (branded HTML + logo)`}
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2.94 4.94a1.5 1.5 0 011.78-.28l13.5 5.4a1.5 1.5 0 010 2.78l-13.5 5.4a1.5 1.5 0 01-2.14-1.66l1.5-5.4a.5.5 0 01.42-.37l7.31-1.04a.5.5 0 000-.99L4.5 7.74a.5.5 0 01-.42-.37l-1.5-5.4a1.5 1.5 0 01.36-1.43z" />
+                  </svg>
+                  Send via RealHack
+                </button>
+                <button
                   onClick={() => {
                     rendered.forEach((e) => {
                       const hasRecipients = (effectiveToOverride && effectiveToOverride.length > 0) || e.to.length > 0;
@@ -476,7 +546,9 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                       }
                     });
                   }}
-                  className="text-xs px-3 py-1.5 rounded bg-lime-400 hover:bg-lime-300 text-ink-950 font-bold transition"
+                  disabled={sending !== null}
+                  className="text-xs px-3 py-1.5 rounded bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold transition"
+                  title="Open each email in Outlook for manual send (no logo, plain text)"
                 >
                   Open all in Outlook
                 </button>
@@ -501,6 +573,32 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                   </span>
                 )}
               </div>
+
+              {sending && (
+                <div className="bg-sky-500/10 border border-sky-500/30 rounded-lg p-3 text-xs space-y-1.5">
+                  <div className="flex items-center justify-between text-slate-200">
+                    <span className="font-semibold">
+                      Sending via RealHack@realpage.com — {sending.done} / {sending.total}
+                    </span>
+                    {sending.done === sending.total && sending.errors.length === 0 && (
+                      <span className="text-lime-300">All sent ✓</span>
+                    )}
+                  </div>
+                  <div className="h-1.5 rounded-full bg-ink-900 overflow-hidden">
+                    <div
+                      className="h-full bg-sky-400 transition-all"
+                      style={{ width: `${(sending.done / sending.total) * 100}%` }}
+                    />
+                  </div>
+                  {sending.errors.length > 0 && (
+                    <ul className="mt-2 list-disc pl-5 text-rose-300 space-y-0.5">
+                      {sending.errors.map((er, i) => (
+                        <li key={i}>{er}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-2">
                 {rendered.map((e, i) => {

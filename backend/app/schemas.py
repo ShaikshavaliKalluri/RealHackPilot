@@ -296,4 +296,5 @@ class RenderedEmail(BaseModel):
     to: list[str]
     subject: str
     body: str
+    body_html: str | None = None
     missing_fields: list[str] = []

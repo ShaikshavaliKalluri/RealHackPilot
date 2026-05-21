@@ -10,7 +10,7 @@
  * Production redirect URI: https://realhack.realpage.com (must be added as a
  * SPA platform redirect URI on the app reg before sign-in works).
  */
-import { PublicClientApplication, type Configuration } from '@azure/msal-browser';
+import { InteractionRequiredAuthError, PublicClientApplication, type Configuration } from '@azure/msal-browser';
 
 const msalConfig: Configuration = {
   auth: {
@@ -28,11 +28,56 @@ const msalConfig: Configuration = {
 export const msalInstance = new PublicClientApplication(msalConfig);
 
 // Scopes we need at sign-in time. User.Read lets us call Graph /me to fetch
-// jobTitle/department for the header badge. The Mail.Send / Channel.Create
-// etc. scopes used by the CLIs are NOT requested here — those are CLI-only.
+// jobTitle/department for the header badge. Mail.Send is consented at login
+// so the dashboard can call Graph /sendMail directly for branded HTML emails
+// (with the CID-inlined RealHack wordmark) instead of handing off to Outlook
+// via mailto: links. Send-As on RealHack@realpage.com is enforced at the
+// Exchange layer for the signed-in user — Mail.Send just gives us a token
+// the browser can use to POST to /users/<shared>/sendMail.
 export const loginRequest = {
-  scopes: ['User.Read'],
+  scopes: ['User.Read', 'Mail.Send'],
 };
+
+// Scope set we ask for when sending an email from the dashboard. Same as
+// login, but kept as a named constant so callers can reason about it.
+const GRAPH_SEND_SCOPES = ['Mail.Send'];
+
+/**
+ * Acquire a Graph-scoped ACCESS TOKEN (audience = graph.microsoft.com)
+ * for the signed-in user. Different from getAccessToken() above — that
+ * one returns our app's ID token for backend auth. This one is the token
+ * the browser uses to POST to graph.microsoft.com/.../sendMail.
+ *
+ * If the silent acquire fails because Mail.Send hasn't been consented
+ * yet (e.g. an existing session that pre-dates this feature), we throw
+ * InteractionRequiredAuthError back up so the caller can decide whether
+ * to redirect the user through a consent flow.
+ */
+export async function getGraphSendToken(): Promise<string> {
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length === 0) {
+    throw new Error('Not signed in — cannot send via Graph.');
+  }
+  const account = accounts[0];
+  try {
+    const result = await msalInstance.acquireTokenSilent({
+      scopes: GRAPH_SEND_SCOPES,
+      account,
+    });
+    return result.accessToken;
+  } catch (e) {
+    if (e instanceof InteractionRequiredAuthError) {
+      // Consent for Mail.Send hasn't been granted yet in this session.
+      // Redirect through MS to consent, then come back — the post-redirect
+      // promise handler in main.tsx will resolve the result, but the
+      // current send will be lost. Caller should surface a clear message.
+      await msalInstance.acquireTokenRedirect({ scopes: GRAPH_SEND_SCOPES, account });
+      // acquireTokenRedirect navigates away; this line is unreachable.
+      throw new Error('Microsoft consent required — redirecting…');
+    }
+    throw e;
+  }
+}
 
 /**
  * Get a bearer token for the signed-in user — used in the Authorization

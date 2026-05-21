@@ -151,6 +151,10 @@ export interface RenderedEmail {
   to: string[];
   subject: string;
   body: string;
+  // The branded HTML version of the body. Null when the template has no
+  // HTML variant or when the composer edited the plain-text body (in which
+  // case we drop the HTML override so the new text is what gets sent).
+  body_html: string | null;
   missing_fields: string[];
 }
 
