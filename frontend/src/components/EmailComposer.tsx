@@ -5,7 +5,19 @@ import type { Team } from '../types';
 interface Props {
   open: boolean;
   teams: Team[];
+  userEmail?: string;  // signed-in organizer's email — used as test-mode default
   onClose: () => void;
+}
+
+/**
+ * Split a comma- / semicolon- / whitespace-separated address list into an
+ * array, dropping anything that doesn't look like an email address.
+ */
+function parseAddressList(raw: string): string[] {
+  return raw
+    .split(/[\s,;]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.includes('@'));
 }
 
 type TeamFilter = 'all' | 'flagged' | 'incomplete' | 'complete';
@@ -30,14 +42,24 @@ function defaultFilterFor(templateId: string): TeamFilter {
   return 'all';
 }
 
-function mailtoLink(email: RenderedEmail): string {
-  const to = email.to.join(',');
-  const subj = encodeURIComponent(email.subject);
-  const body = encodeURIComponent(email.body);
-  return `mailto:${to}?subject=${subj}&body=${body}`;
+interface MailtoOverrides {
+  toOverride?: string[];   // if set, replaces email.to
+  cc?: string[];
+  bcc?: string[];
 }
 
-export function EmailComposer({ open, teams, onClose }: Props) {
+function mailtoLink(email: RenderedEmail, overrides: MailtoOverrides = {}): string {
+  const to = (overrides.toOverride && overrides.toOverride.length > 0 ? overrides.toOverride : email.to).join(',');
+  const params = new URLSearchParams();
+  params.set('subject', email.subject);
+  params.set('body', email.body);
+  if (overrides.cc && overrides.cc.length > 0) params.set('cc', overrides.cc.join(','));
+  if (overrides.bcc && overrides.bcc.length > 0) params.set('bcc', overrides.bcc.join(','));
+  // URLSearchParams encodes spaces as '+' but mailto: wants %20 — swap.
+  return `mailto:${to}?${params.toString().replace(/\+/g, '%20')}`;
+}
+
+export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
   const [templates, setTemplates] = useState<EmailTemplate[]>([]);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [filter, setFilter] = useState<TeamFilter>('all');
@@ -48,6 +70,28 @@ export function EmailComposer({ open, teams, onClose }: Props) {
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
   const [duplicates, setDuplicates] = useState<Record<number, { duplicate: boolean; last_sent_at?: string }>>({});
   const [sentTeams, setSentTeams] = useState<Set<number>>(new Set());
+
+  // ---- CC / BCC / To-override controls (applied to every email in the batch) ----
+  const [ccRaw, setCcRaw] = useState('');
+  const [bccRaw, setBccRaw] = useState('');
+  const [toOverrideRaw, setToOverrideRaw] = useState('');
+  const [testMode, setTestMode] = useState(false);
+
+  // Test mode auto-fills To with the signed-in user's address so nothing
+  // accidentally goes to a real team during testing.
+  const effectiveToOverride = useMemo(() => {
+    if (testMode && userEmail) return [userEmail];
+    const list = parseAddressList(toOverrideRaw);
+    return list.length > 0 ? list : undefined;
+  }, [testMode, userEmail, toOverrideRaw]);
+
+  const ccList = useMemo(() => parseAddressList(ccRaw), [ccRaw]);
+  const bccList = useMemo(() => parseAddressList(bccRaw), [bccRaw]);
+  const overrides: MailtoOverrides = {
+    toOverride: effectiveToOverride,
+    cc: ccList,
+    bcc: bccList,
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -252,6 +296,73 @@ export function EmailComposer({ open, teams, onClose }: Props) {
           {/* STEP 3: preview */}
           {stage === 'preview' && rendered && (
             <div className="space-y-3">
+              {/* Recipients control panel — applied to every email in the batch */}
+              <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Recipients (applied to every email)</h4>
+                  {userEmail && (
+                    <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={testMode}
+                        onChange={(e) => setTestMode(e.target.checked)}
+                        className="accent-amber-400"
+                      />
+                      <span>Send to me only (test mode)</span>
+                    </label>
+                  )}
+                </div>
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500">
+                    To override (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={testMode && userEmail ? userEmail : toOverrideRaw}
+                    onChange={(e) => setToOverrideRaw(e.target.value)}
+                    disabled={testMode}
+                    placeholder="Leave blank to send to each team's members. Comma-separated to redirect."
+                    className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-lime-500/60 disabled:opacity-60"
+                  />
+                  {testMode && (
+                    <p className="text-[10px] text-amber-300 mt-1">
+                      Test mode is on — every email goes to you only. Uncheck to send to real recipients.
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-slate-500">CC</label>
+                    <input
+                      type="text"
+                      value={ccRaw}
+                      onChange={(e) => setCcRaw(e.target.value)}
+                      placeholder="organizer1@realpage.com, organizer2@..."
+                      className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-lime-500/60"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-slate-500">BCC</label>
+                    <input
+                      type="text"
+                      value={bccRaw}
+                      onChange={(e) => setBccRaw(e.target.value)}
+                      placeholder="audit@realpage.com, ..."
+                      className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-lime-500/60"
+                    />
+                  </div>
+                </div>
+
+                {(ccList.length > 0 || bccList.length > 0) && (
+                  <div className="text-[11px] text-slate-400">
+                    {ccList.length > 0 && <span className="mr-3">CC: <span className="text-slate-200">{ccList.length} address{ccList.length === 1 ? '' : 'es'}</span></span>}
+                    {bccList.length > 0 && <span>BCC: <span className="text-slate-200">{bccList.length} address{bccList.length === 1 ? '' : 'es'}</span></span>}
+                  </div>
+                )}
+              </div>
+
               <div className="flex flex-wrap gap-2 items-center">
                 <button
                   onClick={reset}
@@ -263,8 +374,9 @@ export function EmailComposer({ open, teams, onClose }: Props) {
                 <button
                   onClick={() => {
                     rendered.forEach((e) => {
-                      if (e.to.length > 0) {
-                        window.open(mailtoLink(e), '_blank');
+                      const hasRecipients = (effectiveToOverride && effectiveToOverride.length > 0) || e.to.length > 0;
+                      if (hasRecipients) {
+                        window.open(mailtoLink(e, overrides), '_blank');
                         logSend(e);
                       }
                     });
@@ -275,9 +387,12 @@ export function EmailComposer({ open, teams, onClose }: Props) {
                 </button>
                 <button
                   onClick={() => {
-                    const text = rendered.map((e) =>
-                      `To: ${e.to.join(', ') || '(no email)'}\nSubject: ${e.subject}\n\n${e.body}\n\n---\n\n`
-                    ).join('');
+                    const text = rendered.map((e) => {
+                      const to = (effectiveToOverride && effectiveToOverride.length > 0 ? effectiveToOverride : e.to).join(', ') || '(no email)';
+                      const ccLine = ccList.length > 0 ? `Cc: ${ccList.join(', ')}\n` : '';
+                      const bccLine = bccList.length > 0 ? `Bcc: ${bccList.join(', ')}\n` : '';
+                      return `To: ${to}\n${ccLine}${bccLine}Subject: ${e.subject}\n\n${e.body}\n\n---\n\n`;
+                    }).join('');
                     navigator.clipboard.writeText(text);
                     rendered.forEach((e) => logSend(e));
                   }}
@@ -295,7 +410,8 @@ export function EmailComposer({ open, teams, onClose }: Props) {
               <div className="space-y-2">
                 {rendered.map((e, i) => {
                   const expanded = previewIdx === i;
-                  const hasRecipients = e.to.length > 0;
+                  const effectiveTo = effectiveToOverride && effectiveToOverride.length > 0 ? effectiveToOverride : e.to;
+                  const hasRecipients = effectiveTo.length > 0;
                   const dup = duplicates[e.team_id];
                   const alreadySent = sentTeams.has(e.team_id);
                   return (
@@ -319,8 +435,11 @@ export function EmailComposer({ open, teams, onClose }: Props) {
                           </div>
                           <div className="text-xs flex flex-col items-end">
                             <span className={hasRecipients ? 'text-lime-300' : 'text-amber-400'}>
-                              {hasRecipients ? `${e.to.length} recipient${e.to.length === 1 ? '' : 's'}` : 'no email on file'}
+                              {hasRecipients ? `${effectiveTo.length} recipient${effectiveTo.length === 1 ? '' : 's'}` : 'no email on file'}
                             </span>
+                            {effectiveToOverride && effectiveToOverride.length > 0 && (
+                              <span className="text-[10px] text-amber-300">overridden</span>
+                            )}
                             {e.missing_fields.length > 0 && (
                               <span className="text-rose-300">{e.missing_fields.length} missing</span>
                             )}
@@ -331,8 +450,25 @@ export function EmailComposer({ open, teams, onClose }: Props) {
                         <div className="border-t border-slate-700/40 px-4 py-3 space-y-3">
                           <div>
                             <div className="text-xs uppercase tracking-wider text-slate-400">To</div>
-                            <div className="text-sm text-slate-200">{e.to.join(', ') || <span className="italic text-amber-400">No email addresses on file</span>}</div>
+                            <div className="text-sm text-slate-200">
+                              {effectiveTo.join(', ') || <span className="italic text-amber-400">No email addresses on file</span>}
+                              {effectiveToOverride && effectiveToOverride.length > 0 && (
+                                <span className="ml-2 text-xs text-amber-300">(override — team's emails {e.to.length > 0 ? `[${e.to.join(', ')}]` : '(none)'} ignored)</span>
+                              )}
+                            </div>
                           </div>
+                          {ccList.length > 0 && (
+                            <div>
+                              <div className="text-xs uppercase tracking-wider text-slate-400">CC</div>
+                              <div className="text-sm text-slate-200">{ccList.join(', ')}</div>
+                            </div>
+                          )}
+                          {bccList.length > 0 && (
+                            <div>
+                              <div className="text-xs uppercase tracking-wider text-slate-400">BCC</div>
+                              <div className="text-sm text-slate-200">{bccList.join(', ')}</div>
+                            </div>
+                          )}
                           <div>
                             <div className="text-xs uppercase tracking-wider text-slate-400">Subject</div>
                             <div className="text-sm text-slate-100 font-semibold">{e.subject}</div>
@@ -343,7 +479,7 @@ export function EmailComposer({ open, teams, onClose }: Props) {
                           </div>
                           <div className="flex gap-2">
                             <a
-                              href={mailtoLink(e)}
+                              href={mailtoLink(e, overrides)}
                               target="_blank"
                               rel="noreferrer"
                               onClick={() => { if (hasRecipients) logSend(e); }}
@@ -353,7 +489,10 @@ export function EmailComposer({ open, teams, onClose }: Props) {
                             </a>
                             <button
                               onClick={() => {
-                                navigator.clipboard.writeText(`To: ${e.to.join(', ')}\nSubject: ${e.subject}\n\n${e.body}`);
+                                const toLine = (effectiveToOverride && effectiveToOverride.length > 0 ? effectiveToOverride : e.to).join(', ');
+                                const ccLine = ccList.length > 0 ? `\nCc: ${ccList.join(', ')}` : '';
+                                const bccLine = bccList.length > 0 ? `\nBcc: ${bccList.join(', ')}` : '';
+                                navigator.clipboard.writeText(`To: ${toLine}${ccLine}${bccLine}\nSubject: ${e.subject}\n\n${e.body}`);
                                 logSend(e);
                               }}
                               className="text-xs px-3 py-1.5 rounded bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold transition"

@@ -432,6 +432,7 @@ export default function App() {
       <EmailComposer
         open={composerOpen}
         teams={teams}
+        userEmail={user?.email}
         onClose={() => setComposerOpen(false)}
       />
 
