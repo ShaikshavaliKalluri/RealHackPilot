@@ -45,7 +45,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from _device_code_auth import acquire_token, decode_jwt_payload  # noqa: E402
 from app.db import SessionLocal  # noqa: E402
-from app.emails import TEMPLATES, render_many  # noqa: E402
+from app.emails import TEMPLATES, get_logo_attachment, render_many  # noqa: E402
 from app.models import CommLog, Team  # noqa: E402
 
 load_dotenv(".env")
@@ -126,10 +126,13 @@ def send_one(
     to_emails: list[str],
     cc_emails: list[str] | None,
     send_as: str | None,
+    inline_attachments: list[dict] | None = None,
 ) -> tuple[int, str]:
     """POST /sendMail. Returns (status_code, response_text_or_empty).
 
     Uses HTML body when provided (richer formatting); falls back to plain text.
+    inline_attachments (Graph fileAttachment dicts with isInline=true) are only
+    sent with HTML messages — plain-text bodies can't reference CIDs.
     """
     content_type = "HTML" if body_html else "text"
     content = body_html if body_html else body_text
@@ -140,6 +143,8 @@ def send_one(
     }
     if cc_emails:
         message["ccRecipients"] = [{"emailAddress": {"address": e}} for e in cc_emails if e]
+    if body_html and inline_attachments:
+        message["attachments"] = inline_attachments
 
     payload = {"message": message, "saveToSentItems": True}
 
@@ -260,6 +265,13 @@ def main() -> int:
     sent = 0
     skipped: list[tuple[str, str]] = []
 
+    # Load the brand logo once. If unavailable, HTML emails still go out but
+    # the <img src="cid:realhack-logo"> tag renders as alt-text instead.
+    logo_attachment = get_logo_attachment()
+    inline_attachments = [logo_attachment] if logo_attachment else None
+    if inline_attachments is None:
+        warn("RealHack logo PNG not found — HTML emails will render without the inline brand mark.")
+
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     with httpx.Client(headers=headers, timeout=30) as client:
         for r in rendered:
@@ -293,6 +305,7 @@ def main() -> int:
                     to_emails=recipients,
                     cc_emails=cc,
                     send_as=MAIL_FROM or None,
+                    inline_attachments=inline_attachments,
                 )
             except Exception as e:
                 err(f"send failed for '{r['team_name']}': {e}")

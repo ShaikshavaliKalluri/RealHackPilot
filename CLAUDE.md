@@ -63,7 +63,8 @@ python verify_graph_auth.py
 - **FK strategy**: `members.team_id` and `judge_score_records.{team_id,judge_id}` use `ON DELETE CASCADE` so re-uploading the MS Forms export is safe. `comm_log.team_id` uses `ON DELETE SET NULL` to preserve the audit trail.
 - **LLM calls**: always go through `llm.py` (handles OpenAI → Anthropic fallback). `gpt-4o` for screening, `gpt-4o-mini` for the chatbot.
 - **Long-running endpoints** (AI screening, channel provisioning) must run in a background thread + expose a `/status` polling endpoint. Sync endpoints time out at the nginx layer (~60s).
-- **Email body**: always set both `body` (plaintext) and `body_html` in templates. `send_emails.py` prefers HTML when available. `_html_wrap()` in `emails.py` wraps content with the branded header/footer (#0078d4 blue).
+- **Email body**: always set both `body` (plaintext) and `body_html` in templates. `send_emails.py` prefers HTML when available. `_html_wrap()` in `emails.py` wraps content with the branded header (wordmark PNG inlined via CID, blue accent strip below).
+- **Inline brand logo in emails**: HTML templates reference the wordmark via `<img src="cid:realhack-logo">`. `get_logo_attachment()` in `emails.py` returns the Graph `fileAttachment` dict (base64 PNG, `isInline=True`, `contentId=LOGO_CID`). `send_emails.py` loads it once at startup and passes via `send_one(..., inline_attachments=[...])`. Source-of-truth PNG lives at `frontend/public/realhack-logo.png` — backend reads it via relative path, no duplicate copy.
 - **Never commit `.env`**. `AZURE_CLIENT_SECRET`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` live there.
 
 ## Domain Context

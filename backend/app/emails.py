@@ -5,12 +5,44 @@ Tokens are simple {token} substitutions filled from the team record.
 """
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 from sqlalchemy.orm import Session
 
 from .models import Team
+
+
+# CID for the inline brand logo. Templates reference it via <img src="cid:realhack-logo">.
+# Senders (send_emails.py) attach the bytes returned by get_logo_attachment() to the
+# Graph /sendMail payload so the image renders inline instead of as a broken external link.
+LOGO_CID = "realhack-logo"
+
+# Canonical wordmark PNG — single source of truth, owned by the frontend bundle.
+_LOGO_PATH = Path(__file__).parent.parent.parent / "frontend" / "public" / "realhack-logo.png"
+
+
+def get_logo_attachment() -> dict | None:
+    """Graph fileAttachment dict for the inline RealHack wordmark.
+
+    Returns None if the PNG can't be read — sender then sends the HTML without
+    the attachment and the <img> tag renders as alt text rather than failing
+    the whole message.
+    """
+    try:
+        data = _LOGO_PATH.read_bytes()
+    except OSError:
+        return None
+    return {
+        "@odata.type": "#microsoft.graph.fileAttachment",
+        "name": "realhack-logo.png",
+        "contentType": "image/png",
+        "contentId": LOGO_CID,
+        "isInline": True,
+        "contentBytes": base64.b64encode(data).decode("ascii"),
+    }
 
 
 CRITICAL_FIELDS = {
@@ -35,7 +67,13 @@ class EmailTemplate:
 
 # ---- HTML branded wrapper ----
 def _html_wrap(content: str) -> str:
-    """Wrap a content HTML snippet in the RealHack branded email shell."""
+    """Wrap a content HTML snippet in the RealHack branded email shell.
+
+    Header uses the official wordmark via CID (<img src="cid:realhack-logo">).
+    Background is white because the wordmark is bright blue — a blue header
+    would hide it. A thin blue accent line below the logo preserves the
+    brand-color signal.
+    """
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -44,9 +82,9 @@ def _html_wrap(content: str) -> str:
   <style>
     body {{margin:0;padding:0;background:#f0f2f5;font-family:-apple-system,Segoe UI,Arial,sans-serif;}}
     .wrap {{max-width:600px;margin:24px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);}}
-    .hdr {{background:#0078d4;padding:24px 32px;}}
-    .hdr h1 {{color:#fff;margin:0;font-size:20px;font-weight:700;letter-spacing:-.3px;}}
-    .hdr p {{color:#a8d4f5;margin:4px 0 0;font-size:12px;}}
+    .hdr {{background:#ffffff;padding:24px 32px 18px;border-bottom:3px solid #0078d4;}}
+    .hdr img {{display:block;height:42px;width:auto;margin-bottom:8px;}}
+    .hdr p {{color:#5b6b7c;margin:0;font-size:12px;letter-spacing:.2px;}}
     .bdy {{padding:28px 32px;color:#222;font-size:15px;line-height:1.65;}}
     .bdy p {{margin:0 0 14px;}}
     .bdy ul {{margin:8px 0 14px;padding-left:22px;}}
@@ -62,7 +100,7 @@ def _html_wrap(content: str) -> str:
 <body>
   <div class="wrap">
     <div class="hdr">
-      <h1>RealHack 2026</h1>
+      <img src="cid:{LOGO_CID}" alt="RealHack 2026">
       <p>June 18–19 &nbsp;·&nbsp; RealPage Internal Hackathon</p>
     </div>
     <div class="bdy">
