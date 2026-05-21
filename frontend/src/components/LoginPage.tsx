@@ -21,14 +21,16 @@ export function LoginPage({ error }: Props) {
       <div className="w-full max-w-md bg-ink-800/80 border border-slate-700/40 rounded-2xl shadow-2xl shadow-black/40 p-8">
         {/* Logo / branding */}
         <div className="mb-7">
-          <div className="text-xs tracking-[0.25em] font-bold text-lime-400 uppercase mb-2">
-            RealHack Pilot
-          </div>
-          <h1 className="text-3xl font-extrabold tracking-tight">
-            Organizer <span className="text-lime-300">Dashboard</span>
+          <img
+            src="/realhack-logo.png"
+            alt="RealHack 2026"
+            className="h-12 mb-4"
+          />
+          <h1 className="text-2xl font-extrabold tracking-tight">
+            Organizer <span className="text-sky-300">Dashboard</span>
           </h1>
           <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-            RealHack 2026 · June 18–19 · RealPage Internal Hackathon
+            June 18–19 · RealPage Internal Hackathon
           </p>
         </div>
 

@@ -157,8 +157,12 @@ export default function App() {
     <div className="min-h-screen p-8 max-w-7xl mx-auto">
       <header className="mb-6 flex items-start justify-between gap-6">
         <div className="min-w-0 flex-1">
-          <div className="text-xs tracking-[0.2em] font-bold text-lime-400 uppercase">RealHack Pilot</div>
-          <h1 className="text-4xl font-extrabold mt-2 tracking-tight">
+          <img
+            src="/realhack-logo.png"
+            alt="RealHack 2026"
+            className="h-10 mb-3"
+          />
+          <h1 className="text-4xl font-extrabold mt-1 tracking-tight">
             {mode === 'dashboard' && <>Registration <span className="text-lime-300">Command Center</span></>}
             {mode === 'judge' && <>Judge <span className="text-sky-300">Scorecard</span></>}
             {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}
