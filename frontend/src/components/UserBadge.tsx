@@ -30,18 +30,31 @@ export function UserBadge({ user }: Props) {
     return () => window.removeEventListener('mousedown', onClick);
   }, [open]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setOpen(false);
-    // Microsoft only skips its "Pick an account to sign out of" picker when
-    // we pass a hint — `account` alone isn't enough. We pass both `logoutHint`
-    // (string form, used as the OIDC `logout_hint` query param) and `account`
-    // (which MSAL uses internally), preferring the `login_hint` ID-token claim
-    // when present and falling back to the account's UPN/username.
     const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0];
+    // Microsoft will only skip its "Pick an account to sign out of" picker
+    // when we pass a hint. The most reliable hint is `idTokenHint` (the raw
+    // ID token) — this is OIDC-standard and works without any extra app-reg
+    // claim configuration. `logoutHint` is a softer fallback if the silent
+    // token acquire fails.
+    let idTokenHint: string | undefined;
+    try {
+      if (account) {
+        const tokens = await instance.acquireTokenSilent({
+          scopes: ['User.Read'],
+          account,
+        });
+        idTokenHint = tokens.idToken;
+      }
+    } catch {
+      // No fresh token available — fall through to logoutHint only
+    }
     const claims = account?.idTokenClaims as { login_hint?: string } | undefined;
     const logoutHint = claims?.login_hint ?? account?.username;
     instance.logoutRedirect({
       account,
+      idTokenHint,
       logoutHint,
       postLogoutRedirectUri: window.location.origin,
     }).catch((e) => {
