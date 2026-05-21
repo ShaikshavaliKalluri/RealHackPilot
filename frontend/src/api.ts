@@ -453,6 +453,8 @@ export interface BackfillMentorResult {
   teams_with_raw: number;
   mentor_locations_set: number;
   mentor_tshirt_sizes_set: number;
+  mentor_addresses_set: number;
+  member_addresses_set: number;
   performed_by: string | null;
 }
 
