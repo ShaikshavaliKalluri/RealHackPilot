@@ -242,17 +242,23 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
     const mentorLocations = Object.entries(mentorLocCounts).sort((a, b) => b[1] - a[1]);
     const mentorLocationTotal = Object.values(mentorLocCounts).reduce((s, c) => s + c, 0);
 
-    // ===== T-shirt sizing — dedupe by email, mentors included, everyone
+    // ===== T-shirt sizing — dedupe by email, members + mentors, everyone
     //       included (people who didn't fill in a size get "No response").
+    //       Chart counts are computed here too so they match the CSV exactly.
     const tshirtCsvRows: (string | number | null | undefined)[][] = [];
     const tshirtSeen = new Set<string>();
+    const tshirtSizeMap: Record<string, number> = {};
     let tshirtNoResponse = 0;
     for (const t of teams) {
       for (const m of t.members) {
         const key = (m.email || `${t.id}:${m.name}`).toLowerCase();
         if (tshirtSeen.has(key)) continue;
         tshirtSeen.add(key);
-        if (!m.tshirt_size) tshirtNoResponse++;
+        if (!m.tshirt_size) {
+          tshirtNoResponse++;
+        } else {
+          tshirtSizeMap[m.tshirt_size] = (tshirtSizeMap[m.tshirt_size] || 0) + 1;
+        }
         tshirtCsvRows.push([
           t.name,
           m.name,
@@ -267,7 +273,11 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
       const mentorKey = (t.mentor_email || t.mentor_name || '').trim().toLowerCase();
       if (mentorKey && !tshirtSeen.has(mentorKey)) {
         tshirtSeen.add(mentorKey);
-        if (!t.mentor_tshirt_size) tshirtNoResponse++;
+        if (!t.mentor_tshirt_size) {
+          tshirtNoResponse++;
+        } else {
+          tshirtSizeMap[t.mentor_tshirt_size] = (tshirtSizeMap[t.mentor_tshirt_size] || 0) + 1;
+        }
         tshirtCsvRows.push([
           t.name,
           t.mentor_name ?? '',
@@ -280,6 +290,8 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
         ]);
       }
     }
+    const tshirtSizesFromData = Object.entries(tshirtSizeMap).sort((a, b) => b[1] - a[1]);
+    const tshirtTotalFromData = Object.values(tshirtSizeMap).reduce((s, c) => s + c, 0);
 
     // Keep `locations`/`locationTotal` referencing the member view for any
     // legacy chart that still uses it (we're removing the inline chart below
@@ -368,6 +380,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
       memberLocations, memberLocationTotal, memberCsvRows,
       mentorLocations, mentorLocationTotal, mentorCsvRows,
       tshirtCsvRows, tshirtNoResponse,
+      tshirtSizesFromData, tshirtTotalFromData,
       dualRoleEmails,
       compBuckets,
       aiScoreBuckets, aiScreened,
@@ -474,18 +487,18 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
               derived.tshirtCsvRows,
             )}
           />
-          {derived.tshirtSizes.length === 0 && derived.tshirtNoResponse === 0 ? (
+          {derived.tshirtSizesFromData.length === 0 && derived.tshirtNoResponse === 0 ? (
             <p className="text-sm text-slate-400 italic">No size data yet.</p>
           ) : (
             <div className="space-y-2.5">
-              {derived.tshirtSizes.map(([size, count]) => (
-                <HBar key={size} label={size.toUpperCase()} count={count} total={derived.tshirtTotal + derived.tshirtNoResponse} color="bg-violet-500/60" />
+              {derived.tshirtSizesFromData.map(([size, count]) => (
+                <HBar key={size} label={size.toUpperCase()} count={count} total={derived.tshirtTotalFromData + derived.tshirtNoResponse} color="bg-violet-500/60" />
               ))}
               {derived.tshirtNoResponse > 0 && (
-                <HBar key="no-response" label="No response" count={derived.tshirtNoResponse} total={derived.tshirtTotal + derived.tshirtNoResponse} color="bg-slate-600/40" />
+                <HBar key="no-response" label="No response" count={derived.tshirtNoResponse} total={derived.tshirtTotalFromData + derived.tshirtNoResponse} color="bg-slate-600/40" />
               )}
               <div className="text-xs text-slate-500 mt-1 text-right">
-                {derived.tshirtTotal + derived.tshirtNoResponse} total · {derived.tshirtNoResponse} no response
+                {derived.tshirtTotalFromData + derived.tshirtNoResponse} total · {derived.tshirtNoResponse} no response
               </div>
             </div>
           )}
