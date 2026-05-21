@@ -242,17 +242,17 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
     const mentorLocations = Object.entries(mentorLocCounts).sort((a, b) => b[1] - a[1]);
     const mentorLocationTotal = Object.values(mentorLocCounts).reduce((s, c) => s + c, 0);
 
-    // ===== T-shirt sizing — one row per member (not deduped: a person might
-    //       belong to multiple teams, but for swag procurement we still only
-    //       buy one shirt; dedupe by email here too). Mentors included.
+    // ===== T-shirt sizing — dedupe by email, mentors included, everyone
+    //       included (people who didn't fill in a size get "No response").
     const tshirtCsvRows: (string | number | null | undefined)[][] = [];
     const tshirtSeen = new Set<string>();
+    let tshirtNoResponse = 0;
     for (const t of teams) {
       for (const m of t.members) {
         const key = (m.email || `${t.id}:${m.name}`).toLowerCase();
         if (tshirtSeen.has(key)) continue;
         tshirtSeen.add(key);
-        if (!m.tshirt_size) continue;
+        if (!m.tshirt_size) tshirtNoResponse++;
         tshirtCsvRows.push([
           t.name,
           m.name,
@@ -260,25 +260,24 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
           prettyLocation(m.location),
           m.address ?? '',
           prettyLocation(m.location),
-          m.tshirt_size,
+          m.tshirt_size || 'No response',
           'Member',
         ]);
       }
-      if (t.mentor_email && t.mentor_tshirt_size) {
-        const key = t.mentor_email.toLowerCase();
-        if (!tshirtSeen.has(key)) {
-          tshirtSeen.add(key);
-          tshirtCsvRows.push([
-            t.name,
-            t.mentor_name ?? '',
-            t.mentor_email,
-            prettyLocation(t.mentor_location),
-            t.mentor_address ?? '',
-            prettyLocation(t.mentor_location),
-            t.mentor_tshirt_size,
-            'Mentor',
-          ]);
-        }
+      const mentorKey = (t.mentor_email || t.mentor_name || '').trim().toLowerCase();
+      if (mentorKey && !tshirtSeen.has(mentorKey)) {
+        tshirtSeen.add(mentorKey);
+        if (!t.mentor_tshirt_size) tshirtNoResponse++;
+        tshirtCsvRows.push([
+          t.name,
+          t.mentor_name ?? '',
+          t.mentor_email ?? '',
+          prettyLocation(t.mentor_location),
+          t.mentor_address ?? '',
+          prettyLocation(t.mentor_location),
+          t.mentor_tshirt_size || 'No response',
+          'Mentor',
+        ]);
       }
     }
 
@@ -368,7 +367,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
       locations, locationTotal,
       memberLocations, memberLocationTotal, memberCsvRows,
       mentorLocations, mentorLocationTotal, mentorCsvRows,
-      tshirtCsvRows,
+      tshirtCsvRows, tshirtNoResponse,
       dualRoleEmails,
       compBuckets,
       aiScoreBuckets, aiScreened,
@@ -475,14 +474,19 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props) {
               derived.tshirtCsvRows,
             )}
           />
-          {derived.tshirtSizes.length === 0 ? (
+          {derived.tshirtSizes.length === 0 && derived.tshirtNoResponse === 0 ? (
             <p className="text-sm text-slate-400 italic">No size data yet.</p>
           ) : (
             <div className="space-y-2.5">
               {derived.tshirtSizes.map(([size, count]) => (
-                <HBar key={size} label={size.toUpperCase()} count={count} total={derived.tshirtTotal} color="bg-violet-500/60" />
+                <HBar key={size} label={size.toUpperCase()} count={count} total={derived.tshirtTotal + derived.tshirtNoResponse} color="bg-violet-500/60" />
               ))}
-              <div className="text-xs text-slate-500 mt-1 text-right">{derived.tshirtTotal} total size responses</div>
+              {derived.tshirtNoResponse > 0 && (
+                <HBar key="no-response" label="No response" count={derived.tshirtNoResponse} total={derived.tshirtTotal + derived.tshirtNoResponse} color="bg-slate-600/40" />
+              )}
+              <div className="text-xs text-slate-500 mt-1 text-right">
+                {derived.tshirtTotal + derived.tshirtNoResponse} total · {derived.tshirtNoResponse} no response
+              </div>
             </div>
           )}
         </Section>
