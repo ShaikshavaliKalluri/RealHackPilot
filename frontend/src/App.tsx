@@ -168,53 +168,64 @@ export default function App() {
 
   return (
     <div className="min-h-screen p-8 max-w-7xl mx-auto">
-      <header className="mb-6">
-        <div className="flex items-center justify-between gap-6 mb-4">
-          <img
-            src="/realhack-logo.png"
-            alt="RealHack 2026"
-            className="h-12 -ml-1"
-          />
+      <header className="mb-6 pb-5 border-b border-slate-800/60">
+        <div className="flex items-center justify-between gap-6 mb-5">
+          {/* Brand mark — typographic, matches LoginPage */}
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-sky-400 to-sky-600 flex items-center justify-center shadow-md shadow-sky-500/30">
+              <svg viewBox="0 0 24 24" className="w-4 h-4 fill-white">
+                <polygon points="8,5 8,19 19,12" />
+              </svg>
+            </div>
+            <div className="text-xl font-extrabold tracking-tight">
+              RealHack <span className="text-sky-400">&apos;26</span>
+            </div>
+            <span className="hidden md:inline-block text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 bg-slate-800/60 border border-slate-700/40 rounded-md text-slate-400">
+              Internal Tool
+            </span>
+          </div>
+
+          {/* Controls */}
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={() => exportCsv().catch((e) => alert(`Export failed: ${e.message ?? e}`))}
-              className="bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold px-3 py-2 rounded-lg text-sm transition whitespace-nowrap"
+              className="bg-ink-800/60 hover:bg-ink-800 border border-slate-700/40 hover:border-slate-600 text-slate-200 font-medium px-3 py-1.5 rounded-lg text-sm transition whitespace-nowrap"
               title="Download teams + scores as CSV (opens in Excel)"
             >
               Export CSV
             </button>
-            <div className="flex gap-1 bg-ink-800/60 border border-slate-700/40 rounded-lg p-1">
+            <nav className="flex gap-1 bg-ink-900/40 border border-slate-800/60 rounded-lg p-1">
               <button
                 onClick={() => setMode('dashboard')}
-                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'dashboard' ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'dashboard' ? 'bg-lime-500/15 text-lime-200 border-lime-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
               >
                 Dashboard
               </button>
               <button
                 onClick={() => setMode('judge')}
-                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'judge' ? 'bg-sky-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'judge' ? 'bg-sky-500/15 text-sky-200 border-sky-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
               >
                 Judge mode
               </button>
               <button
                 onClick={() => setMode('scoring')}
-                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'scoring' ? 'bg-amber-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'scoring' ? 'bg-amber-500/15 text-amber-200 border-amber-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
               >
                 Scoring
               </button>
               <button
                 onClick={() => setMode('comms')}
-                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'comms' ? 'bg-violet-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'comms' ? 'bg-violet-500/15 text-violet-200 border-violet-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
               >
                 Comms
               </button>
               <button
                 onClick={() => setMode('analytics')}
-                className={`px-4 py-2 rounded text-sm font-semibold transition ${mode === 'analytics' ? 'bg-teal-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'analytics' ? 'bg-teal-500/15 text-teal-200 border-teal-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
               >
                 Analytics
               </button>
-            </div>
+            </nav>
             {user && <UserBadge user={user} />}
           </div>
         </div>
