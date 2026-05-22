@@ -3,6 +3,7 @@ import type { Team, RubricAxis, JudgeScoreRecord } from '../types';
 import {
   fetchRubric,
   fetchMyAssignedTeams,
+  fetchTeamsForJudge,
   fetchJudgeScores,
   submitJudgeScore,
   deleteJudgeScore,
@@ -14,9 +15,12 @@ interface Props {
   judgeId: number;
   judgeName: string;
   user: UserProfile | null;
+  // Preview mode: organizer is viewing AS this judge (read-only banner shown).
+  // When preview is set, teams are fetched via /api/judges/{id}/teams instead of /me/teams.
+  preview?: { onExit: () => void } | null;
 }
 
-export function JudgeDashboard({ judgeId, judgeName, user }: Props) {
+export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
   const [round, setRound] = useState<number>(1);
   const [teams, setTeams] = useState<Team[]>([]);
   const [axes, setAxes] = useState<RubricAxis[]>([]);
@@ -32,14 +36,15 @@ export function JudgeDashboard({ judgeId, judgeName, user }: Props) {
   useEffect(() => {
     setLoading(true);
     setErr(null);
-    Promise.all([fetchMyAssignedTeams(round), fetchJudgeScores({ judge_id: judgeId, round })])
+    const teamsPromise = preview ? fetchTeamsForJudge(judgeId, round) : fetchMyAssignedTeams(round);
+    Promise.all([teamsPromise, fetchJudgeScores({ judge_id: judgeId, round })])
       .then(([t, s]) => {
         setTeams(t);
         setSubmittedScores(s);
       })
       .catch((e) => setErr(e.message || String(e)))
       .finally(() => setLoading(false));
-  }, [judgeId, round]);
+  }, [judgeId, round, preview]);
 
   const scoredTeamIds = useMemo(() => new Set(submittedScores.map((s) => s.team_id)), [submittedScores]);
   const activeTeam = teams.find((t) => t.id === activeTeamId) || null;
@@ -52,6 +57,21 @@ export function JudgeDashboard({ judgeId, judgeName, user }: Props) {
 
   return (
     <div className="min-h-screen">
+      {preview && (
+        <div className="bg-amber-500/15 border-b border-amber-500/40 px-4 py-2.5">
+          <div className="max-w-3xl mx-auto flex items-center justify-between gap-3 flex-wrap text-amber-100">
+            <div className="text-sm">
+              <span className="font-bold">Preview mode</span> — viewing the judge dashboard as <span className="font-bold">{judgeName}</span>.
+            </div>
+            <button
+              onClick={preview.onExit}
+              className="text-xs px-3 py-1.5 rounded font-semibold bg-amber-400 hover:bg-amber-300 text-ink-950 transition"
+            >
+              Exit preview
+            </button>
+          </div>
+        </div>
+      )}
       {/* Top bar — sticky on mobile so judges can always see round + identity */}
       <header className="sticky top-0 z-10 bg-ink-950/95 backdrop-blur border-b border-slate-800/60 px-4 py-3">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">

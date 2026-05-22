@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMsal } from '@azure/msal-react';
+import { fetchJudges } from '../api';
+import type { Judge } from '../types';
 
 export interface UserProfile {
   name: string;
@@ -11,12 +13,32 @@ export interface UserProfile {
 
 interface Props {
   user: UserProfile;
+  // When set, organizers can pick a judge to preview as. Called with judge_id + name on selection.
+  onPreviewAsJudge?: (judgeId: number, judgeName: string) => void;
 }
 
-export function UserBadge({ user }: Props) {
+export function UserBadge({ user, onPreviewAsJudge }: Props) {
   const { instance } = useMsal();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const [judgePickerOpen, setJudgePickerOpen] = useState(false);
+  const [judges, setJudges] = useState<Judge[]>([]);
+  const [judgesLoading, setJudgesLoading] = useState(false);
+
+  const openJudgePicker = async () => {
+    setJudgePickerOpen(true);
+    if (judges.length === 0) {
+      setJudgesLoading(true);
+      try {
+        const list = await fetchJudges();
+        setJudges(list.filter((j) => j.role === 'judge'));
+      } catch (e) {
+        console.error('Failed to load judges:', e);
+      } finally {
+        setJudgesLoading(false);
+      }
+    }
+  };
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -100,6 +122,58 @@ export function UserBadge({ user }: Props) {
               </div>
             )}
           </div>
+
+          {/* Preview-as-judge (organizers only) */}
+          {onPreviewAsJudge && (
+            <>
+              {!judgePickerOpen ? (
+                <button
+                  onClick={openJudgePicker}
+                  className="w-full px-4 py-3 text-left text-sm text-slate-200 hover:bg-sky-500/10 hover:text-sky-300 transition flex items-center gap-2 border-b border-slate-700/40"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  Preview as judge…
+                </button>
+              ) : (
+                <div className="border-b border-slate-700/40">
+                  <div className="px-4 py-2 flex items-center justify-between bg-ink-900/50">
+                    <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Pick a judge to preview</span>
+                    <button
+                      onClick={() => setJudgePickerOpen(false)}
+                      className="text-xs text-slate-400 hover:text-white"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {judgesLoading ? (
+                      <div className="px-4 py-3 text-sm text-slate-400">Loading…</div>
+                    ) : judges.length === 0 ? (
+                      <div className="px-4 py-3 text-sm text-slate-400 italic">No judges added yet. Go to the Judges tab.</div>
+                    ) : (
+                      judges.map((j) => (
+                        <button
+                          key={j.id}
+                          onClick={() => {
+                            onPreviewAsJudge(j.id, j.name);
+                            setJudgePickerOpen(false);
+                            setOpen(false);
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm text-slate-200 hover:bg-sky-500/10 hover:text-sky-300 transition border-t border-slate-800/40 first:border-t-0"
+                        >
+                          <div className="font-semibold truncate">{j.name}</div>
+                          {j.email && <div className="text-xs text-slate-500 truncate">{j.email}</div>}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
 
           {/* Actions */}
           <button

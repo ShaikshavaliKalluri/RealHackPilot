@@ -729,6 +729,23 @@ def my_assigned_teams(
     return db.query(models.Team).filter(models.Team.id.in_(team_ids)).order_by(models.Team.name.asc()).all()
 
 
+@app.get("/api/judges/{judge_id}/teams", response_model=list[TeamOut])
+def teams_for_judge(
+    judge_id: int,
+    round: int | None = None,
+    db: Session = Depends(get_db),
+) -> list[models.Team]:
+    """Teams assigned to the given judge. Used by the organizer 'preview as judge'
+    feature to see exactly what a specific judge will see in their mobile view."""
+    q = db.query(models.JudgeAssignment).filter(models.JudgeAssignment.judge_id == judge_id)
+    if round is not None:
+        q = q.filter(models.JudgeAssignment.round == round)
+    team_ids = [a.team_id for a in q.all()]
+    if not team_ids:
+        return []
+    return db.query(models.Team).filter(models.Team.id.in_(team_ids)).order_by(models.Team.name.asc()).all()
+
+
 @app.get("/api/judges/{judge_id}/assignments", response_model=list[JudgeAssignmentOut])
 def get_judge_assignments(
     judge_id: int,

@@ -29,6 +29,8 @@ export default function App() {
   const { inProgress } = useMsal();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
+  // Organizer-only: lets them preview the dashboard AS a specific judge to verify assignments.
+  const [previewJudge, setPreviewJudge] = useState<{ id: number; name: string } | null>(null);
   const [authError, setAuthError] = useState<string | null>(() => {
     // Pick up any error stashed by main.tsx during MSAL bootstrap
     // (e.g. AADSTS50105 when Entra blocks a user not in the security group).
@@ -187,6 +189,18 @@ export default function App() {
     return <JudgeDashboard judgeId={role.judge_id} judgeName={role.name || 'Judge'} user={user} />;
   }
 
+  // Organizers can preview the judge dashboard AS a specific judge.
+  if (role.role === 'organizer' && previewJudge) {
+    return (
+      <JudgeDashboard
+        judgeId={previewJudge.id}
+        judgeName={previewJudge.name}
+        user={user}
+        preview={{ onExit: () => setPreviewJudge(null) }}
+      />
+    );
+  }
+
   // Users authenticated by Azure AD but not registered in our Judge table.
   if (role.role === 'none') {
     return (
@@ -260,7 +274,14 @@ export default function App() {
                 Judges
               </button>
             </nav>
-            {user && <UserBadge user={user} />}
+            {user && (
+              <UserBadge
+                user={user}
+                onPreviewAsJudge={role?.role === 'organizer'
+                  ? (id, name) => setPreviewJudge({ id, name })
+                  : undefined}
+              />
+            )}
           </div>
         </div>
         <h1 className="text-3xl font-extrabold tracking-tight">

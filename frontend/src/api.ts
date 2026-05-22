@@ -298,6 +298,13 @@ export async function fetchMyAssignedTeams(round?: number): Promise<Team[]> {
   return r.json();
 }
 
+export async function fetchTeamsForJudge(judgeId: number, round?: number): Promise<Team[]> {
+  const qs = round !== undefined ? `?round=${round}` : '';
+  const r = await authFetch(`${BASE}/judges/${judgeId}/teams${qs}`);
+  if (!r.ok) throw new Error(`Teams-for-judge fetch failed: ${r.status}`);
+  return r.json();
+}
+
 export interface JudgeAssignment {
   id: number;
   judge_id: number;
