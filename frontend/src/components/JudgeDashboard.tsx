@@ -4,6 +4,8 @@ import {
   fetchRubric,
   fetchMyAssignedTeams,
   fetchTeamsForJudge,
+  fetchMyAvailableRounds,
+  fetchRoundsForJudge,
   fetchJudgeScores,
   submitJudgeScore,
   deleteJudgeScore,
@@ -26,6 +28,7 @@ type Filter = 'all' | 'scored' | 'pending';
 
 export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
   const [round, setRound] = useState<number>(1);
+  const [availableRounds, setAvailableRounds] = useState<number[]>([1]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [axes, setAxes] = useState<RubricAxis[]>([]);
   const [submittedScores, setSubmittedScores] = useState<JudgeScoreRecord[]>([]);
@@ -38,6 +41,19 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
   useEffect(() => {
     fetchRubric().then((r) => setAxes(r.axes)).catch(() => {});
   }, []);
+
+  // Fetch the rounds the judge actually has panels for. Round 2 stays hidden
+  // until the organizer creates a Round 2 panel containing this judge + teams.
+  useEffect(() => {
+    const p = preview ? fetchRoundsForJudge(judgeId) : fetchMyAvailableRounds();
+    p.then((rounds) => {
+      const list = rounds.length > 0 ? rounds : [1];
+      setAvailableRounds(list);
+      // If the currently-selected round isn't in the list, snap back to the first available one
+      if (!list.includes(round)) setRound(list[0]);
+    }).catch(() => setAvailableRounds([1]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [judgeId, preview]);
 
   useEffect(() => {
     setLoading(true);
@@ -142,17 +158,24 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
 
           {/* Round + Filter + Search controls */}
           <section className="flex flex-wrap gap-3 items-center mb-5">
-            <div className="flex gap-1 bg-ink-900/40 border border-slate-800/60 rounded-lg p-1">
-              {[1, 2].map((r) => (
-                <button
-                  key={r}
-                  onClick={() => { setRound(r); setActiveTeamId(null); }}
-                  className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${round === r ? 'bg-sky-500/15 text-sky-200 border-sky-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
-                >
-                  Round {r}
-                </button>
-              ))}
-            </div>
+            {availableRounds.length > 1 ? (
+              <div className="flex gap-1 bg-ink-900/40 border border-slate-800/60 rounded-lg p-1">
+                {availableRounds.map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => { setRound(r); setActiveTeamId(null); }}
+                    className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${round === r ? 'bg-sky-500/15 text-sky-200 border-sky-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
+                  >
+                    Round {r}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-slate-500">
+                Round {availableRounds[0] ?? 1}
+                <span className="ml-1.5 text-slate-600">· Round 2 unlocks once organizers create a panel for it</span>
+              </div>
+            )}
             <div className="flex gap-1 bg-ink-800/60 border border-slate-700/40 rounded-lg p-1">
               {(['all', 'pending', 'scored'] as Filter[]).map((f) => (
                 <button

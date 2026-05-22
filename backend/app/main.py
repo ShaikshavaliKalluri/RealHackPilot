@@ -747,6 +747,20 @@ def me_role(
     )
 
 
+def _available_rounds_for_judge(db: Session, judge_id: int) -> list[int]:
+    """Rounds where this judge has at least one panel that already has both
+    teams AND judges (i.e. the round is actually ready to be scored)."""
+    panel_rows = db.query(models.Panel).join(
+        models.PanelJudge, models.PanelJudge.panel_id == models.Panel.id
+    ).filter(models.PanelJudge.judge_id == judge_id).all()
+    rounds: set[int] = set()
+    for p in panel_rows:
+        # require at least one team in the panel — otherwise round is effectively empty
+        if any(True for _ in p.teams):
+            rounds.add(p.round)
+    return sorted(rounds)
+
+
 def _team_ids_for_judge_via_panels(db: Session, judge_id: int, round: int | None) -> set[int]:
     """Return the set of team ids the judge sees, derived from panel membership.
 
@@ -790,6 +804,32 @@ def my_assigned_teams(
     if not team_ids:
         return []
     return db.query(models.Team).filter(models.Team.id.in_(team_ids)).order_by(models.Team.name.asc()).all()
+
+
+@app.get("/api/judge/me/rounds", response_model=list[int])
+def my_available_rounds(
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> list[int]:
+    """Rounds the signed-in judge can score in (i.e. has panels with teams)."""
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    email = (profile.get("email") or "").strip().lower()
+    judge = (
+        db.query(models.Judge)
+        .filter(models.Judge.email.ilike(email))
+        .filter(models.Judge.is_active == True)  # noqa: E712
+        .first()
+    )
+    if not judge:
+        raise HTTPException(status_code=403, detail="Not registered as a judge")
+    return _available_rounds_for_judge(db, judge.id)
+
+
+@app.get("/api/judges/{judge_id}/rounds", response_model=list[int])
+def rounds_for_judge(judge_id: int, db: Session = Depends(get_db)) -> list[int]:
+    """Rounds a specific judge can score in. Used by 'preview as judge'."""
+    return _available_rounds_for_judge(db, judge_id)
 
 
 @app.get("/api/judges/{judge_id}/teams", response_model=list[TeamOut])

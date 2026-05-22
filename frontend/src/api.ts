@@ -337,6 +337,18 @@ export async function fetchTeamsForJudge(judgeId: number, round?: number): Promi
   return r.json();
 }
 
+export async function fetchMyAvailableRounds(): Promise<number[]> {
+  const r = await authFetch(`${BASE}/judge/me/rounds`);
+  if (!r.ok) throw new Error(`My rounds fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function fetchRoundsForJudge(judgeId: number): Promise<number[]> {
+  const r = await authFetch(`${BASE}/judges/${judgeId}/rounds`);
+  if (!r.ok) throw new Error(`Judge rounds fetch failed: ${r.status}`);
+  return r.json();
+}
+
 export interface JudgeAssignment {
   id: number;
   judge_id: number;
