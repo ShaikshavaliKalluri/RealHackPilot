@@ -1154,7 +1154,7 @@ def backfill_mentor_locations(
                     m.location = loc
                     member_locations_set += 1
             if not m.address:
-                addr = addr_slots.get(pos)
+                addr = addr_slots.get(pos + 1)  # form slots are 1-indexed; member.position is 0-indexed
                 if addr:
                     m.address = addr
                     member_addresses_set += 1

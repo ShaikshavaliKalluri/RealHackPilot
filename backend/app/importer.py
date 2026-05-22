@@ -118,7 +118,7 @@ def parse_workbook(path: str) -> list[dict]:
                 _nh = _norm(_h)
                 if ("mailing" in _nh and "address" in _nh) or "opted for us or ph" in _nh:
                     _m = re.search(r"(\d+)\s*$", _h.strip())
-                    if _m and int(_m.group(1)) == n:
+                    if _m and int(_m.group(1)) == n + 1:  # form skips digit 1; member N uses locationN+1
                         address_idx = _i
                         break
         # Final positional fallback: column immediately after member N's location col.
