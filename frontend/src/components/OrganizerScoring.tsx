@@ -64,7 +64,7 @@ export function OrganizerScoring({ teams, onReload }: Props) {
           <div>
             <div className="text-xs uppercase tracking-wider text-slate-400">Round</div>
             <div className="flex gap-1 bg-ink-900 border border-slate-700/40 rounded-lg p-1 mt-1">
-              {[1, 2, 3].map((r) => (
+              {[1, 2].map((r) => (
                 <button
                   key={r}
                   onClick={() => setRound(r)}
@@ -419,8 +419,8 @@ function ManualEntry({ teams, judges, axes, round, onRefreshJudges, onSaved }: M
 //
 // Per-round panel that ranks the leaderboard, lets the organizer select
 // which teams advance, and writes the new advanced_to_round to the DB.
-// For Round 3, instead of "advance", the panel offers a Crown Winners
-// flow that sets final_position = 1/2/3 on the picked teams.
+// For Round 2 (the final round), instead of "advance", the panel offers
+// a Crown Winners flow that sets final_position = 1/2/3 on the picked teams.
 
 interface AdvancementPanelProps {
   round: number;
@@ -429,7 +429,9 @@ interface AdvancementPanelProps {
   onAdvanced: () => void;
 }
 
-const DEFAULT_ADVANCE_COUNT: Record<number, number> = { 1: 20, 2: 10, 3: 3 };
+// Round 1: advance ~20 to Round 2. Round 2 is the final — winners (1st/2nd/3rd)
+// are crowned directly from Round 2 leaderboard rather than advancing further.
+const DEFAULT_ADVANCE_COUNT: Record<number, number> = { 1: 20, 2: 3 };
 
 function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: AdvancementPanelProps) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -492,14 +494,14 @@ function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: Advancement
     }
   };
 
-  // Round 3 → Winners flow
-  if (round === 3) {
+  // Round 2 (final) → Winners flow
+  if (round === 2) {
     return (
       <>
         <div className="bg-gradient-to-br from-amber-500/15 to-rose-500/10 border border-amber-500/40 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h3 className="font-bold text-amber-200">🏆 Crown the Winners</h3>
-            <p className="text-xs text-slate-300 mt-0.5">After Round 3 finishes, pick 1st / 2nd / 3rd place from the leaderboard.</p>
+            <p className="text-xs text-slate-300 mt-0.5">After Round 2 finishes, pick 1st / 2nd / 3rd place from the leaderboard.</p>
           </div>
           <button
             onClick={() => setWinnerOpen(true)}
@@ -521,9 +523,9 @@ function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: Advancement
     );
   }
 
-  // Round 1 + Round 2 → standard advancement flow
+  // Round 1 → standard advancement flow (advance to Round 2, which is the final)
   const nextRound = round + 1;
-  const nextRoundLabel = nextRound === 3 ? 'Round 3 (Final)' : `Round ${nextRound}`;
+  const nextRoundLabel = nextRound === 2 ? 'Round 2 (Final)' : `Round ${nextRound}`;
 
   return (
     <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 space-y-3">

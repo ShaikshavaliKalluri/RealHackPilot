@@ -39,8 +39,8 @@ def submit_score(
     entered_by_email: str | None,
 ) -> JudgeScore:
     """Insert or update a judge score (idempotent by unique constraint)."""
-    if round_num not in (1, 2, 3):
-        raise ValueError(f"round must be 1, 2, or 3 (got {round_num})")
+    if round_num not in (1, 2):
+        raise ValueError(f"round must be 1 or 2 (got {round_num})")
 
     normalized = normalize_scores(scores)
     total = sum(normalized.values())

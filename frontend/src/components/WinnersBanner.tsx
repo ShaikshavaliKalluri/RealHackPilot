@@ -10,7 +10,7 @@ interface Props {
  *
  * Reads `final_position` (1/2/3) off each team. Renders nothing if no
  * winners are set yet — i.e. quiet until the organizer crowns them
- * via the Scoring tab → Round 3 → Crown Winners modal.
+ * via the Scoring tab → Round 2 → Crown Winners modal.
  */
 export function WinnersBanner({ teams, onJumpToTeam }: Props) {
   const winners = teams
@@ -33,7 +33,7 @@ export function WinnersBanner({ teams, onJumpToTeam }: Props) {
           <span className="text-2xl">🏆</span>
           <div>
             <h2 className="text-xl font-extrabold text-amber-200">RealHack 2026 — Winners</h2>
-            <p className="text-xs text-slate-400">Crowned by the organizing panel after Round 3.</p>
+            <p className="text-xs text-slate-400">Crowned by the organizing panel after Round 2.</p>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

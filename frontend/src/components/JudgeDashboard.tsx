@@ -96,7 +96,7 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
             </div>
           </div>
           <div className="mt-3 flex gap-1 bg-ink-900 border border-slate-700/40 rounded-lg p-1">
-            {[1, 2, 3].map((r) => (
+            {[1, 2].map((r) => (
               <button
                 key={r}
                 onClick={() => { setRound(r); setActiveTeamId(null); }}

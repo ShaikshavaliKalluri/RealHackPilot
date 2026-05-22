@@ -89,7 +89,7 @@ export function JudgeMode({ teams, user }: Props) {
         <div>
           <div className="text-xs uppercase tracking-wider text-slate-400">Round</div>
           <div className="flex gap-1 bg-ink-900 border border-slate-700/40 rounded-lg p-1 mt-1">
-            {[1, 2, 3].map((r) => (
+            {[1, 2].map((r) => (
               <button
                 key={r}
                 onClick={() => { setRound(r); setActiveTeamId(null); }}
