@@ -277,9 +277,13 @@ export default function App() {
             {user && (
               <UserBadge
                 user={user}
-                onPreviewAsJudge={role?.role === 'organizer'
-                  ? (id, name) => setPreviewJudge({ id, name })
-                  : undefined}
+                onPreviewAsJudge={
+                  // Super-admin only — Preview-as-judge is a dev/QA tool, not a
+                  // routine organizer feature. Locked to Shaik's email.
+                  (user.email || '').trim().toLowerCase() === 'shaikshavali.kalluri@realpage.com'
+                    ? (id, name) => setPreviewJudge({ id, name })
+                    : undefined
+                }
               />
             )}
           </div>
