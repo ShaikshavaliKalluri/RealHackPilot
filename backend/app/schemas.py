@@ -82,6 +82,13 @@ class JudgeCreate(BaseModel):
     role: str = "judge"
 
 
+class JudgeUpdate(BaseModel):
+    """All fields optional — PATCH semantics. Only supplied fields are updated."""
+    name: str | None = None
+    email: str | None = None
+    role: str | None = None
+
+
 class UserRoleOut(BaseModel):
     """Result of looking up the signed-in user's role in the Judge table."""
     role: str  # "organizer" | "judge" | "none"

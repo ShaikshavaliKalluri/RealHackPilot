@@ -42,7 +42,7 @@ from .schemas import (
     TeamOut, UploadResult, DashboardStats, AIScreenResult,
     EmailTemplateOut, EmailRenderRequest, RenderedEmail,
     JudgeAIRequest, JudgeHumanRequest,
-    JudgeOut, JudgeCreate, JudgeScoreSubmit, JudgeScoreOut,
+    JudgeOut, JudgeCreate, JudgeUpdate, JudgeScoreSubmit, JudgeScoreOut,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet,
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
@@ -673,7 +673,7 @@ PROTECTED_EMAILS: set[str] = {
 
 
 @app.patch("/api/judges/{judge_id}", response_model=JudgeOut)
-def update_judge(judge_id: int, req: JudgeCreate, db: Session = Depends(get_db)) -> models.Judge:
+def update_judge(judge_id: int, req: JudgeUpdate, db: Session = Depends(get_db)) -> models.Judge:
     judge = db.query(models.Judge).get(judge_id)
     if not judge:
         raise HTTPException(status_code=404, detail="judge not found")
