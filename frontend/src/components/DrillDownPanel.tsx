@@ -272,6 +272,11 @@ const labelForFlagKind = (kind: string): string => {
     case 'team_too_small': return 'Team too small';
     case 'team_too_large': return 'Team too large';
     case 'missing_mentor': return 'Missing mentor';
+    case 'missing_location': return 'Missing location';
+    case 'missing_address': return 'Missing address';
+    case 'bad_email': return 'Bad email';
+    case 'bad_mentor_email': return 'Bad mentor email';
+    case 'team_name_is_member': return 'Team name = member name';
     default: return kind;
   }
 };
