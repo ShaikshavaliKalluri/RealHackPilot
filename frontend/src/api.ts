@@ -332,6 +332,69 @@ export async function setJudgeAssignments(judgeId: number, round: number, teamId
   return r.json();
 }
 
+// ===== Panels =====
+
+export interface Panel {
+  id: number;
+  name: string;
+  round: number;
+  team_ids: number[];
+  judge_ids: number[];
+}
+
+export async function fetchPanels(round?: number): Promise<Panel[]> {
+  const qs = round !== undefined ? `?round=${round}` : '';
+  const r = await authFetch(`${BASE}/panels${qs}`);
+  if (!r.ok) throw new Error(`Panels fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function createPanel(name: string, round: number): Promise<Panel> {
+  const r = await authFetch(`${BASE}/panels`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, round }),
+  });
+  if (!r.ok) throw new Error(`Create panel failed: ${r.status}`);
+  return r.json();
+}
+
+export async function renamePanel(panelId: number, name: string): Promise<Panel> {
+  const r = await authFetch(`${BASE}/panels/${panelId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  if (!r.ok) throw new Error(`Rename panel failed: ${r.status}`);
+  return r.json();
+}
+
+export async function deletePanel(panelId: number): Promise<{ deleted: boolean }> {
+  const r = await authFetch(`${BASE}/panels/${panelId}`, { method: 'DELETE' });
+  if (!r.ok) throw new Error(`Delete panel failed: ${r.status}`);
+  return r.json();
+}
+
+export async function setPanelTeams(panelId: number, teamIds: number[]): Promise<Panel> {
+  const r = await authFetch(`${BASE}/panels/${panelId}/teams`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ team_ids: teamIds }),
+  });
+  if (!r.ok) throw new Error(`Set panel teams failed: ${r.status}`);
+  return r.json();
+}
+
+export async function setPanelJudges(panelId: number, judgeIds: number[]): Promise<Panel> {
+  const r = await authFetch(`${BASE}/panels/${panelId}/judges`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ judge_ids: judgeIds }),
+  });
+  if (!r.ok) throw new Error(`Set panel judges failed: ${r.status}`);
+  return r.json();
+}
+
 export async function fetchLeaderboard(round: number): Promise<LeaderboardData> {
   const r = await authFetch(`${BASE}/judging/leaderboard?round=${round}`);
   if (!r.ok) throw new Error(`Leaderboard fetch failed: ${r.status}`);

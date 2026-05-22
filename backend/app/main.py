@@ -44,6 +44,7 @@ from .schemas import (
     JudgeAIRequest, JudgeHumanRequest,
     JudgeOut, JudgeCreate, JudgeScoreSubmit, JudgeScoreOut,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
+    PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet,
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
     CommLogOut, TeamChannelCreateRequest, TeamMessageRequest, BroadcastRequest,
     CommLogCreateRequest, RepoCheckOut, ReadinessFlagsRequest,
@@ -702,6 +703,27 @@ def me_role(
     )
 
 
+def _team_ids_for_judge_via_panels(db: Session, judge_id: int, round: int | None) -> set[int]:
+    """Return the set of team ids the judge sees, derived from panel membership.
+
+    A judge sees every team that's in at least one panel they're a member of
+    (filtered by round if supplied). Same team across multiple panels is
+    deduped naturally by the set.
+    """
+    pj_q = db.query(models.PanelJudge).filter(models.PanelJudge.judge_id == judge_id)
+    panel_ids = [pj.panel_id for pj in pj_q.all()]
+    if not panel_ids:
+        return set()
+    panels_q = db.query(models.Panel).filter(models.Panel.id.in_(panel_ids))
+    if round is not None:
+        panels_q = panels_q.filter(models.Panel.round == round)
+    relevant_panel_ids = [p.id for p in panels_q.all()]
+    if not relevant_panel_ids:
+        return set()
+    rows = db.query(models.PanelTeam).filter(models.PanelTeam.panel_id.in_(relevant_panel_ids)).all()
+    return {r.team_id for r in rows}
+
+
 @app.get("/api/judge/me/teams", response_model=list[TeamOut])
 def my_assigned_teams(
     round: int | None = None,
@@ -709,7 +731,7 @@ def my_assigned_teams(
     creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
     db: Session = Depends(get_db),
 ) -> list[models.Team]:
-    """Teams assigned to the signed-in judge. Optionally filtered by round."""
+    """Teams the signed-in judge sees in the given round, via panel membership."""
     profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
     email = (profile.get("email") or "").strip().lower()
     judge = (
@@ -720,10 +742,7 @@ def my_assigned_teams(
     )
     if not judge:
         raise HTTPException(status_code=403, detail="Not registered as a judge")
-    q = db.query(models.JudgeAssignment).filter(models.JudgeAssignment.judge_id == judge.id)
-    if round is not None:
-        q = q.filter(models.JudgeAssignment.round == round)
-    team_ids = [a.team_id for a in q.all()]
+    team_ids = _team_ids_for_judge_via_panels(db, judge.id, round)
     if not team_ids:
         return []
     return db.query(models.Team).filter(models.Team.id.in_(team_ids)).order_by(models.Team.name.asc()).all()
@@ -735,15 +754,106 @@ def teams_for_judge(
     round: int | None = None,
     db: Session = Depends(get_db),
 ) -> list[models.Team]:
-    """Teams assigned to the given judge. Used by the organizer 'preview as judge'
-    feature to see exactly what a specific judge will see in their mobile view."""
-    q = db.query(models.JudgeAssignment).filter(models.JudgeAssignment.judge_id == judge_id)
-    if round is not None:
-        q = q.filter(models.JudgeAssignment.round == round)
-    team_ids = [a.team_id for a in q.all()]
+    """Teams the given judge sees in the given round (via panel membership).
+    Used by the organizer 'preview as judge' feature."""
+    team_ids = _team_ids_for_judge_via_panels(db, judge_id, round)
     if not team_ids:
         return []
     return db.query(models.Team).filter(models.Team.id.in_(team_ids)).order_by(models.Team.name.asc()).all()
+
+
+# ===== Panels: groups of teams + judges per round =====
+
+def _panel_to_out(p: models.Panel) -> PanelOut:
+    return PanelOut(
+        id=p.id,
+        name=p.name,
+        round=p.round,
+        team_ids=sorted({pt.team_id for pt in p.teams}),
+        judge_ids=sorted({pj.judge_id for pj in p.judges}),
+    )
+
+
+@app.get("/api/panels", response_model=list[PanelOut])
+def list_panels(round: int | None = None, db: Session = Depends(get_db)) -> list[PanelOut]:
+    q = db.query(models.Panel)
+    if round is not None:
+        q = q.filter(models.Panel.round == round)
+    panels = q.order_by(models.Panel.round.asc(), models.Panel.id.asc()).all()
+    return [_panel_to_out(p) for p in panels]
+
+
+@app.post("/api/panels", response_model=PanelOut)
+def create_panel(
+    req: PanelCreate,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> PanelOut:
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    panel = models.Panel(
+        name=req.name.strip() or f"Panel {req.round}",
+        round=req.round,
+        created_by_email=(profile.get("email") or "").lower() or None,
+    )
+    db.add(panel)
+    db.commit()
+    db.refresh(panel)
+    return _panel_to_out(panel)
+
+
+@app.patch("/api/panels/{panel_id}", response_model=PanelOut)
+def update_panel(panel_id: int, req: PanelUpdate, db: Session = Depends(get_db)) -> PanelOut:
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+    if req.name is not None and req.name.strip():
+        panel.name = req.name.strip()
+    db.commit()
+    db.refresh(panel)
+    return _panel_to_out(panel)
+
+
+@app.delete("/api/panels/{panel_id}")
+def delete_panel(panel_id: int, db: Session = Depends(get_db)) -> dict:
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+    db.delete(panel)
+    db.commit()
+    return {"deleted": True}
+
+
+@app.post("/api/panels/{panel_id}/teams", response_model=PanelOut)
+def set_panel_teams(panel_id: int, req: PanelTeamsSet, db: Session = Depends(get_db)) -> PanelOut:
+    """Replace the set of teams in this panel."""
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+    db.query(models.PanelTeam).filter(models.PanelTeam.panel_id == panel_id).delete(synchronize_session=False)
+    for tid in set(req.team_ids):
+        if not db.query(models.Team).get(tid):
+            continue
+        db.add(models.PanelTeam(panel_id=panel_id, team_id=tid))
+    db.commit()
+    db.refresh(panel)
+    return _panel_to_out(panel)
+
+
+@app.post("/api/panels/{panel_id}/judges", response_model=PanelOut)
+def set_panel_judges(panel_id: int, req: PanelJudgesSet, db: Session = Depends(get_db)) -> PanelOut:
+    """Replace the set of judges in this panel."""
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+    db.query(models.PanelJudge).filter(models.PanelJudge.panel_id == panel_id).delete(synchronize_session=False)
+    for jid in set(req.judge_ids):
+        if not db.query(models.Judge).get(jid):
+            continue
+        db.add(models.PanelJudge(panel_id=panel_id, judge_id=jid))
+    db.commit()
+    db.refresh(panel)
+    return _panel_to_out(panel)
 
 
 @app.get("/api/judges/{judge_id}/assignments", response_model=list[JudgeAssignmentOut])

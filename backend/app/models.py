@@ -86,12 +86,11 @@ class Judge(Base):
 
 
 class JudgeAssignment(Base):
-    """Which judge is supposed to score which team in which round.
+    """Legacy direct judge-to-team assignment, kept for backward compatibility.
 
-    A row says: judge `judge_id` should score team `team_id` in round `round`.
-    Multiple judges can be assigned to the same team for the same round (panel
-    judging). The judge dashboard filters to only show teams they're assigned
-    to — keeping the mobile UI focused.
+    Superseded by the Panel model — Panels group teams + judges together so
+    every judge in a panel sees every team in the panel. This table stays
+    around to avoid breaking older rows but new flows should use Panel.
     """
     __tablename__ = "judge_assignments"
     __table_args__ = (
@@ -107,6 +106,53 @@ class JudgeAssignment(Base):
 
     judge: Mapped["Judge"] = relationship()
     team: Mapped["Team"] = relationship()
+
+
+class Panel(Base):
+    """A group of judges that collectively scores a group of teams in a given round.
+
+    Round 1 typically splits 95 teams across 2 panels (~48 each); each panel
+    has its own set of 3-4 judges. Teams CAN appear in multiple panels — useful
+    for finals where you want broader judge coverage on advancing teams.
+    """
+    __tablename__ = "panels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(128))  # "Panel 1", "Panel 2", ...
+    round: Mapped[int] = mapped_column(Integer, index=True)  # 1 | 2 | 3
+    created_by_email: Mapped[str | None] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    teams: Mapped[list["PanelTeam"]] = relationship(back_populates="panel", cascade="all, delete-orphan")
+    judges: Mapped[list["PanelJudge"]] = relationship(back_populates="panel", cascade="all, delete-orphan")
+
+
+class PanelTeam(Base):
+    __tablename__ = "panel_teams"
+    __table_args__ = (
+        UniqueConstraint("panel_id", "team_id", name="uq_panel_team"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    panel_id: Mapped[int] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
+
+    panel: Mapped["Panel"] = relationship(back_populates="teams")
+    team: Mapped["Team"] = relationship()
+
+
+class PanelJudge(Base):
+    __tablename__ = "panel_judges"
+    __table_args__ = (
+        UniqueConstraint("panel_id", "judge_id", name="uq_panel_judge"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    panel_id: Mapped[int] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
+    judge_id: Mapped[int] = mapped_column(ForeignKey("judges.id", ondelete="CASCADE"), index=True)
+
+    panel: Mapped["Panel"] = relationship(back_populates="judges")
+    judge: Mapped["Judge"] = relationship()
 
 
 class JudgeScore(Base):

@@ -104,6 +104,32 @@ class JudgeAssignmentOut(BaseModel):
     round: int
 
 
+class PanelOut(BaseModel):
+    """A panel with its team_ids and judge_ids flattened for the frontend."""
+    id: int
+    name: str
+    round: int
+    team_ids: list[int] = []
+    judge_ids: list[int] = []
+
+
+class PanelCreate(BaseModel):
+    name: str
+    round: int
+
+
+class PanelUpdate(BaseModel):
+    name: str | None = None
+
+
+class PanelTeamsSet(BaseModel):
+    team_ids: list[int]
+
+
+class PanelJudgesSet(BaseModel):
+    judge_ids: list[int]
+
+
 class JudgeScoreSubmit(BaseModel):
     judge_id: int
     team_id: int
