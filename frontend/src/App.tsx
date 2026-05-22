@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
-import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, fetchMyRole, type LLMHealth, type AIScreenStatus, type UserProfile, type UserRole } from './api';
+import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, fetchMyRole, isSandboxMode, setSandboxMode, type LLMHealth, type AIScreenStatus, type UserProfile, type UserRole } from './api';
 import { JudgeDashboard } from './components/JudgeDashboard';
 import { JudgesPanel } from './components/JudgesPanel';
 import { LoginQRPage } from './components/LoginQRPage';
@@ -230,8 +230,24 @@ export default function App() {
     { key: 'qr', label: 'Login QR', tone: 'bg-sky-500/15 text-sky-200 border-sky-500/30', title: 'Printable QR code for judges to scan and log in' },
   ];
 
+  const sandboxOn = isSandboxMode();
+
   return (
     <div className="min-h-screen p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+      {sandboxOn && (
+        <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-4 sm:-mt-6 lg:-mt-8 mb-4 sm:mb-6 lg:mb-8 bg-amber-500/15 border-b-2 border-amber-400/60 px-4 sm:px-6 lg:px-8 py-2.5 flex items-center justify-between gap-3 flex-wrap text-amber-100">
+          <div className="text-sm">
+            <span className="font-bold">🧪 TEST MODE</span>
+            <span className="ml-2 text-amber-200/80">— reading/writing the sandbox database. Production data is safe.</span>
+          </div>
+          <button
+            onClick={() => setSandboxMode(false)}
+            className="text-xs px-3 py-1 rounded font-semibold bg-amber-400 hover:bg-amber-300 text-ink-950 transition"
+          >
+            Exit Test Mode
+          </button>
+        </div>
+      )}
       <header className="mb-5 sm:mb-6 pb-4 sm:pb-5 border-b border-slate-800/60">
         <div className="flex items-center justify-between gap-3 mb-4 sm:mb-5">
           {/* Brand: official RealHack wordmark — smaller on mobile */}
@@ -287,6 +303,9 @@ export default function App() {
                   (user.email || '').trim().toLowerCase() === 'shaikshavali.kalluri@realpage.com'
                     ? (id, name) => setPreviewJudge({ id, name })
                     : undefined
+                }
+                showSandboxControls={
+                  (user.email || '').trim().toLowerCase() === 'shaikshavali.kalluri@realpage.com'
                 }
               />
             )}

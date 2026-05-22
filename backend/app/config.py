@@ -3,6 +3,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./realhack_pilot.db"
+    # Optional sandbox DB — empty disables Test Mode. When set, super-admin
+    # can flip into Test Mode and the app reads/writes this DB instead of prod.
+    sandbox_database_url: str = ""
     app_env: str = "dev"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 

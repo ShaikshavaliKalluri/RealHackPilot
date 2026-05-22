@@ -3,6 +3,31 @@ import { getAccessToken } from './auth';
 
 const BASE = '/api';
 
+// ---- Test Mode (sandbox database) ----
+// Persisted in localStorage so reloading keeps Test Mode on. authFetch checks
+// this flag on every request and sets `x-sandbox: true` when on. The backend
+// routes requests with that header to the sandbox DB instead of prod.
+const SANDBOX_FLAG_KEY = 'realhack_pilot_sandbox';
+
+export function isSandboxMode(): boolean {
+  try {
+    return localStorage.getItem(SANDBOX_FLAG_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setSandboxMode(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(SANDBOX_FLAG_KEY, '1');
+    else localStorage.removeItem(SANDBOX_FLAG_KEY);
+  } catch {
+    // localStorage unavailable — just ignore; Test Mode won't persist across reloads
+  }
+  // Hard reload so every cached page state reflects the new DB.
+  window.location.reload();
+}
+
 /**
  * Wrapper around `fetch` that auto-injects the MSAL ID token as
  * `Authorization: Bearer ...` on every API call.
@@ -18,6 +43,7 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Prom
     const token = await getAccessToken({ forceRefresh });
     const headers = new Headers(init.headers || {});
     if (token) headers.set('Authorization', `Bearer ${token}`);
+    if (isSandboxMode()) headers.set('x-sandbox', 'true');
     return fetch(input, { ...init, headers });
   };
 
@@ -256,6 +282,29 @@ export async function deleteJudge(judgeId: number): Promise<{ deleted: boolean }
   if (!r.ok) {
     const t = await r.text();
     throw new Error(`Delete judge failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
+// ---- Sandbox admin (super-admin only) ----
+
+export interface SandboxStatus {
+  configured: boolean;
+  message?: string;
+  counts?: Record<string, number>;
+}
+
+export async function fetchSandboxStatus(): Promise<SandboxStatus> {
+  const r = await authFetch(`${BASE}/admin/sandbox/status`);
+  if (!r.ok) throw new Error(`Sandbox status failed: ${r.status}`);
+  return r.json();
+}
+
+export async function refreshSandbox(): Promise<{ refreshed: boolean; rows_copied: Record<string, number> }> {
+  const r = await authFetch(`${BASE}/admin/sandbox/refresh`, { method: 'POST' });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Sandbox refresh failed: ${r.status} — ${t}`);
   }
   return r.json();
 }

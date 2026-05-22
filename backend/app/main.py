@@ -101,12 +101,117 @@ async def _require_auth_middleware(request, call_next):
 def _startup() -> None:
     Base.metadata.create_all(bind=engine)
     lightweight_migrate()
+    # Mirror the schema onto the sandbox DB if one is configured. Sandbox content
+    # itself is populated on demand via POST /api/admin/sandbox/refresh.
+    from .db import sandbox_engine
+    if sandbox_engine is not None:
+        Base.metadata.create_all(bind=sandbox_engine)
     backup_service.start_scheduler()
 
 
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "env": settings.app_env}
+
+
+# ===== Sandbox / Test Mode =====
+#
+# Test Mode is a super-admin-only toggle on the frontend. When on, every API
+# call from that browser sends `x-sandbox: true`; the `get_db` dependency
+# routes the session to the sandbox database. Production data is never read
+# or written from a Test-Mode session. The refresh endpoint copies the live
+# prod rows into the sandbox so the organizer can try destructive flows
+# (advance teams, crown finalists, send mocked emails) against realistic
+# data without affecting the live event.
+
+# Lowercased list — same set used to gate the 'Preview as judge' control.
+SANDBOX_ADMIN_EMAILS = {"shaikshavali.kalluri@realpage.com"}
+
+
+def _require_sandbox_admin(claims: dict, creds: HTTPAuthorizationCredentials) -> str:
+    """Raise unless the caller is a super-admin allowed to manage the sandbox."""
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    email = (profile.get("email") or "").strip().lower()
+    if email not in SANDBOX_ADMIN_EMAILS:
+        raise HTTPException(status_code=403, detail="Sandbox controls are super-admin only")
+    return email
+
+
+@app.get("/api/admin/sandbox/status")
+def sandbox_status(
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+) -> dict:
+    """Report whether sandbox is configured + (if so) basic row counts."""
+    _require_sandbox_admin(claims, creds)
+    from .db import sandbox_engine, SandboxSessionLocal
+    if sandbox_engine is None or SandboxSessionLocal is None:
+        return {"configured": False, "message": "SANDBOX_DATABASE_URL not set on the server."}
+    db = SandboxSessionLocal()
+    try:
+        counts = {
+            "teams": db.query(models.Team).count(),
+            "members": db.query(models.Member).count(),
+            "judges": db.query(models.Judge).count(),
+            "panels": db.query(models.Panel).count(),
+            "judge_scores": db.query(models.JudgeScore).count(),
+        }
+    finally:
+        db.close()
+    return {"configured": True, "counts": counts}
+
+
+@app.post("/api/admin/sandbox/refresh")
+def sandbox_refresh(
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+) -> dict:
+    """Wipe the sandbox database and reload it with a fresh copy of prod data.
+
+    Streams rows table-by-table via SQLAlchemy reflection — no shell tooling
+    needed, works against the same Postgres server. Tables are wiped in FK-safe
+    order, then refilled in dependency order.
+    """
+    _require_sandbox_admin(claims, creds)
+    from .db import sandbox_engine, SandboxSessionLocal
+    if sandbox_engine is None or SandboxSessionLocal is None:
+        raise HTTPException(status_code=400, detail="SANDBOX_DATABASE_URL not set on the server")
+
+    # Order matters for FK constraints: wipe children first, refill parents first.
+    table_order = [
+        models.Team, models.Member, models.Judge, models.Panel,
+        models.PanelTeam, models.PanelJudge, models.JudgeAssignment,
+        models.JudgeScore, models.CommLog,
+    ]
+
+    prod = SessionLocal()
+    sb = SandboxSessionLocal()
+    copied: dict[str, int] = {}
+    try:
+        # Wipe sandbox in reverse order so FKs don't trip
+        for model in reversed(table_order):
+            sb.query(model).delete(synchronize_session=False)
+        sb.commit()
+
+        # Copy prod rows over, preserving primary keys
+        from sqlalchemy import inspect as sqla_inspect
+        for model in table_order:
+            rows = prod.query(model).all()
+            mapper = sqla_inspect(model)
+            col_names = [c.key for c in mapper.columns]
+            payload = [{k: getattr(r, k) for k in col_names} for r in rows]
+            if payload:
+                sb.bulk_insert_mappings(model, payload)
+            copied[model.__tablename__] = len(payload)
+        sb.commit()
+    except Exception as e:
+        sb.rollback()
+        raise HTTPException(status_code=500, detail=f"Sandbox refresh failed: {e}")
+    finally:
+        prod.close()
+        sb.close()
+
+    return {"refreshed": True, "rows_copied": copied}
 
 
 @app.get("/api/me", response_model=dict)

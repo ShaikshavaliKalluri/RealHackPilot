@@ -1,6 +1,7 @@
+from fastapi import Request
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
 
@@ -8,6 +9,19 @@ engine = create_engine(
     settings.database_url,
     connect_args={"check_same_thread": False} if settings.database_url.startswith("sqlite") else {},
 )
+
+# Optional sandbox engine — only created if a sandbox_database_url is set.
+# Same schema, separate physical database. Used when the super-admin toggles
+# 'Test Mode' on the frontend: every request from that session sends an
+# `x-sandbox: true` header and `get_db` routes the session here instead of prod.
+sandbox_engine: Engine | None = None
+SandboxSessionLocal: sessionmaker | None = None
+if settings.sandbox_database_url:
+    sandbox_engine = create_engine(
+        settings.sandbox_database_url,
+        connect_args={"check_same_thread": False} if settings.sandbox_database_url.startswith("sqlite") else {},
+    )
+    SandboxSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sandbox_engine)
 
 
 @event.listens_for(Engine, "connect")
@@ -31,12 +45,31 @@ class Base(DeclarativeBase):
     pass
 
 
-def get_db():
-    db = SessionLocal()
+def get_db(request: Request):
+    """Per-request DB session.
+
+    If the request includes `x-sandbox: true` AND a sandbox engine is configured,
+    yield a session bound to the sandbox database. Otherwise yield the normal
+    production session. Frontend sets the header when Test Mode is on.
+    """
+    use_sandbox = (
+        SandboxSessionLocal is not None
+        and request.headers.get("x-sandbox", "").lower() in {"1", "true", "yes"}
+    )
+    factory = SandboxSessionLocal if use_sandbox else SessionLocal
+    db: Session = factory()  # type: ignore[misc]
     try:
         yield db
     finally:
         db.close()
+
+
+def is_sandbox_request(request: Request) -> bool:
+    """True when the incoming request is targeting the sandbox DB."""
+    return (
+        SandboxSessionLocal is not None
+        and request.headers.get("x-sandbox", "").lower() in {"1", "true", "yes"}
+    )
 
 
 def lightweight_migrate() -> None:

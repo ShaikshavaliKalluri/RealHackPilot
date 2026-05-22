@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMsal } from '@azure/msal-react';
-import { fetchJudges } from '../api';
+import { fetchJudges, isSandboxMode, setSandboxMode, refreshSandbox, fetchSandboxStatus } from '../api';
 import type { Judge } from '../types';
 
 export interface UserProfile {
@@ -15,15 +15,69 @@ interface Props {
   user: UserProfile;
   // When set, organizers can pick a judge to preview as. Called with judge_id + name on selection.
   onPreviewAsJudge?: (judgeId: number, judgeName: string) => void;
+  // When true, expose Test Mode controls (super-admin only).
+  showSandboxControls?: boolean;
 }
 
-export function UserBadge({ user, onPreviewAsJudge }: Props) {
+export function UserBadge({ user, onPreviewAsJudge, showSandboxControls }: Props) {
   const { instance } = useMsal();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [judgePickerOpen, setJudgePickerOpen] = useState(false);
   const [judges, setJudges] = useState<Judge[]>([]);
   const [judgesLoading, setJudgesLoading] = useState(false);
+  const [sandboxBusy, setSandboxBusy] = useState(false);
+  const [sandboxMsg, setSandboxMsg] = useState<string | null>(null);
+  const sandboxOn = isSandboxMode();
+
+  const handleToggleSandbox = () => {
+    if (sandboxOn) {
+      setSandboxMode(false); // reloads
+      return;
+    }
+    if (!confirm(
+      "Turn Test Mode on?\n\n" +
+      "All actions will read/write the sandbox database (a copy of prod). " +
+      "Production data won't be touched. The page will reload."
+    )) return;
+    setSandboxMode(true); // reloads
+  };
+
+  const handleRefreshSandbox = async () => {
+    if (!confirm("Wipe the sandbox database and reload it with a fresh copy of current prod data?")) return;
+    setSandboxBusy(true);
+    setSandboxMsg(null);
+    try {
+      const result = await refreshSandbox();
+      const totals = Object.entries(result.rows_copied)
+        .map(([t, n]) => `${t}: ${n}`)
+        .join(' · ');
+      setSandboxMsg(`Refreshed ✓  ${totals}`);
+    } catch (e: any) {
+      setSandboxMsg(`Failed: ${e.message ?? String(e)}`);
+    } finally {
+      setSandboxBusy(false);
+    }
+  };
+
+  const handleSandboxStatus = async () => {
+    setSandboxBusy(true);
+    setSandboxMsg(null);
+    try {
+      const result = await fetchSandboxStatus();
+      if (!result.configured) setSandboxMsg(result.message ?? 'Sandbox not configured');
+      else {
+        const totals = Object.entries(result.counts ?? {})
+          .map(([t, n]) => `${t}: ${n}`)
+          .join(' · ');
+        setSandboxMsg(`Sandbox rows — ${totals}`);
+      }
+    } catch (e: any) {
+      setSandboxMsg(`Failed: ${e.message ?? String(e)}`);
+    } finally {
+      setSandboxBusy(false);
+    }
+  };
 
   const openJudgePicker = async () => {
     setJudgePickerOpen(true);
@@ -173,6 +227,53 @@ export function UserBadge({ user, onPreviewAsJudge }: Props) {
                 </div>
               )}
             </>
+          )}
+
+          {/* Test Mode (super-admin only) */}
+          {showSandboxControls && (
+            <div className="border-b border-slate-700/40 bg-ink-900/30">
+              <div className="px-4 py-2.5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                  </svg>
+                  <span className="text-sm font-semibold text-slate-100">Test Mode</span>
+                </div>
+                <button
+                  onClick={handleToggleSandbox}
+                  className={`relative inline-flex items-center h-6 w-11 rounded-full transition ${sandboxOn ? 'bg-amber-400' : 'bg-slate-600'}`}
+                  aria-label="Toggle Test Mode"
+                >
+                  <span className={`inline-block w-5 h-5 transform bg-white rounded-full transition-transform ${sandboxOn ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                </button>
+              </div>
+              <p className="px-4 pb-2 text-[11px] text-slate-400 leading-snug">
+                {sandboxOn
+                  ? 'Reading/writing sandbox DB. Production data is safe.'
+                  : 'Toggle on to read/write the sandbox DB instead of prod. Page reloads.'}
+              </p>
+              {sandboxOn && (
+                <div className="px-4 pb-3 flex flex-wrap gap-1.5">
+                  <button
+                    onClick={handleRefreshSandbox}
+                    disabled={sandboxBusy}
+                    className="text-[11px] px-2 py-1 rounded border border-amber-500/40 hover:bg-amber-500/10 text-amber-200 disabled:opacity-40 transition"
+                  >
+                    {sandboxBusy ? 'Working…' : 'Refresh from prod'}
+                  </button>
+                  <button
+                    onClick={handleSandboxStatus}
+                    disabled={sandboxBusy}
+                    className="text-[11px] px-2 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300 disabled:opacity-40 transition"
+                  >
+                    Sandbox status
+                  </button>
+                </div>
+              )}
+              {sandboxMsg && (
+                <div className="px-4 pb-3 text-[11px] text-slate-300 break-words">{sandboxMsg}</div>
+              )}
+            </div>
           )}
 
           {/* Actions */}
