@@ -193,15 +193,26 @@ export function JudgesPanel({ teams }: Props) {
 
   const editingPanel = panels.find((p) => p.id === editingPanelId) || null;
 
+  // Teams eligible for the currently-selected round. R1 includes every team
+  // that registered; R2 only includes the teams the organizer advanced
+  // (advanced_to_round >= 2). This pool feeds the panel team picker and the
+  // 'Distribute teams' modal so judges never get assigned a team that wasn't
+  // supposed to be in the round.
+  const eligibleTeamsForRound = useMemo(
+    () => teams.filter((t) => (t.advanced_to_round ?? 1) >= round),
+    [teams, round],
+  );
+
   const filteredTeamsForEdit = useMemo(() => {
     const q = editSearch.trim().toLowerCase();
-    if (!q) return teams;
-    return teams.filter((t) =>
+    const base = eligibleTeamsForRound;
+    if (!q) return base;
+    return base.filter((t) =>
       t.name.toLowerCase().includes(q) ||
       (t.mentor_name && t.mentor_name.toLowerCase().includes(q)) ||
       (t.idea && t.idea.toLowerCase().includes(q)),
     );
-  }, [teams, editSearch]);
+  }, [eligibleTeamsForRound, editSearch]);
 
   const filteredJudgesForEdit = useMemo(() => {
     const q = editSearch.trim().toLowerCase();
@@ -600,7 +611,7 @@ export function JudgesPanel({ teams }: Props) {
 
                     <p className="text-xs text-slate-500 mt-3">
                       {editMode === 'teams'
-                        ? `${editTeamIds.size} of ${teams.length} teams selected`
+                        ? `${editTeamIds.size} of ${eligibleTeamsForRound.length} eligible team${eligibleTeamsForRound.length === 1 ? '' : 's'} selected${round > 1 ? ` (Round ${round}: advancers only)` : ''}`
                         : `${editJudgeIds.size} of ${judgesOnly.length} judges selected`}
                     </p>
                   </div>
@@ -620,7 +631,7 @@ export function JudgesPanel({ teams }: Props) {
       {distributeOpen && (
         <DistributeTeamsModal
           round={round}
-          teams={teams}
+          teams={eligibleTeamsForRound}
           existingPanels={panels}
           onClose={() => setDistributeOpen(false)}
           onSaved={async () => { setDistributeOpen(false); await reloadPanels(); }}
@@ -751,7 +762,8 @@ function DistributeTeamsModal({ round, teams, existingPanels, onClose, onSaved }
         <div className="bg-gradient-to-br from-sky-500/25 to-emerald-500/15 p-4 border-b border-sky-500/40">
           <h3 className="font-bold text-sky-200">🎲 Distribute teams randomly</h3>
           <p className="text-xs text-slate-300 mt-0.5">
-            Round {round} · {teams.length} teams available · split across the panels below. No team will be in more than one panel.
+            Round {round} · {teams.length} eligible team{teams.length === 1 ? '' : 's'}
+            {round > 1 ? ' (advancers only)' : ' available'} · split across the panels below. No team will be in more than one panel.
           </p>
         </div>
         <div className="p-5 space-y-3">
@@ -789,7 +801,8 @@ function DistributeTeamsModal({ round, teams, existingPanels, onClose, onSaved }
           </button>
 
           <div className={`text-xs px-3 py-2 rounded ${overflow ? 'bg-rose-500/10 border border-rose-500/30 text-rose-300' : 'bg-ink-900/50 text-slate-400'}`}>
-            Assigning <span className="text-slate-100 font-bold">{totalAssigned}</span> of {teams.length} teams.
+            Assigning <span className="text-slate-100 font-bold">{totalAssigned}</span> of {teams.length} eligible team{teams.length === 1 ? '' : 's'}
+            {round > 1 && <span className="text-slate-500"> (advancers from Round {round - 1})</span>}.
             {!overflow && totalAssigned < teams.length && (
               <span className="text-slate-500"> · {teams.length - totalAssigned} team{teams.length - totalAssigned === 1 ? '' : 's'} won't be assigned</span>
             )}
