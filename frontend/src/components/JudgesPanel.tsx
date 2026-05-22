@@ -43,6 +43,9 @@ export function JudgesPanel({ teams }: Props) {
 
   const [err, setErr] = useState<string | null>(null);
 
+  // Random-distribute wizard state
+  const [distributeOpen, setDistributeOpen] = useState(false);
+
   const reloadJudges = async () => {
     setJudgesLoading(true);
     try {
@@ -340,6 +343,13 @@ export function JudgesPanel({ teams }: Props) {
               ))}
             </div>
             <button
+              onClick={() => setDistributeOpen(true)}
+              className="bg-sky-400 hover:bg-sky-300 text-ink-950 font-bold px-3 py-1.5 rounded text-sm transition"
+              title="Randomly split teams across panels"
+            >
+              🎲 Distribute teams
+            </button>
+            <button
               onClick={handleCreatePanel}
               className="bg-rose-400 hover:bg-rose-300 text-ink-950 font-bold px-3 py-1.5 rounded text-sm transition"
             >
@@ -572,6 +582,171 @@ export function JudgesPanel({ teams }: Props) {
             Editing {editingPanel.name} · changes save when you click Save.
           </p>
         )}
+      </div>
+
+      {distributeOpen && (
+        <DistributeTeamsModal
+          round={round}
+          teams={teams}
+          existingPanels={panels}
+          onClose={() => setDistributeOpen(false)}
+          onSaved={async () => { setDistributeOpen(false); await reloadPanels(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+// ===== Random-distribute teams across panels =====
+
+interface DistributeProps {
+  round: number;
+  teams: Team[];
+  existingPanels: Panel[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+interface PanelTarget {
+  // For existing panels we keep their id; new panels get id=null and we create them.
+  id: number | null;
+  name: string;
+  size: number;  // requested team count
+}
+
+function DistributeTeamsModal({ round, teams, existingPanels, onClose, onSaved }: DistributeProps) {
+  // Default suggestion: 2 panels if none exist yet, otherwise reuse existing ones.
+  const initial = useMemo<PanelTarget[]>(() => {
+    if (existingPanels.length > 0) {
+      // Pre-fill sizes from current team counts to make 'rebalance' easy.
+      return existingPanels.map((p) => ({ id: p.id, name: p.name, size: p.team_ids.length || 0 }));
+    }
+    const half = Math.ceil(teams.length / 2);
+    return [
+      { id: null, name: 'Panel 1', size: half },
+      { id: null, name: 'Panel 2', size: teams.length - half },
+    ];
+  }, [existingPanels, teams.length]);
+
+  const [targets, setTargets] = useState<PanelTarget[]>(initial);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const totalAssigned = targets.reduce((s, t) => s + (Number.isFinite(t.size) ? Math.max(0, t.size) : 0), 0);
+  const overflow = totalAssigned > teams.length;
+
+  const updateTarget = (i: number, patch: Partial<PanelTarget>) => {
+    setTargets((prev) => prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)));
+  };
+
+  const addPanel = () => {
+    setTargets((prev) => [...prev, { id: null, name: `Panel ${prev.length + 1}`, size: 0 }]);
+  };
+
+  const removePanel = (i: number) => {
+    setTargets((prev) => prev.filter((_, idx) => idx !== i));
+  };
+
+  const handleDistribute = async () => {
+    setErr(null);
+    if (overflow) {
+      setErr(`Total exceeds team count (${totalAssigned} requested, only ${teams.length} teams available)`);
+      return;
+    }
+    if (!confirm(`Randomly distribute ${totalAssigned} teams across ${targets.length} panels for Round ${round}? Existing team assignments for these panels will be replaced.`)) return;
+    setBusy(true);
+    try {
+      // Fisher-Yates shuffle for an unbiased random partition.
+      const shuffled = [...teams];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      let cursor = 0;
+      for (const target of targets) {
+        const teamSlice = shuffled.slice(cursor, cursor + Math.max(0, target.size));
+        cursor += Math.max(0, target.size);
+        const teamIds = teamSlice.map((t) => t.id);
+        let panelId = target.id;
+        if (panelId === null) {
+          const created = await createPanel(target.name, round);
+          panelId = created.id;
+        }
+        await setPanelTeams(panelId, teamIds);
+      }
+      onSaved();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg bg-ink-800 border border-sky-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
+        <div className="bg-gradient-to-br from-sky-500/25 to-emerald-500/15 p-4 border-b border-sky-500/40">
+          <h3 className="font-bold text-sky-200">🎲 Distribute teams randomly</h3>
+          <p className="text-xs text-slate-300 mt-0.5">
+            Round {round} · {teams.length} teams available · split across the panels below. No team will be in more than one panel.
+          </p>
+        </div>
+        <div className="p-5 space-y-3">
+          {targets.map((t, i) => (
+            <div key={i} className="flex items-center gap-3">
+              <input
+                value={t.name}
+                onChange={(e) => updateTarget(i, { name: e.target.value })}
+                placeholder="Panel name"
+                className="flex-1 bg-ink-900 border border-slate-700/40 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-500/60"
+              />
+              <input
+                type="number"
+                min={0}
+                value={t.size}
+                onChange={(e) => updateTarget(i, { size: Math.max(0, parseInt(e.target.value || '0', 10)) })}
+                className="w-20 bg-ink-900 border border-slate-700/40 rounded px-3 py-2 text-sm text-center focus:outline-none focus:border-sky-500/60"
+              />
+              <span className="text-xs text-slate-500 w-12">teams</span>
+              <button
+                onClick={() => removePanel(i)}
+                disabled={targets.length <= 1}
+                className="text-slate-500 hover:text-rose-300 disabled:opacity-30 text-lg leading-none"
+                title="Remove panel"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={addPanel}
+            className="text-xs px-2.5 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+          >
+            + Add another panel
+          </button>
+
+          <div className={`text-xs px-3 py-2 rounded ${overflow ? 'bg-rose-500/10 border border-rose-500/30 text-rose-300' : 'bg-ink-900/50 text-slate-400'}`}>
+            Assigning <span className="text-slate-100 font-bold">{totalAssigned}</span> of {teams.length} teams.
+            {!overflow && totalAssigned < teams.length && (
+              <span className="text-slate-500"> · {teams.length - totalAssigned} team{teams.length - totalAssigned === 1 ? '' : 's'} won't be assigned</span>
+            )}
+            {overflow && <span> · too many — reduce sizes.</span>}
+          </div>
+          {err && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded p-2 text-xs">{err}</div>}
+        </div>
+        <div className="px-5 pb-5 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="text-sm text-slate-300 hover:text-white px-3 py-2">
+            Cancel
+          </button>
+          <button
+            onClick={handleDistribute}
+            disabled={busy || overflow || totalAssigned === 0}
+            className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
+          >
+            {busy ? 'Distributing…' : '🎲 Distribute'}
+          </button>
+        </div>
       </div>
     </div>
   );
