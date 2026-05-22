@@ -1,6 +1,13 @@
-import { useMemo, useState } from 'react';
-import type { Team, DashboardStats } from '../types';
-import { backfillMentorLocations } from '../api';
+import { useEffect, useMemo, useState } from 'react';
+import type { Team, DashboardStats, LeaderboardData } from '../types';
+import { backfillMentorLocations, fetchLeaderboard } from '../api';
+
+// The active edition for all export filenames and report headers. Bump this
+// for next year's event (e.g. 'RealHack 2027') — keeps the 2026 reports
+// archived correctly and the new run cleanly labelled.
+const HACK_YEAR = '2026';
+const HACK_NAME = `RealHack ${HACK_YEAR}`;
+const FILE_PREFIX = `realhack-${HACK_YEAR}`;
 
 interface Props {
   teams: Team[];
@@ -137,6 +144,22 @@ function LocationBars({
 export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { onReload?: () => void }) {
   const [backfillBusy, setBackfillBusy] = useState(false);
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
+  // Cache of judge leaderboards per round so we can stitch judge totals into
+  // the round-results CSV exports without refetching on every download.
+  const [leaderboards, setLeaderboards] = useState<Record<number, LeaderboardData>>({});
+
+  useEffect(() => {
+    // Pull R1 + R2 leaderboards in parallel. Missing rounds (no scores yet)
+    // resolve to an empty leaderboard so the exports still work.
+    Promise.all([fetchLeaderboard(1).catch(() => null), fetchLeaderboard(2).catch(() => null)]).then(
+      ([r1, r2]) => {
+        const next: Record<number, LeaderboardData> = {};
+        if (r1) next[1] = r1;
+        if (r2) next[2] = r2;
+        setLeaderboards(next);
+      },
+    );
+  }, []);
   const handleBackfill = async () => {
     setBackfillBusy(true);
     setBackfillMsg(null);
@@ -449,7 +472,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
           <ExportButton
             label="Export to Excel"
             onClick={() => downloadCsv(
-              'realhack-2026_mentor-locations.csv',
+              `${FILE_PREFIX}_mentor-locations.csv`,
               ['Team Name', 'Mentor Name', 'Mentor Email', 'Location', 'Address', 'Country', 'T-shirt Size', 'Dual-Role'],
               derived.mentorCsvRows,
             )}
@@ -470,7 +493,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
           <ExportButton
             label="Export to Excel"
             onClick={() => downloadCsv(
-              'realhack-2026_team-member-locations.csv',
+              `${FILE_PREFIX}_team-member-locations.csv`,
               ['Team Name', 'Team Member Name', 'Member Email', 'Location', 'Address', 'Country', 'T-shirt Size', 'Dual-Role'],
               derived.memberCsvRows,
             )}
@@ -491,7 +514,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
           <ExportButton
             label="Export to Excel"
             onClick={() => downloadCsv(
-              'realhack-2026_tshirt-sizes.csv',
+              `${FILE_PREFIX}_tshirt-sizes.csv`,
               ['Team Name', 'Name', 'Email', 'Location', 'Address', 'Country', 'T-shirt Size', 'Role', 'Missing Address (US/PH)'],
               derived.tshirtCsvRows,
             )}
@@ -605,6 +628,11 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
 
       </div>
 
+      {/* ===== Round results (RealHack 2026) ===== */}
+      <Section title={`${HACK_NAME} — round results & exports`}>
+        <RoundResultsExports teams={teams} leaderboards={leaderboards} />
+      </Section>
+
       {/* Top 10 teams by AI score */}
       {derived.top10.length > 0 && (
         <Section title="Top 10 teams by AI overall score">
@@ -635,6 +663,156 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
           <div className="text-xs text-slate-500 mt-2">Click a team to jump to its card on the Dashboard tab.</div>
         </Section>
       )}
+    </div>
+  );
+}
+
+
+// ===== Round results / exports =====
+
+interface RoundResultsProps {
+  teams: Team[];
+  leaderboards: Record<number, LeaderboardData>;
+}
+
+/** Bucket of teams + the heading we show + the filename for its CSV. */
+interface RoundBucket {
+  key: 'r1' | 'r2' | 'finals';
+  label: string;
+  description: string;
+  teams: Team[];
+  filename: string;
+  tone: string;  // tailwind class for the count chip
+}
+
+function RoundResultsExports({ teams, leaderboards }: RoundResultsProps) {
+  // Indexed maps for quick score lookup per team per round.
+  const r1Avg = useMemo(() => new Map((leaderboards[1]?.rows ?? []).map((r) => [r.team_id, r.avg_score])), [leaderboards]);
+  const r2Avg = useMemo(() => new Map((leaderboards[2]?.rows ?? []).map((r) => [r.team_id, r.avg_score])), [leaderboards]);
+  const r1JudgeCount = useMemo(() => new Map((leaderboards[1]?.rows ?? []).map((r) => [r.team_id, r.judge_count])), [leaderboards]);
+  const r2JudgeCount = useMemo(() => new Map((leaderboards[2]?.rows ?? []).map((r) => [r.team_id, r.judge_count])), [leaderboards]);
+
+  // Teams that advanced past Round 1 (so were "selected" for R2).
+  const r1Selected = useMemo(
+    () => teams.filter((t) => (t.advanced_to_round ?? 1) >= 2),
+    [teams],
+  );
+  // Teams that reached R2 (same set as r1Selected, but framed as participants of R2).
+  const r2Selected = r1Selected;
+  // Crowned finalists (1st / 2nd / 3rd).
+  const finalists = useMemo(
+    () => teams.filter((t) => t.final_position !== null && t.final_position !== undefined)
+      .sort((a, b) => (a.final_position ?? 99) - (b.final_position ?? 99)),
+    [teams],
+  );
+
+  const buckets: RoundBucket[] = [
+    {
+      key: 'r1',
+      label: 'Round 1 — advancing teams',
+      description: `Teams the organizers advanced past Round 1.`,
+      teams: r1Selected,
+      filename: `${FILE_PREFIX}_round-1-advancers.csv`,
+      tone: 'bg-sky-500/15 text-sky-300 border-sky-500/40',
+    },
+    {
+      key: 'r2',
+      label: 'Round 2 — participants & scores',
+      description: `Round 2 leaderboard with judge-averaged scores.`,
+      teams: r2Selected,
+      filename: `${FILE_PREFIX}_round-2-results.csv`,
+      tone: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+    },
+    {
+      key: 'finals',
+      label: 'Finals — crowned winners',
+      description: `1st / 2nd / 3rd as set by the organizing panel.`,
+      teams: finalists,
+      filename: `${FILE_PREFIX}_finals-winners.csv`,
+      tone: 'bg-lime-500/15 text-lime-300 border-lime-500/40',
+    },
+  ];
+
+  const buildRows = (bucket: RoundBucket): (string | number | null)[][] => {
+    return bucket.teams.map((t) => {
+      const memberNames = t.members.map((m) => m.name).join('; ');
+      const memberEmails = t.members.map((m) => m.email || '').join('; ');
+      const aiScore = (t.ai_scores?.overall as any)?.score ?? '';
+      const aiHeadline = (t.ai_scores?.overall as any)?.headline ?? '';
+      const r1 = r1Avg.get(t.id);
+      const r2 = r2Avg.get(t.id);
+      const r1n = r1JudgeCount.get(t.id) ?? 0;
+      const r2n = r2JudgeCount.get(t.id) ?? 0;
+      const pos = t.final_position;
+      const status = pos ? (pos === 1 ? '🥇 1st place' : pos === 2 ? '🥈 2nd place' : pos === 3 ? '🥉 3rd place' : `${pos}th`)
+        : (t.advanced_to_round ?? 1) >= 2 ? 'Advanced to Round 2' : 'Round 1 only';
+      return [
+        t.name,
+        t.mentor_name || '',
+        t.mentor_email || '',
+        t.members.length,
+        memberNames,
+        memberEmails,
+        r1 !== undefined ? r1.toFixed(2) : '',
+        r1n,
+        r2 !== undefined ? r2.toFixed(2) : '',
+        r2n,
+        aiScore,
+        aiHeadline,
+        Math.round((t.completeness_score || 0) * 100) + '%',
+        t.idea || '',
+        t.tools || '',
+        t.approach || '',
+        t.viability || '',
+        t.business_value || '',
+        pos ?? '',
+        status,
+      ];
+    });
+  };
+
+  const exportBucket = (bucket: RoundBucket) => {
+    const header = [
+      'Team', 'Mentor', 'Mentor Email', 'Members', 'Member Names', 'Member Emails',
+      'R1 Avg Score', 'R1 Judge Count', 'R2 Avg Score', 'R2 Judge Count',
+      'AI Score', 'AI Headline', 'Completeness',
+      'Idea', 'Tech Stack', 'Approach', 'Viability', 'Business Value',
+      'Final Position', 'Status',
+    ];
+    downloadCsv(bucket.filename, header, buildRows(bucket));
+  };
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-slate-400 -mt-1 mb-3">
+        Three exports for the {HACK_NAME} edition. Each CSV opens in Excel and includes team details, judge-averaged scores per round, AI screening output, and the team's final status.
+      </p>
+      {buckets.map((b) => (
+        <div
+          key={b.key}
+          className="bg-ink-900/40 border border-slate-700/40 rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h4 className="font-bold text-slate-100">{b.label}</h4>
+              <span className={`text-[11px] px-2 py-0.5 rounded border ${b.tone}`}>
+                {b.teams.length} team{b.teams.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">{b.description}</p>
+          </div>
+          <button
+            onClick={() => exportBucket(b)}
+            disabled={b.teams.length === 0}
+            className="text-xs px-3 py-1.5 rounded border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 disabled:opacity-30 disabled:cursor-not-allowed transition flex items-center gap-1.5"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+            </svg>
+            Export to Excel
+          </button>
+        </div>
+      ))}
     </div>
   );
 }
