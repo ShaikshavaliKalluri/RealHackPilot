@@ -45,6 +45,8 @@ export function JudgesPanel({ teams }: Props) {
 
   // Random-distribute wizard state
   const [distributeOpen, setDistributeOpen] = useState(false);
+  // Move-teams modal state (source panel)
+  const [movingFromPanelId, setMovingFromPanelId] = useState<number | null>(null);
 
   const reloadJudges = async () => {
     setJudgesLoading(true);
@@ -393,6 +395,15 @@ export function JudgesPanel({ teams }: Props) {
                     >
                       Edit teams
                     </button>
+                    {p.team_ids.length > 0 && panels.length > 1 && (
+                      <button
+                        onClick={() => setMovingFromPanelId(p.id)}
+                        className="text-xs px-2.5 py-1 rounded border border-sky-500/30 hover:border-sky-500/60 hover:bg-sky-500/10 text-sky-300 transition"
+                        title="Move teams from this panel to another panel in the same round"
+                      >
+                        ↔ Move teams
+                      </button>
+                    )}
                     <button
                       onClick={() => openEditor(p, 'judges')}
                       className={`text-xs px-2.5 py-1 rounded border transition ${editingPanelId === p.id && editMode === 'judges' ? 'bg-rose-500/20 border-rose-500/60 text-rose-200' : 'border-slate-600 hover:border-slate-400 text-slate-300'}`}
@@ -593,6 +604,16 @@ export function JudgesPanel({ teams }: Props) {
           onSaved={async () => { setDistributeOpen(false); await reloadPanels(); }}
         />
       )}
+
+      {movingFromPanelId !== null && (
+        <MoveTeamsModal
+          sourcePanel={panels.find((p) => p.id === movingFromPanelId)!}
+          siblingPanels={panels.filter((p) => p.id !== movingFromPanelId)}
+          teams={teams}
+          onClose={() => setMovingFromPanelId(null)}
+          onSaved={async () => { setMovingFromPanelId(null); await reloadPanels(); }}
+        />
+      )}
     </div>
   );
 }
@@ -746,6 +767,167 @@ function DistributeTeamsModal({ round, teams, existingPanels, onClose, onSaved }
           >
             {busy ? 'Distributing…' : '🎲 Distribute'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ===== Move teams between panels =====
+
+interface MoveTeamsProps {
+  sourcePanel: Panel;
+  siblingPanels: Panel[];
+  teams: Team[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function MoveTeamsModal({ sourcePanel, siblingPanels, teams, onClose, onSaved }: MoveTeamsProps) {
+  const [selectedTeams, setSelectedTeams] = useState<Set<number>>(new Set());
+  const [destPanelId, setDestPanelId] = useState<number | ''>(siblingPanels[0]?.id ?? '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const teamById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
+  const sourceTeams = sourcePanel.team_ids
+    .map((id) => teamById.get(id))
+    .filter((t): t is Team => !!t)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const toggleTeam = (id: number) => {
+    setSelectedTeams((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleMove = async () => {
+    setErr(null);
+    if (!destPanelId) {
+      setErr('Pick a destination panel');
+      return;
+    }
+    if (selectedTeams.size === 0) {
+      setErr('Pick at least one team to move');
+      return;
+    }
+    const dest = siblingPanels.find((p) => p.id === destPanelId);
+    if (!dest) return;
+    if (!confirm(
+      `Move ${selectedTeams.size} team${selectedTeams.size === 1 ? '' : 's'} from "${sourcePanel.name}" to "${dest.name}"?`,
+    )) return;
+    setBusy(true);
+    try {
+      const movingIds = Array.from(selectedTeams);
+      const sourceAfter = sourcePanel.team_ids.filter((id) => !selectedTeams.has(id));
+      // Dedupe destination — if a team somehow exists already, set() handles it.
+      const destAfter = Array.from(new Set([...dest.team_ids, ...movingIds]));
+      await setPanelTeams(sourcePanel.id, sourceAfter);
+      await setPanelTeams(dest.id, destAfter);
+      onSaved();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg bg-ink-800 border border-sky-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
+        <div className="bg-gradient-to-br from-sky-500/25 to-emerald-500/15 p-4 border-b border-sky-500/40">
+          <h3 className="font-bold text-sky-200">↔ Move teams</h3>
+          <p className="text-xs text-slate-300 mt-0.5">
+            From <span className="font-bold text-slate-100">{sourcePanel.name}</span> · pick teams to move and the destination panel.
+          </p>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="text-xs uppercase tracking-wider text-slate-400">Move to</label>
+            <select
+              value={destPanelId}
+              onChange={(e) => setDestPanelId(e.target.value ? Number(e.target.value) : '')}
+              className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 mt-1 text-sm focus:outline-none focus:border-sky-500/60"
+            >
+              {siblingPanels.length === 0 && <option value="">— No other panels —</option>}
+              {siblingPanels.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.team_ids.length} teams)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs uppercase tracking-wider text-slate-400">
+                Teams in {sourcePanel.name} ({sourceTeams.length})
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedTeams(new Set(sourceTeams.map((t) => t.id)))}
+                  className="text-[11px] px-2 py-0.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setSelectedTeams(new Set())}
+                  className="text-[11px] px-2 py-0.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="max-h-[40vh] overflow-y-auto pr-1 space-y-1.5">
+              {sourceTeams.map((t) => {
+                const checked = selectedTeams.has(t.id);
+                return (
+                  <label
+                    key={t.id}
+                    className={`flex items-center gap-2 rounded-lg border p-2 cursor-pointer transition ${
+                      checked
+                        ? 'bg-sky-500/10 border-sky-500/50'
+                        : 'bg-ink-900/40 border-slate-700/40 hover:border-slate-500'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleTeam(t.id)}
+                      className="accent-sky-400"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-slate-100 truncate">{t.name}</div>
+                      <div className="text-xs text-slate-400 truncate">Mentor: {t.mentor_name || '—'}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {err && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded p-2 text-xs">{err}</div>}
+        </div>
+        <div className="px-5 pb-5 flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-500">
+            {selectedTeams.size} of {sourceTeams.length} selected
+          </span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="text-sm text-slate-300 hover:text-white px-3 py-2">
+              Cancel
+            </button>
+            <button
+              onClick={handleMove}
+              disabled={busy || selectedTeams.size === 0 || !destPanelId}
+              className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
+            >
+              {busy ? 'Moving…' : `↔ Move ${selectedTeams.size || ''}`}
+            </button>
+          </div>
         </div>
       </div>
     </div>
