@@ -85,6 +85,30 @@ class Judge(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class JudgeAssignment(Base):
+    """Which judge is supposed to score which team in which round.
+
+    A row says: judge `judge_id` should score team `team_id` in round `round`.
+    Multiple judges can be assigned to the same team for the same round (panel
+    judging). The judge dashboard filters to only show teams they're assigned
+    to — keeping the mobile UI focused.
+    """
+    __tablename__ = "judge_assignments"
+    __table_args__ = (
+        UniqueConstraint("judge_id", "team_id", "round", name="uq_judge_team_round_assignment"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    judge_id: Mapped[int] = mapped_column(ForeignKey("judges.id", ondelete="CASCADE"), index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
+    round: Mapped[int] = mapped_column(Integer, index=True)  # 1 | 2 | 3
+    assigned_by_email: Mapped[str | None] = mapped_column(String(255))
+    assigned_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    judge: Mapped["Judge"] = relationship()
+    team: Mapped["Team"] = relationship()
+
+
 class JudgeScore(Base):
     __tablename__ = "judge_score_records"
     __table_args__ = (

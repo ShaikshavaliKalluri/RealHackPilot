@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
-import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, type LLMHealth, type AIScreenStatus, type UserProfile } from './api';
+import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, fetchMyRole, type LLMHealth, type AIScreenStatus, type UserProfile, type UserRole } from './api';
+import { JudgeDashboard } from './components/JudgeDashboard';
+import { JudgesPanel } from './components/JudgesPanel';
 import type { Team, DashboardStats } from './types';
 import { StatCard } from './components/StatCard';
 import { TeamCard } from './components/TeamCard';
@@ -19,13 +21,14 @@ import { WinnersBanner } from './components/WinnersBanner';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
 type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | 'unique_people' | null;
-type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics';
+type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics' | 'judges';
 
 export default function App() {
   // ---- Auth (MSAL) ----
   const isAuthenticated = useIsAuthenticated();
   const { inProgress } = useMsal();
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [role, setRole] = useState<UserRole | null>(null);
   const [authError, setAuthError] = useState<string | null>(() => {
     // Pick up any error stashed by main.tsx during MSAL bootstrap
     // (e.g. AADSTS50105 when Entra blocks a user not in the security group).
@@ -73,6 +76,9 @@ export default function App() {
     fetchMe()
       .then(setUser)
       .catch((e) => setAuthError(e.message || 'Failed to load profile'));
+    fetchMyRole()
+      .then(setRole)
+      .catch((e) => console.error('Role lookup failed:', e));
     reload().catch((e) => console.error(e));
     llmHealth().then(setLlm).catch((e) => console.error(e));
   }, [isAuthenticated]);
@@ -166,6 +172,36 @@ export default function App() {
     return <LoginPage error={authError} />;
   }
 
+  // Wait for role lookup before routing — prevents flicker between organizer
+  // and judge views while /api/me/role is loading.
+  if (role === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-400">
+        Loading…
+      </div>
+    );
+  }
+
+  // Judges get the focused mobile-friendly view — no organizer tabs.
+  if (role.role === 'judge' && role.judge_id) {
+    return <JudgeDashboard judgeId={role.judge_id} judgeName={role.name || 'Judge'} user={user} />;
+  }
+
+  // Users authenticated by Azure AD but not registered in our Judge table.
+  if (role.role === 'none') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="max-w-md bg-ink-800/60 border border-slate-700/40 rounded-xl p-6 text-center">
+          <img src="/realhack-logo.png" alt="RealHack 2026" className="h-12 mx-auto mb-4" />
+          <h2 className="text-lg font-bold text-slate-100 mb-2">Not registered for this app</h2>
+          <p className="text-sm text-slate-400 mb-4">
+            You're signed in as <span className="text-slate-200">{role.email || role.name}</span>, but you're not on the judge or organizer list yet. Please contact the RealHack organizers if this looks wrong.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen p-8 max-w-7xl mx-auto">
       <header className="mb-6 pb-5 border-b border-slate-800/60">
@@ -217,6 +253,12 @@ export default function App() {
               >
                 Analytics
               </button>
+              <button
+                onClick={() => setMode('judges')}
+                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'judges' ? 'bg-rose-500/15 text-rose-200 border-rose-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
+              >
+                Judges
+              </button>
             </nav>
             {user && <UserBadge user={user} />}
           </div>
@@ -227,6 +269,7 @@ export default function App() {
           {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}
           {mode === 'comms' && <>Teams <span className="text-violet-300">Channels &amp; Broadcast</span></>}
           {mode === 'analytics' && <>Analytics <span className="text-teal-300">&amp; Reporting</span></>}
+          {mode === 'judges' && <>Judges <span className="text-rose-300">&amp; Assignments</span></>}
         </h1>
         <p className="text-slate-400 mt-2 text-sm">
           {mode === 'dashboard' && 'Upload the latest MS Forms export. Teams get scored on completeness, screened for duplicates and rule violations, and surfaced in one place.'}
@@ -234,6 +277,7 @@ export default function App() {
           {mode === 'scoring' && 'Live leaderboard aggregating judge scores per round, plus manual entry for organizers to log scores on behalf of a judge.'}
           {mode === 'comms' && 'Create per-team Microsoft Teams channels and broadcast announcements to every team at once.'}
           {mode === 'analytics' && 'Location heat map, completeness distribution, AI score breakdown, top teams, flag analysis, and swag procurement summary.'}
+          {mode === 'judges' && 'Add judges, mark organizers, and assign which teams each judge sees on their mobile dashboard per round.'}
         </p>
       </header>
 
@@ -454,6 +498,8 @@ export default function App() {
           <BroadcastPanel teams={teams} onReload={reload} />
         </div>
       )}
+
+      {mode === 'judges' && <JudgesPanel teams={teams} />}
 
       <EmailComposer
         open={composerOpen}

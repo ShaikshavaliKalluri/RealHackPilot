@@ -276,6 +276,55 @@ export async function fetchJudgeScores(opts: { round?: number; judge_id?: number
   return r.json();
 }
 
+// ===== Role + judge assignments =====
+
+export interface UserRole {
+  role: 'organizer' | 'judge' | 'none';
+  judge_id: number | null;
+  name: string | null;
+  email: string | null;
+}
+
+export async function fetchMyRole(): Promise<UserRole> {
+  const r = await authFetch(`${BASE}/me/role`);
+  if (!r.ok) throw new Error(`Role fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function fetchMyAssignedTeams(round?: number): Promise<Team[]> {
+  const qs = round !== undefined ? `?round=${round}` : '';
+  const r = await authFetch(`${BASE}/judge/me/teams${qs}`);
+  if (!r.ok) throw new Error(`Assigned teams fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export interface JudgeAssignment {
+  id: number;
+  judge_id: number;
+  team_id: number;
+  round: number;
+}
+
+export async function fetchJudgeAssignments(judgeId: number, round?: number): Promise<JudgeAssignment[]> {
+  const qs = round !== undefined ? `?round=${round}` : '';
+  const r = await authFetch(`${BASE}/judges/${judgeId}/assignments${qs}`);
+  if (!r.ok) throw new Error(`Assignments fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function setJudgeAssignments(judgeId: number, round: number, teamIds: number[]): Promise<JudgeAssignment[]> {
+  const r = await authFetch(`${BASE}/judges/${judgeId}/assignments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ round, team_ids: teamIds }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Set assignments failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
 export async function fetchLeaderboard(round: number): Promise<LeaderboardData> {
   const r = await authFetch(`${BASE}/judging/leaderboard?round=${round}`);
   if (!r.ok) throw new Error(`Leaderboard fetch failed: ${r.status}`);

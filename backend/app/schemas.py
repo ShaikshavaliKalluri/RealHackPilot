@@ -82,6 +82,28 @@ class JudgeCreate(BaseModel):
     role: str = "judge"
 
 
+class UserRoleOut(BaseModel):
+    """Result of looking up the signed-in user's role in the Judge table."""
+    role: str  # "organizer" | "judge" | "none"
+    judge_id: int | None = None
+    name: str | None = None
+    email: str | None = None
+
+
+class JudgeAssignmentSet(BaseModel):
+    """Bulk-set the team assignments for a specific judge in a specific round."""
+    round: int
+    team_ids: list[int]
+
+
+class JudgeAssignmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    judge_id: int
+    team_id: int
+    round: int
+
+
 class JudgeScoreSubmit(BaseModel):
     judge_id: int
     team_id: int

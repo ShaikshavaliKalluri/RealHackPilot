@@ -43,6 +43,7 @@ from .schemas import (
     EmailTemplateOut, EmailRenderRequest, RenderedEmail,
     JudgeAIRequest, JudgeHumanRequest,
     JudgeOut, JudgeCreate, JudgeScoreSubmit, JudgeScoreOut,
+    UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
     CommLogOut, TeamChannelCreateRequest, TeamMessageRequest, BroadcastRequest,
     CommLogCreateRequest, RepoCheckOut, ReadinessFlagsRequest,
@@ -667,6 +668,117 @@ def judge_login(req: JudgeCreate, db: Session = Depends(get_db)) -> models.Judge
     judge = judging.upsert_judge_by_email(db, name=req.name, email=req.email, role=req.role or "judge")
     db.commit()
     return judge
+
+
+@app.get("/api/me/role", response_model=UserRoleOut)
+def me_role(
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> UserRoleOut:
+    """After Azure AD login succeeds, look up the user's role in our Judge table.
+
+    Azure AD + AD group already guard the API at the network/auth layer — this
+    endpoint just maps the signed-in user's email to organizer/judge/none so
+    the frontend can route them to the right view.
+    """
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    email = (profile.get("email") or "").strip().lower()
+    if not email:
+        return UserRoleOut(role="none", name=profile.get("name"), email=None)
+    judge = (
+        db.query(models.Judge)
+        .filter(models.Judge.email.ilike(email))
+        .filter(models.Judge.is_active == True)  # noqa: E712
+        .first()
+    )
+    if not judge:
+        return UserRoleOut(role="none", name=profile.get("name"), email=email)
+    return UserRoleOut(
+        role=judge.role or "judge",
+        judge_id=judge.id,
+        name=judge.name,
+        email=judge.email,
+    )
+
+
+@app.get("/api/judge/me/teams", response_model=list[TeamOut])
+def my_assigned_teams(
+    round: int | None = None,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> list[models.Team]:
+    """Teams assigned to the signed-in judge. Optionally filtered by round."""
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    email = (profile.get("email") or "").strip().lower()
+    judge = (
+        db.query(models.Judge)
+        .filter(models.Judge.email.ilike(email))
+        .filter(models.Judge.is_active == True)  # noqa: E712
+        .first()
+    )
+    if not judge:
+        raise HTTPException(status_code=403, detail="Not registered as a judge")
+    q = db.query(models.JudgeAssignment).filter(models.JudgeAssignment.judge_id == judge.id)
+    if round is not None:
+        q = q.filter(models.JudgeAssignment.round == round)
+    team_ids = [a.team_id for a in q.all()]
+    if not team_ids:
+        return []
+    return db.query(models.Team).filter(models.Team.id.in_(team_ids)).order_by(models.Team.name.asc()).all()
+
+
+@app.get("/api/judges/{judge_id}/assignments", response_model=list[JudgeAssignmentOut])
+def get_judge_assignments(
+    judge_id: int,
+    round: int | None = None,
+    db: Session = Depends(get_db),
+) -> list[models.JudgeAssignment]:
+    q = db.query(models.JudgeAssignment).filter(models.JudgeAssignment.judge_id == judge_id)
+    if round is not None:
+        q = q.filter(models.JudgeAssignment.round == round)
+    return q.all()
+
+
+@app.post("/api/judges/{judge_id}/assignments", response_model=list[JudgeAssignmentOut])
+def set_judge_assignments(
+    judge_id: int,
+    req: JudgeAssignmentSet,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> list[models.JudgeAssignment]:
+    """Replace the set of teams assigned to this judge for the given round.
+
+    Existing assignments for (judge_id, round) are wiped and replaced with
+    the supplied team_ids. Idempotent — sending the same list twice is fine.
+    """
+    judge = db.query(models.Judge).get(judge_id)
+    if not judge:
+        raise HTTPException(status_code=404, detail="judge not found")
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    by_email = (profile.get("email") or "").strip().lower() or None
+
+    db.query(models.JudgeAssignment).filter(
+        models.JudgeAssignment.judge_id == judge_id,
+        models.JudgeAssignment.round == req.round,
+    ).delete(synchronize_session=False)
+
+    new_rows: list[models.JudgeAssignment] = []
+    for tid in set(req.team_ids):
+        if not db.query(models.Team).get(tid):
+            continue  # silently skip team ids that don't exist
+        row = models.JudgeAssignment(
+            judge_id=judge_id,
+            team_id=tid,
+            round=req.round,
+            assigned_by_email=by_email,
+        )
+        db.add(row)
+        new_rows.append(row)
+    db.commit()
+    return new_rows
 
 
 @app.post("/api/judging/scores", response_model=JudgeScoreOut)
