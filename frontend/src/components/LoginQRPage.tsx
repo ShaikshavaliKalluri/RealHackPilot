@@ -67,14 +67,23 @@ export function LoginQRPage() {
         </div>
       </div>
 
-      {/* Print-specific CSS — hide everything else on the page when printing this view */}
+      {/* Print-specific CSS — hide EVERYTHING outside the printable sheet
+          (including the floating chatbot, app header, sidebars). */}
       <style>{`
         @media print {
+          @page { margin: 0.5in; }
           body { background: white !important; }
-          .no-print { display: none !important; }
-          .printable-sheet { box-shadow: none !important; max-width: 100% !important; }
-          /* Hide the rest of the app shell (header, nav) when printing */
-          header, nav, footer { display: none !important; }
+          body * { visibility: hidden !important; }
+          .printable-sheet,
+          .printable-sheet * { visibility: visible !important; }
+          .printable-sheet {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            max-width: 100% !important;
+            box-shadow: none !important;
+          }
         }
       `}</style>
     </div>
