@@ -47,6 +47,10 @@ export function JudgesPanel({ teams }: Props) {
   const [distributeOpen, setDistributeOpen] = useState(false);
   // Move-teams modal state (source panel)
   const [movingFromPanelId, setMovingFromPanelId] = useState<number | null>(null);
+  // Move-judges modal state (source panel) — supports copy (keep in both) too
+  const [movingJudgesFromPanelId, setMovingJudgesFromPanelId] = useState<number | null>(null);
+  // Print-sheet modal state
+  const [printingPanelId, setPrintingPanelId] = useState<number | null>(null);
 
   const reloadJudges = async () => {
     setJudgesLoading(true);
@@ -404,12 +408,30 @@ export function JudgesPanel({ teams }: Props) {
                         ↔ Move teams
                       </button>
                     )}
+                    {(p.team_ids.length > 0 || p.judge_ids.length > 0) && (
+                      <button
+                        onClick={() => setPrintingPanelId(p.id)}
+                        className="text-xs px-2.5 py-1 rounded border border-emerald-500/30 hover:border-emerald-500/60 hover:bg-emerald-500/10 text-emerald-300 transition"
+                        title="Print a sheet showing judges + assigned teams"
+                      >
+                        🖨 Print sheet
+                      </button>
+                    )}
                     <button
                       onClick={() => openEditor(p, 'judges')}
                       className={`text-xs px-2.5 py-1 rounded border transition ${editingPanelId === p.id && editMode === 'judges' ? 'bg-rose-500/20 border-rose-500/60 text-rose-200' : 'border-slate-600 hover:border-slate-400 text-slate-300'}`}
                     >
                       Edit judges
                     </button>
+                    {p.judge_ids.length > 0 && panels.length > 1 && (
+                      <button
+                        onClick={() => setMovingJudgesFromPanelId(p.id)}
+                        className="text-xs px-2.5 py-1 rounded border border-sky-500/30 hover:border-sky-500/60 hover:bg-sky-500/10 text-sky-300 transition"
+                        title="Move or copy judges to another panel in the same round"
+                      >
+                        ↔ Move/copy judges
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDeletePanel(p.id, p.name)}
                       className="text-xs px-2.5 py-1 rounded border border-rose-500/30 hover:border-rose-500/60 text-rose-300 hover:text-rose-200 transition"
@@ -612,6 +634,25 @@ export function JudgesPanel({ teams }: Props) {
           teams={teams}
           onClose={() => setMovingFromPanelId(null)}
           onSaved={async () => { setMovingFromPanelId(null); await reloadPanels(); }}
+        />
+      )}
+
+      {movingJudgesFromPanelId !== null && (
+        <MoveJudgesModal
+          sourcePanel={panels.find((p) => p.id === movingJudgesFromPanelId)!}
+          siblingPanels={panels.filter((p) => p.id !== movingJudgesFromPanelId)}
+          judges={judges}
+          onClose={() => setMovingJudgesFromPanelId(null)}
+          onSaved={async () => { setMovingJudgesFromPanelId(null); await reloadPanels(); }}
+        />
+      )}
+
+      {printingPanelId !== null && (
+        <PrintPanelSheet
+          panel={panels.find((p) => p.id === printingPanelId)!}
+          teams={teams}
+          judges={judges}
+          onClose={() => setPrintingPanelId(null)}
         />
       )}
     </div>
@@ -930,6 +971,348 @@ function MoveTeamsModal({ sourcePanel, siblingPanels, teams, onClose, onSaved }:
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+// ===== Move (or copy) judges between panels =====
+
+interface MoveJudgesProps {
+  sourcePanel: Panel;
+  siblingPanels: Panel[];
+  judges: Judge[];
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function MoveJudgesModal({ sourcePanel, siblingPanels, judges, onClose, onSaved }: MoveJudgesProps) {
+  const [selectedJudges, setSelectedJudges] = useState<Set<number>>(new Set());
+  const [destPanelId, setDestPanelId] = useState<number | ''>(siblingPanels[0]?.id ?? '');
+  // When true, leave the judge in the source panel — effectively a copy/share.
+  const [keepInSource, setKeepInSource] = useState<boolean>(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const judgeById = useMemo(() => new Map(judges.map((j) => [j.id, j])), [judges]);
+  const sourceJudges = sourcePanel.judge_ids
+    .map((id) => judgeById.get(id))
+    .filter((j): j is Judge => !!j)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const toggleJudge = (id: number) => {
+    setSelectedJudges((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleApply = async () => {
+    setErr(null);
+    if (!destPanelId) {
+      setErr('Pick a destination panel');
+      return;
+    }
+    if (selectedJudges.size === 0) {
+      setErr('Pick at least one judge');
+      return;
+    }
+    const dest = siblingPanels.find((p) => p.id === destPanelId);
+    if (!dest) return;
+    const verb = keepInSource ? 'Copy' : 'Move';
+    if (!confirm(
+      `${verb} ${selectedJudges.size} judge${selectedJudges.size === 1 ? '' : 's'} ` +
+      `from "${sourcePanel.name}" to "${dest.name}"?` +
+      (keepInSource ? ` (Will remain in "${sourcePanel.name}" as well.)` : ''),
+    )) return;
+    setBusy(true);
+    try {
+      const movingIds = Array.from(selectedJudges);
+      const destAfter = Array.from(new Set([...dest.judge_ids, ...movingIds]));
+      await setPanelJudges(dest.id, destAfter);
+      if (!keepInSource) {
+        const sourceAfter = sourcePanel.judge_ids.filter((id) => !selectedJudges.has(id));
+        await setPanelJudges(sourcePanel.id, sourceAfter);
+      }
+      onSaved();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg bg-ink-800 border border-sky-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
+        <div className="bg-gradient-to-br from-sky-500/25 to-emerald-500/15 p-4 border-b border-sky-500/40">
+          <h3 className="font-bold text-sky-200">↔ Move or copy judges</h3>
+          <p className="text-xs text-slate-300 mt-0.5">
+            From <span className="font-bold text-slate-100">{sourcePanel.name}</span> · choose destination + whether to also keep them in this panel.
+          </p>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="text-xs uppercase tracking-wider text-slate-400">Destination panel</label>
+            <select
+              value={destPanelId}
+              onChange={(e) => setDestPanelId(e.target.value ? Number(e.target.value) : '')}
+              className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 mt-1 text-sm focus:outline-none focus:border-sky-500/60"
+            >
+              {siblingPanels.length === 0 && <option value="">— No other panels —</option>}
+              {siblingPanels.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name} ({p.judge_ids.length} judges)
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <label className="flex items-start gap-2 bg-ink-900/40 border border-slate-700/40 rounded-lg p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={keepInSource}
+              onChange={(e) => setKeepInSource(e.target.checked)}
+              className="mt-0.5 accent-sky-400"
+            />
+            <div>
+              <div className="text-sm font-semibold text-slate-100">Keep them in "{sourcePanel.name}" too</div>
+              <div className="text-xs text-slate-400 mt-0.5">
+                Selected judges will end up in <strong>both</strong> panels (a copy, not a move). Useful when a senior judge oversees multiple panels.
+              </div>
+            </div>
+          </label>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs uppercase tracking-wider text-slate-400">
+                Judges in {sourcePanel.name} ({sourceJudges.length})
+              </label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setSelectedJudges(new Set(sourceJudges.map((j) => j.id)))}
+                  className="text-[11px] px-2 py-0.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setSelectedJudges(new Set())}
+                  className="text-[11px] px-2 py-0.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="max-h-[35vh] overflow-y-auto pr-1 space-y-1.5">
+              {sourceJudges.map((j) => {
+                const checked = selectedJudges.has(j.id);
+                return (
+                  <label
+                    key={j.id}
+                    className={`flex items-center gap-2 rounded-lg border p-2 cursor-pointer transition ${
+                      checked
+                        ? 'bg-sky-500/10 border-sky-500/50'
+                        : 'bg-ink-900/40 border-slate-700/40 hover:border-slate-500'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleJudge(j.id)}
+                      className="accent-sky-400"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-slate-100 truncate">{j.name}</div>
+                      <div className="text-xs text-slate-400 truncate">{j.email || '—'}</div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {err && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded p-2 text-xs">{err}</div>}
+        </div>
+        <div className="px-5 pb-5 flex items-center justify-between gap-2">
+          <span className="text-xs text-slate-500">
+            {selectedJudges.size} of {sourceJudges.length} selected
+          </span>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="text-sm text-slate-300 hover:text-white px-3 py-2">
+              Cancel
+            </button>
+            <button
+              onClick={handleApply}
+              disabled={busy || selectedJudges.size === 0 || !destPanelId}
+              className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
+            >
+              {busy ? 'Saving…' : keepInSource ? `Copy ${selectedJudges.size || ''}` : `Move ${selectedJudges.size || ''}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ===== Print panel sheet =====
+
+interface PrintSheetProps {
+  panel: Panel;
+  teams: Team[];
+  judges: Judge[];
+  onClose: () => void;
+}
+
+function PrintPanelSheet({ panel, teams, judges, onClose }: PrintSheetProps) {
+  const panelTeams = useMemo(() => {
+    const map = new Map(teams.map((t) => [t.id, t]));
+    return panel.team_ids
+      .map((id) => map.get(id))
+      .filter((t): t is Team => !!t)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [panel, teams]);
+  const panelJudges = useMemo(() => {
+    const map = new Map(judges.map((j) => [j.id, j]));
+    return panel.judge_ids
+      .map((id) => map.get(id))
+      .filter((j): j is Judge => !!j)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [panel, judges]);
+
+  const handlePrint = () => window.print();
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 backdrop-blur-sm p-4 overflow-y-auto" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-3xl my-6 bg-ink-800 border border-emerald-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
+        {/* Toolbar (hidden when printing) */}
+        <div className="no-print bg-ink-900/60 p-3 flex items-center justify-between gap-3 border-b border-slate-700/40">
+          <div className="text-xs text-slate-400">
+            Preview of <span className="text-slate-200 font-semibold">{panel.name}</span> · Round {panel.round}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="text-sm text-slate-300 hover:text-white px-3 py-1.5">
+              Close
+            </button>
+            <button
+              onClick={handlePrint}
+              className="bg-emerald-400 hover:bg-emerald-300 text-ink-950 font-bold px-4 py-1.5 rounded-lg text-sm transition"
+            >
+              🖨 Print
+            </button>
+          </div>
+        </div>
+
+        {/* Printable sheet — white background so it prints cleanly on default settings */}
+        <div className="printable-sheet bg-white text-ink-950 p-10">
+          {/* Header */}
+          <div className="flex items-start justify-between gap-4 mb-5 pb-4 border-b-2 border-ink-950">
+            <div>
+              <div className="text-xs uppercase tracking-[0.3em] text-slate-500 font-bold">RealHack 2026</div>
+              <h1 className="text-3xl font-extrabold text-ink-950 mt-1">{panel.name}</h1>
+              <p className="text-sm text-slate-600 mt-0.5">Round {panel.round} · Judging Sheet</p>
+            </div>
+            <img src="/realhack-logo.png" alt="RealHack 2026" className="h-12" />
+          </div>
+
+          {/* Judges */}
+          <section className="mb-6">
+            <h2 className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-2">
+              Judges ({panelJudges.length})
+            </h2>
+            {panelJudges.length === 0 ? (
+              <p className="text-sm text-slate-500 italic">No judges assigned yet.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {panelJudges.map((j) => (
+                  <div key={j.id} className="border border-ink-950/20 rounded-lg p-3 bg-slate-50">
+                    <div className="font-bold text-ink-950">{j.name}</div>
+                    {j.email && <div className="text-xs text-slate-600 mt-0.5">{j.email}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Teams roster */}
+          <section>
+            <h2 className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-2">
+              Teams to score ({panelTeams.length})
+            </h2>
+            {panelTeams.length === 0 ? (
+              <p className="text-sm text-slate-500 italic">No teams assigned yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {panelTeams.map((t, idx) => (
+                  <div key={t.id} className="border border-ink-950/20 rounded-lg p-3 bg-white break-inside-avoid">
+                    <div className="flex items-baseline gap-3 mb-1.5">
+                      <span className="text-slate-400 font-bold text-sm w-6 text-right">{idx + 1}.</span>
+                      <h3 className="font-extrabold text-ink-950 text-lg">{t.name}</h3>
+                    </div>
+                    <div className="pl-9 space-y-1 text-sm">
+                      <div>
+                        <span className="text-xs uppercase tracking-wider text-slate-500 font-bold">Mentor:</span>
+                        <span className="ml-2 text-ink-950 font-semibold">{t.mentor_name || '—'}</span>
+                        {t.mentor_email && <span className="ml-2 text-xs text-slate-500">({t.mentor_email})</span>}
+                      </div>
+                      <div>
+                        <span className="text-xs uppercase tracking-wider text-slate-500 font-bold">
+                          Members ({t.members.length}):
+                        </span>
+                        {t.members.length === 0 ? (
+                          <span className="ml-2 text-slate-500 italic">none listed</span>
+                        ) : (
+                          <ul className="ml-6 mt-0.5 list-disc text-slate-800">
+                            {t.members.map((m) => (
+                              <li key={m.id}>
+                                {m.name}
+                                {m.email && <span className="text-slate-500 text-xs ml-1.5">{m.email}</span>}
+                                {m.location && <span className="text-slate-500 text-xs ml-1.5">· {m.location}</span>}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      {t.idea && (
+                        <div>
+                          <span className="text-xs uppercase tracking-wider text-slate-500 font-bold">Idea:</span>
+                          <span className="ml-2 text-slate-800">{t.idea}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <div className="mt-8 pt-4 border-t border-ink-950/30 text-xs text-slate-500 text-center italic">
+            Generated from realhack.realpage.com · RealHack 2026 — for the {panel.name} judging panel.
+          </div>
+        </div>
+      </div>
+
+      {/* Print-only CSS — hide everything except the printable sheet */}
+      <style>{`
+        @media print {
+          @page { margin: 0.4in; }
+          body { background: white !important; }
+          body * { visibility: hidden !important; }
+          .printable-sheet,
+          .printable-sheet * { visibility: visible !important; }
+          .printable-sheet {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            padding: 0 !important;
+          }
+          .break-inside-avoid { break-inside: avoid; }
+        }
+      `}</style>
     </div>
   );
 }
