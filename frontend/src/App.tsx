@@ -290,6 +290,9 @@ export default function App() {
                     ? (id, name) => setPreviewJudge({ id, name })
                     : undefined
                 }
+                showSandboxControls={
+                  (user.email || '').trim().toLowerCase() === 'shaikshavali.kalluri@realpage.com'
+                }
               />
             )}
           </div>
