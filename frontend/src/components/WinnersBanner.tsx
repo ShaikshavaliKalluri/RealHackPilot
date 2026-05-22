@@ -20,10 +20,10 @@ export function WinnersBanner({ teams, onJumpToTeam }: Props) {
   if (winners.length === 0) return null;
 
   const medal = (pos: number | null | undefined) => {
-    if (pos === 1) return { emoji: '🥇', label: '1st place', tone: 'from-amber-400/30 to-yellow-500/15 border-amber-400/60 text-amber-200' };
-    if (pos === 2) return { emoji: '🥈', label: '2nd place', tone: 'from-slate-300/20 to-slate-400/10 border-slate-300/40 text-slate-100' };
-    if (pos === 3) return { emoji: '🥉', label: '3rd place', tone: 'from-orange-500/20 to-rose-500/10 border-orange-500/40 text-orange-200' };
-    return { emoji: '🏆', label: 'Winner', tone: 'from-amber-400/20 to-rose-500/10 border-amber-400/40 text-amber-200' };
+    if (pos === 1) return { emoji: '🥇', label: '#1', tone: 'from-amber-400/30 to-yellow-500/15 border-amber-400/60 text-amber-200' };
+    if (pos === 2) return { emoji: '🥈', label: '#2', tone: 'from-slate-300/20 to-slate-400/10 border-slate-300/40 text-slate-100' };
+    if (pos === 3) return { emoji: '🥉', label: '#3', tone: 'from-orange-500/20 to-rose-500/10 border-orange-500/40 text-orange-200' };
+    return { emoji: '🏆', label: `#${pos ?? '?'}`, tone: 'from-amber-400/20 to-rose-500/10 border-amber-400/40 text-amber-200' };
   };
 
   return (
@@ -32,8 +32,8 @@ export function WinnersBanner({ teams, onJumpToTeam }: Props) {
         <div className="flex items-center gap-3 mb-4">
           <span className="text-2xl">🏆</span>
           <div>
-            <h2 className="text-xl font-extrabold text-amber-200">RealHack 2026 — Winners</h2>
-            <p className="text-xs text-slate-400">Crowned by the organizing panel after Round 2.</p>
+            <h2 className="text-xl font-extrabold text-amber-200">RealHack 2026 — Finalists</h2>
+            <p className="text-xs text-slate-400">Top finalists crowned by the organizing panel after Round 2.</p>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

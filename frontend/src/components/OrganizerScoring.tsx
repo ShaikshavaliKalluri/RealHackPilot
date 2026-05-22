@@ -500,15 +500,15 @@ function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: Advancement
       <>
         <div className="bg-gradient-to-br from-amber-500/15 to-rose-500/10 border border-amber-500/40 rounded-xl p-4 flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h3 className="font-bold text-amber-200">🏆 Crown the Winners</h3>
-            <p className="text-xs text-slate-300 mt-0.5">After Round 2 finishes, pick 1st / 2nd / 3rd place from the leaderboard.</p>
+            <h3 className="font-bold text-amber-200">🏆 Crown the Finalists</h3>
+            <p className="text-xs text-slate-300 mt-0.5">After Round 2 finishes, pick the top finalists (3, 5, 7, or 10) from the leaderboard.</p>
           </div>
           <button
             onClick={() => setWinnerOpen(true)}
             disabled={rankedRows.length === 0}
             className="bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg transition"
           >
-            Crown Winners…
+            Crown Finalists…
           </button>
         </div>
         {winnerOpen && (
@@ -615,21 +615,45 @@ interface CrownWinnersModalProps {
 }
 
 function CrownWinnersModal({ rows, teamById, onClose, onSaved }: CrownWinnersModalProps) {
-  // Pre-fill 1st / 2nd / 3rd with the top three scorers
-  const [first, setFirst] = useState<number | ''>(rows[0]?.team_id ?? '');
-  const [second, setSecond] = useState<number | ''>(rows[1]?.team_id ?? '');
-  const [third, setThird] = useState<number | ''>(rows[2]?.team_id ?? '');
+  // How many finalists to crown. Defaults to 5 — RealHack 2026 picks vary
+  // (top 3, top 5, top 7, top 10) so we make this configurable up front.
+  const [count, setCount] = useState<number>(Math.min(5, rows.length || 5));
+  // selections[i] = team_id (or '') for rank i+1
+  const [selections, setSelections] = useState<(number | '')[]>(
+    () => rows.slice(0, 5).map((r) => r.team_id),
+  );
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Keep selections array length in sync with count, preserving prior picks.
+  const ensureLen = (n: number) => {
+    setSelections((prev) => {
+      const next = [...prev];
+      while (next.length < n) {
+        const i = next.length;
+        next.push(rows[i]?.team_id ?? '');
+      }
+      next.length = n;
+      return next;
+    });
+  };
+
+  const setRank = (rank: number, value: number | '') => {
+    setSelections((prev) => {
+      const next = [...prev];
+      next[rank - 1] = value;
+      return next;
+    });
+  };
 
   const handleSave = async () => {
     setBusy(true);
     setErr(null);
     try {
       const positions: Record<string, number> = {};
-      if (first) positions['1'] = Number(first);
-      if (second) positions['2'] = Number(second);
-      if (third) positions['3'] = Number(third);
+      selections.forEach((teamId, idx) => {
+        if (teamId) positions[String(idx + 1)] = Number(teamId);
+      });
       await setWinners(positions);
       onSaved();
     } catch (e: any) {
@@ -640,7 +664,7 @@ function CrownWinnersModal({ rows, teamById, onClose, onSaved }: CrownWinnersMod
   };
 
   const handleClear = async () => {
-    if (!confirm('Clear all winner positions?')) return;
+    if (!confirm('Clear all finalist positions?')) return;
     setBusy(true);
     setErr(null);
     try {
@@ -653,35 +677,47 @@ function CrownWinnersModal({ rows, teamById, onClose, onSaved }: CrownWinnersMod
     }
   };
 
-  const dropdown = (value: number | '', onChange: (v: number | '') => void, label: string) => (
-    <div>
-      <label className="text-xs uppercase tracking-wider text-slate-400">{label}</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : '')}
-        className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 mt-1 text-sm focus:outline-none focus:border-amber-500/60"
-      >
-        <option value="">— Not set —</option>
-        {rows.map((r) => (
-          <option key={r.team_id} value={r.team_id}>
-            {r.team_name} ({r.total_sum})
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-6" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-ink-800 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden">
         <div className="bg-gradient-to-br from-amber-500/25 to-rose-500/15 p-4 border-b border-amber-500/40">
-          <h3 className="font-bold text-amber-200">🏆 Crown the Winners</h3>
-          <p className="text-xs text-slate-300 mt-0.5">Pre-filled with the top 3 from the leaderboard — adjust if needed.</p>
+          <h3 className="font-bold text-amber-200">🏆 Crown the Finalists</h3>
+          <p className="text-xs text-slate-300 mt-0.5">Pick how many finalists you want (3 / 5 / 7 / 10) — dropdowns pre-fill from the leaderboard.</p>
         </div>
         <div className="p-5 space-y-3">
-          {dropdown(first, setFirst, '🥇 1st place')}
-          {dropdown(second, setSecond, '🥈 2nd place')}
-          {dropdown(third, setThird, '🥉 3rd place')}
+          <div>
+            <label className="text-xs uppercase tracking-wider text-slate-400">How many finalists?</label>
+            <div className="mt-1 flex gap-1 bg-ink-900 border border-slate-700/40 rounded-lg p-1">
+              {[3, 5, 7, 10].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => { setCount(n); ensureLen(n); }}
+                  className={`flex-1 px-3 py-1.5 rounded text-sm font-semibold transition ${count === n ? 'bg-amber-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+                >
+                  Top {n}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="max-h-[50vh] overflow-y-auto pr-1 space-y-2">
+            {Array.from({ length: count }, (_, i) => i + 1).map((rank) => (
+              <div key={rank}>
+                <label className="text-xs uppercase tracking-wider text-slate-400">Rank #{rank}</label>
+                <select
+                  value={selections[rank - 1] ?? ''}
+                  onChange={(e) => setRank(rank, e.target.value ? Number(e.target.value) : '')}
+                  className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 mt-1 text-sm focus:outline-none focus:border-amber-500/60"
+                >
+                  <option value="">— Not set —</option>
+                  {rows.map((r) => (
+                    <option key={r.team_id} value={r.team_id}>
+                      {r.team_name} ({r.total_sum})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
           {err && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded p-2 text-xs">{err}</div>}
         </div>
         <div className="px-5 pb-5 flex items-center justify-between gap-2 flex-wrap">
@@ -697,7 +733,7 @@ function CrownWinnersModal({ rows, teamById, onClose, onSaved }: CrownWinnersMod
               disabled={busy}
               className="bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
             >
-              {busy ? 'Saving…' : 'Save winners'}
+              {busy ? 'Saving…' : 'Save finalists'}
             </button>
           </div>
         </div>

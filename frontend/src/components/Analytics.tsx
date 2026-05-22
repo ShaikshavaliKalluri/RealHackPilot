@@ -633,36 +633,6 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
         <RoundResultsExports teams={teams} leaderboards={leaderboards} />
       </Section>
 
-      {/* Top 10 teams by AI score */}
-      {derived.top10.length > 0 && (
-        <Section title="Top 10 teams by AI overall score">
-          <div className="space-y-1.5">
-            {derived.top10.map((t, idx) => {
-              const score = (t.ai_scores?.overall as any)?.score;
-              const headline = (t.ai_scores?.overall as any)?.headline || '';
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => onJumpToTeam(t.id)}
-                  className="w-full text-left flex items-center gap-3 bg-ink-900/60 hover:bg-lime-500/10 border border-transparent hover:border-lime-500/40 rounded-lg px-3 py-2 transition"
-                >
-                  <div className={`text-lg font-extrabold w-7 shrink-0 ${idx < 3 ? 'text-lime-300' : 'text-slate-500'}`}>
-                    {idx + 1}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-slate-100 truncate">{t.name}</div>
-                    {headline && <div className="text-xs text-slate-400 truncate">{headline}</div>}
-                  </div>
-                  <div className="shrink-0 text-xl font-extrabold text-lime-300">
-                    {score}/5
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          <div className="text-xs text-slate-500 mt-2">Click a team to jump to its card on the Dashboard tab.</div>
-        </Section>
-      )}
     </div>
   );
 }
@@ -725,8 +695,8 @@ function RoundResultsExports({ teams, leaderboards }: RoundResultsProps) {
     },
     {
       key: 'finals',
-      label: 'Finals — crowned winners',
-      description: `1st / 2nd / 3rd as set by the organizing panel.`,
+      label: 'Finals — top finalists',
+      description: `Top finalists as picked by the organizing panel (could be top 3, top 5, top 10 — whatever the organizers crown).`,
       teams: finalists,
       filename: `${FILE_PREFIX}_finals-winners.csv`,
       tone: 'bg-lime-500/15 text-lime-300 border-lime-500/40',
@@ -744,7 +714,8 @@ function RoundResultsExports({ teams, leaderboards }: RoundResultsProps) {
       const r1n = r1JudgeCount.get(t.id) ?? 0;
       const r2n = r2JudgeCount.get(t.id) ?? 0;
       const pos = t.final_position;
-      const status = pos ? (pos === 1 ? '🥇 1st place' : pos === 2 ? '🥈 2nd place' : pos === 3 ? '🥉 3rd place' : `${pos}th`)
+      const status = pos
+        ? `Finalist · rank #${pos}`
         : (t.advanced_to_round ?? 1) >= 2 ? 'Advanced to Round 2' : 'Round 1 only';
       return [
         t.name,
