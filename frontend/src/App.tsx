@@ -3,13 +3,13 @@ import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, fetchMyRole, type LLMHealth, type AIScreenStatus, type UserProfile, type UserRole } from './api';
 import { JudgeDashboard } from './components/JudgeDashboard';
 import { JudgesPanel } from './components/JudgesPanel';
+import { LoginQRPage } from './components/LoginQRPage';
 import type { Team, DashboardStats } from './types';
 import { StatCard } from './components/StatCard';
 import { TeamCard } from './components/TeamCard';
 import { UploadCard } from './components/UploadCard';
 import { DrillDownPanel } from './components/DrillDownPanel';
 import { EmailComposer } from './components/EmailComposer';
-import { JudgeMode } from './components/JudgeMode';
 import { OrganizerScoring } from './components/OrganizerScoring';
 import { CommsPanel } from './components/CommsPanel';
 import { BroadcastPanel } from './components/BroadcastPanel';
@@ -21,7 +21,7 @@ import { WinnersBanner } from './components/WinnersBanner';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
 type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | 'unique_people' | null;
-type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics' | 'judges';
+type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics' | 'judges' | 'qr';
 
 export default function App() {
   // ---- Auth (MSAL) ----
@@ -244,12 +244,6 @@ export default function App() {
                 Dashboard
               </button>
               <button
-                onClick={() => setMode('judge')}
-                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'judge' ? 'bg-sky-500/15 text-sky-200 border-sky-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
-              >
-                Judge mode
-              </button>
-              <button
                 onClick={() => setMode('scoring')}
                 className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'scoring' ? 'bg-amber-500/15 text-amber-200 border-amber-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
               >
@@ -273,6 +267,13 @@ export default function App() {
               >
                 Judges
               </button>
+              <button
+                onClick={() => setMode('qr')}
+                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'qr' ? 'bg-sky-500/15 text-sky-200 border-sky-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
+                title="Printable QR code for judges to scan and log in"
+              >
+                Login QR
+              </button>
             </nav>
             {user && (
               <UserBadge
@@ -290,19 +291,19 @@ export default function App() {
         </div>
         <h1 className="text-3xl font-extrabold tracking-tight">
           {mode === 'dashboard' && <>Registration <span className="text-lime-300">Command Center</span></>}
-          {mode === 'judge' && <>Judge <span className="text-sky-300">Scorecard</span></>}
           {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}
           {mode === 'comms' && <>Teams <span className="text-violet-300">Channels &amp; Broadcast</span></>}
           {mode === 'analytics' && <>Analytics <span className="text-teal-300">&amp; Reporting</span></>}
           {mode === 'judges' && <>Judges <span className="text-rose-300">&amp; Assignments</span></>}
+          {mode === 'qr' && <>Login <span className="text-sky-300">QR</span></>}
         </h1>
         <p className="text-slate-400 mt-2 text-sm">
           {mode === 'dashboard' && 'Upload the latest MS Forms export. Teams get scored on completeness, screened for duplicates and rule violations, and surfaced in one place.'}
-          {mode === 'judge' && 'Sign in, pick a round, score each team against the rubric. Each judge can submit once per team per round.'}
           {mode === 'scoring' && 'Live leaderboard aggregating judge scores per round, plus manual entry for organizers to log scores on behalf of a judge.'}
           {mode === 'comms' && 'Create per-team Microsoft Teams channels and broadcast announcements to every team at once.'}
           {mode === 'analytics' && 'Location heat map, completeness distribution, AI score breakdown, top teams, flag analysis, and swag procurement summary.'}
           {mode === 'judges' && 'Add judges, mark organizers, and assign which teams each judge sees on their mobile dashboard per round.'}
+          {mode === 'qr' && 'Printable QR code for the judging room — judges scan with their phone camera and sign in via Azure AD.'}
         </p>
       </header>
 
@@ -509,8 +510,6 @@ export default function App() {
       </>
       )}
 
-      {mode === 'judge' && user && <JudgeMode teams={teams} user={user} />}
-
       {mode === 'scoring' && <OrganizerScoring teams={teams} onReload={reload} />}
 
       {mode === 'analytics' && stats && (
@@ -525,6 +524,8 @@ export default function App() {
       )}
 
       {mode === 'judges' && <JudgesPanel teams={teams} />}
+
+      {mode === 'qr' && <LoginQRPage />}
 
       <EmailComposer
         open={composerOpen}
