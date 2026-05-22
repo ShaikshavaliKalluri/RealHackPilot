@@ -843,6 +843,15 @@ def me_role(
         .first()
     )
     if not judge:
+        # Super-admin always passes — needed so Shaik can still access the app
+        # in Test Mode before the sandbox DB has been populated from prod.
+        if email in SANDBOX_ADMIN_EMAILS:
+            return UserRoleOut(
+                role="organizer",
+                judge_id=None,
+                name=profile.get("name"),
+                email=email,
+            )
         return UserRoleOut(role="none", name=profile.get("name"), email=email)
     return UserRoleOut(
         role=judge.role or "judge",
