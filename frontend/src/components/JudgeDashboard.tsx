@@ -217,9 +217,9 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
               {filteredTeams.map((t) => {
                 const scored = scoredTeamIds.has(t.id);
                 return (
-                  <div key={t.id} className="relative">
+                  <div key={t.id} className={`relative rounded-xl ${scored ? 'ring-2 ring-lime-500/50' : ''}`}>
                     {scored && (
-                      <span className="absolute top-3 right-3 z-10 text-[10px] px-2 py-0.5 rounded bg-lime-500/20 text-lime-300 border border-lime-500/40 font-semibold uppercase tracking-wider">
+                      <span className="absolute -top-2 -left-2 z-10 text-[10px] px-2 py-0.5 rounded-full bg-lime-500 text-ink-950 border-2 border-ink-950 font-bold uppercase tracking-wider shadow-lg shadow-lime-500/40">
                         ✓ Scored
                       </span>
                     )}
