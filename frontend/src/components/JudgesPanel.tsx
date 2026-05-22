@@ -3,6 +3,9 @@ import type { Team, Judge } from '../types';
 import {
   fetchJudges,
   createJudge,
+  updateJudge,
+  deleteJudge,
+  PROTECTED_JUDGE_EMAILS,
   fetchPanels,
   createPanel,
   renamePanel,
@@ -76,6 +79,43 @@ export function JudgesPanel({ teams }: Props) {
       setErr(e.message || String(e));
     } finally {
       setAdding(false);
+    }
+  };
+
+  const isProtected = (email: string | null | undefined): boolean =>
+    PROTECTED_JUDGE_EMAILS.has((email || '').trim().toLowerCase());
+
+  const handleToggleRole = async (j: Judge) => {
+    setErr(null);
+    const nextRole = j.role === 'organizer' ? 'judge' : 'organizer';
+    try {
+      await updateJudge(j.id, { role: nextRole });
+      await reloadJudges();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
+  };
+
+  const handleRenameJudge = async (j: Judge) => {
+    const next = prompt('Rename', j.name);
+    if (!next || next.trim() === j.name) return;
+    setErr(null);
+    try {
+      await updateJudge(j.id, { name: next.trim() });
+      await reloadJudges();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    }
+  };
+
+  const handleDeleteJudge = async (j: Judge) => {
+    if (!confirm(`Remove ${j.name} from the app? Their submitted scores stay; only the user entry is deleted.`)) return;
+    setErr(null);
+    try {
+      await deleteJudge(j.id);
+      await reloadJudges();
+    } catch (e: any) {
+      setErr(e.message || String(e));
     }
   };
 
@@ -221,21 +261,59 @@ export function JudgesPanel({ teams }: Props) {
           <p className="text-sm text-slate-400 italic">Nobody added yet.</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {judges.map((j) => (
-              <div key={j.id} className="bg-ink-900/40 border border-slate-700/40 rounded-lg p-3 flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-semibold text-slate-100 truncate">{j.name}</div>
-                  <div className="text-xs text-slate-400 truncate">{j.email || '—'}</div>
+            {judges.map((j) => {
+              const protectedAcct = isProtected(j.email);
+              return (
+                <div key={j.id} className="bg-ink-900/40 border border-slate-700/40 rounded-lg p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-100 truncate flex items-center gap-1.5">
+                        {j.name}
+                        {protectedAcct && (
+                          <span title="Protected account — cannot be deleted or downgraded">
+                            <svg className="w-3.5 h-3.5 text-amber-400 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 1l3 3h4v4l3 3-3 3v4h-4l-3 3-3-3H3v-4l-3-3 3-3V4h4l3-3z M9 13h2v-2H9v2zM9 9h2V5H9v4z" clipRule="evenodd" />
+                            </svg>
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-400 truncate">{j.email || '—'}</div>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded border shrink-0 ${
+                      j.role === 'organizer'
+                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+                        : 'bg-sky-500/15 text-sky-300 border-sky-500/40'
+                    }`}>
+                      {j.role}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      onClick={() => handleRenameJudge(j)}
+                      className="text-[11px] px-2 py-0.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      onClick={() => handleToggleRole(j)}
+                      disabled={protectedAcct && j.role === 'organizer'}
+                      title={protectedAcct ? 'Protected — must remain organizer' : `Switch to ${j.role === 'organizer' ? 'judge' : 'organizer'}`}
+                      className="text-[11px] px-2 py-0.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      Make {j.role === 'organizer' ? 'judge' : 'organizer'}
+                    </button>
+                    {!protectedAcct && (
+                      <button
+                        onClick={() => handleDeleteJudge(j)}
+                        className="text-[11px] px-2 py-0.5 rounded border border-rose-500/30 hover:border-rose-500/60 text-rose-300 transition"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded border shrink-0 ${
-                  j.role === 'organizer'
-                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
-                    : 'bg-sky-500/15 text-sky-300 border-sky-500/40'
-                }`}>
-                  {j.role}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

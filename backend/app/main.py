@@ -663,6 +663,50 @@ def create_judge(req: JudgeCreate, db: Session = Depends(get_db)) -> models.Judg
     return judge
 
 
+# Built-in organizers that can never be removed — guards the core team from
+# accidental deletion. Stored lowercase for case-insensitive compares.
+PROTECTED_EMAILS: set[str] = {
+    "shaikshavali.kalluri@realpage.com",
+    "suneel.nallu@realpage.com",
+    "bhaskar.jaddu@realpage.com",
+}
+
+
+@app.patch("/api/judges/{judge_id}", response_model=JudgeOut)
+def update_judge(judge_id: int, req: JudgeCreate, db: Session = Depends(get_db)) -> models.Judge:
+    judge = db.query(models.Judge).get(judge_id)
+    if not judge:
+        raise HTTPException(status_code=404, detail="judge not found")
+    if req.name and req.name.strip():
+        judge.name = req.name.strip()
+    if req.email is not None:
+        new_email = (req.email or "").strip().lower() or None
+        # Protected accounts: don't let their email be changed (which would lock them out).
+        if (judge.email or "").strip().lower() in PROTECTED_EMAILS and new_email != (judge.email or "").strip().lower():
+            raise HTTPException(status_code=403, detail="Protected account email cannot be changed")
+        judge.email = new_email
+    if req.role:
+        # Protected accounts cannot be downgraded from organizer.
+        if (judge.email or "").strip().lower() in PROTECTED_EMAILS and req.role != "organizer":
+            raise HTTPException(status_code=403, detail="Protected account must remain an organizer")
+        judge.role = req.role
+    db.commit()
+    db.refresh(judge)
+    return judge
+
+
+@app.delete("/api/judges/{judge_id}")
+def delete_judge(judge_id: int, db: Session = Depends(get_db)) -> dict:
+    judge = db.query(models.Judge).get(judge_id)
+    if not judge:
+        raise HTTPException(status_code=404, detail="judge not found")
+    if (judge.email or "").strip().lower() in PROTECTED_EMAILS:
+        raise HTTPException(status_code=403, detail="This account is protected and cannot be deleted")
+    db.delete(judge)
+    db.commit()
+    return {"deleted": True}
+
+
 @app.post("/api/judges/login", response_model=JudgeOut)
 def judge_login(req: JudgeCreate, db: Session = Depends(get_db)) -> models.Judge:
     """Mock SSO: upsert by email, return Judge record."""

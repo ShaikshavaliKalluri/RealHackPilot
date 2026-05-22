@@ -235,6 +235,38 @@ export async function createJudge(name: string, email: string | null, role = 'ju
   return r.json();
 }
 
+export async function updateJudge(
+  judgeId: number,
+  patch: { name?: string; email?: string | null; role?: string },
+): Promise<Judge> {
+  const r = await authFetch(`${BASE}/judges/${judgeId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Update judge failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
+export async function deleteJudge(judgeId: number): Promise<{ deleted: boolean }> {
+  const r = await authFetch(`${BASE}/judges/${judgeId}`, { method: 'DELETE' });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Delete judge failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
+// Lowercase the protected emails so the frontend can hide destructive controls.
+export const PROTECTED_JUDGE_EMAILS: ReadonlySet<string> = new Set([
+  'shaikshavali.kalluri@realpage.com',
+  'suneel.nallu@realpage.com',
+  'bhaskar.jaddu@realpage.com',
+]);
+
 export async function submitJudgeScore(payload: {
   judge_id: number;
   team_id: number;
