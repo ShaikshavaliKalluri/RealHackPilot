@@ -10,15 +10,19 @@ import {
   type UserProfile,
 } from '../api';
 import { UserBadge } from './UserBadge';
+import { TeamCard } from './TeamCard';
+import { ChatPanel } from './ChatPanel';
 
 interface Props {
   judgeId: number;
   judgeName: string;
   user: UserProfile | null;
-  // Preview mode: organizer is viewing AS this judge (read-only banner shown).
-  // When preview is set, teams are fetched via /api/judges/{id}/teams instead of /me/teams.
+  // Preview mode: organizer is viewing AS this judge (banner shown).
+  // When set, teams are fetched via /api/judges/{id}/teams instead of /me/teams.
   preview?: { onExit: () => void } | null;
 }
+
+type Filter = 'all' | 'scored' | 'pending';
 
 export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
   const [round, setRound] = useState<number>(1);
@@ -28,6 +32,8 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
   const [activeTeamId, setActiveTeamId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>('all');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     fetchRubric().then((r) => setAxes(r.axes)).catch(() => {});
@@ -55,11 +61,27 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
     setSubmittedScores(list);
   };
 
+  const filteredTeams = useMemo(() => {
+    let list = teams;
+    if (filter === 'scored') list = list.filter((t) => scoredTeamIds.has(t.id));
+    if (filter === 'pending') list = list.filter((t) => !scoredTeamIds.has(t.id));
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (t) =>
+          t.name.toLowerCase().includes(q) ||
+          (t.mentor_name && t.mentor_name.toLowerCase().includes(q)) ||
+          (t.idea && t.idea.toLowerCase().includes(q)),
+      );
+    }
+    return list;
+  }, [teams, filter, search, scoredTeamIds]);
+
   return (
     <div className="min-h-screen">
       {preview && (
         <div className="bg-amber-500/15 border-b border-amber-500/40 px-4 py-2.5">
-          <div className="max-w-3xl mx-auto flex items-center justify-between gap-3 flex-wrap text-amber-100">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 flex-wrap text-amber-100">
             <div className="text-sm">
               <span className="font-bold">Preview mode</span> — viewing the judge dashboard as <span className="font-bold">{judgeName}</span>.
             </div>
@@ -72,50 +94,10 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
           </div>
         </div>
       )}
-      {/* Top bar — sticky on mobile so judges can always see round + identity */}
-      <header className="sticky top-0 z-10 bg-ink-950/95 backdrop-blur border-b border-slate-800/60 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
-          <img src="/realhack-logo.png" alt="RealHack 2026" className="h-9" />
-          {user && <UserBadge user={user} />}
-        </div>
-      </header>
 
-      <main className="max-w-3xl mx-auto px-4 py-5 space-y-5">
-        {/* Judge greeting + round picker */}
-        <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4">
-          <div className="flex items-baseline justify-between gap-3 flex-wrap">
-            <div>
-              <div className="text-xs uppercase tracking-wider text-slate-400">Welcome</div>
-              <h1 className="text-xl sm:text-2xl font-extrabold text-slate-100">{judgeName}</h1>
-            </div>
-            <div className="text-right">
-              <div className="text-xs uppercase tracking-wider text-slate-400">Round {round}</div>
-              <div className="text-base font-bold text-sky-300">
-                {scoredTeamIds.size} <span className="text-slate-500 font-normal">/ {teams.length} scored</span>
-              </div>
-            </div>
-          </div>
-          <div className="mt-3 flex gap-1 bg-ink-900 border border-slate-700/40 rounded-lg p-1">
-            {[1, 2].map((r) => (
-              <button
-                key={r}
-                onClick={() => { setRound(r); setActiveTeamId(null); }}
-                className={`flex-1 px-3 py-1.5 rounded text-sm font-semibold transition ${round === r ? 'bg-sky-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
-              >
-                Round {r}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {err && (
-          <div className="bg-rose-500/10 border border-rose-500/40 rounded-xl p-4 text-sm text-rose-200">
-            {err}
-          </div>
-        )}
-
-        {/* Active scorecard view */}
-        {activeTeam && (
+      {/* Active scorecard view — full screen overlay */}
+      {activeTeam ? (
+        <div className="p-4 sm:p-8 max-w-3xl mx-auto">
           <Scorecard
             team={activeTeam}
             round={round}
@@ -125,56 +107,117 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
             onBack={() => setActiveTeamId(null)}
             onSubmitted={async () => { await reloadScores(); setActiveTeamId(null); }}
           />
-        )}
+        </div>
+      ) : (
+        <div className="p-4 sm:p-8 max-w-7xl mx-auto">
+          <header className="mb-6 pb-5 border-b border-slate-800/60">
+            <div className="flex items-center justify-between gap-3 mb-5 flex-wrap">
+              <img src="/realhack-logo.png" alt="RealHack 2026" className="h-12 sm:h-14 -ml-1" />
+              {user && <UserBadge user={user} />}
+            </div>
+            <div className="flex items-baseline justify-between gap-3 flex-wrap">
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                  Judge <span className="text-sky-300">Scorecard</span>
+                </h1>
+                <p className="text-slate-400 mt-2 text-sm">
+                  Welcome <span className="text-slate-200 font-semibold">{judgeName}</span>. Pick a team to score against the rubric. Each judge submits once per team per round.
+                </p>
+              </div>
+              <div className="text-right">
+                <div className="text-xs uppercase tracking-wider text-slate-400">Round {round}</div>
+                <div className="text-lg font-bold text-sky-300">
+                  {scoredTeamIds.size}
+                  <span className="text-slate-500 font-normal text-sm"> / {teams.length} scored</span>
+                </div>
+              </div>
+            </div>
+          </header>
 
-        {/* Team list */}
-        {!activeTeam && (
-          <div>
-            {loading ? (
-              <div className="text-slate-400 text-sm text-center py-8">Loading your assigned teams…</div>
-            ) : teams.length === 0 ? (
-              <div className="bg-ink-800/40 border border-dashed border-slate-700/40 rounded-xl p-8 text-center">
-                <h3 className="font-bold text-slate-100 mb-2">No teams assigned to you for Round {round} yet</h3>
-                <p className="text-sm text-slate-400">The organizers will assign teams to you shortly. Check back closer to the event.</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {teams.map((t) => {
-                  const scored = scoredTeamIds.has(t.id);
-                  return (
-                    <button
-                      key={t.id}
-                      onClick={() => setActiveTeamId(t.id)}
-                      className={`text-left rounded-xl border p-4 transition ${
-                        scored
-                          ? 'bg-lime-500/10 border-lime-500/40 hover:bg-lime-500/15'
-                          : 'bg-ink-800/60 border-slate-700/40 hover:border-sky-500/40'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <h4 className="font-bold text-base truncate text-slate-100">{t.name}</h4>
-                        {scored && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-lime-500/20 text-lime-300 border border-lime-500/40 shrink-0">
-                            ✓ Scored
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1 truncate">
-                        Mentor: {t.mentor_name || '—'} · {t.members.length} member{t.members.length === 1 ? '' : 's'}
-                      </p>
-                      {t.ai_scores?.summary ? (
-                        <p className="text-xs text-slate-300 mt-2 line-clamp-3 italic">{t.ai_scores.summary}</p>
-                      ) : t.idea ? (
-                        <p className="text-xs text-slate-500 mt-2 line-clamp-2">{t.idea}</p>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </main>
+          {err && (
+            <div className="mb-5 bg-rose-500/10 border border-rose-500/40 rounded-xl p-4 text-sm text-rose-200">
+              {err}
+            </div>
+          )}
+
+          {/* Round + Filter + Search controls */}
+          <section className="flex flex-wrap gap-3 items-center mb-5">
+            <div className="flex gap-1 bg-ink-900/40 border border-slate-800/60 rounded-lg p-1">
+              {[1, 2].map((r) => (
+                <button
+                  key={r}
+                  onClick={() => { setRound(r); setActiveTeamId(null); }}
+                  className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${round === r ? 'bg-sky-500/15 text-sky-200 border-sky-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
+                >
+                  Round {r}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1 bg-ink-800/60 border border-slate-700/40 rounded-lg p-1">
+              {(['all', 'pending', 'scored'] as Filter[]).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`px-3 py-1.5 rounded text-sm font-semibold capitalize transition ${
+                    filter === f ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              placeholder="Search team, mentor, or idea…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="flex-1 min-w-[240px] bg-ink-800/60 border border-slate-700/40 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-lime-500/60"
+            />
+            <span className="text-sm text-slate-400">
+              {filteredTeams.length} of {teams.length}
+            </span>
+          </section>
+
+          {loading ? (
+            <div className="text-slate-400">Loading your assigned teams…</div>
+          ) : teams.length === 0 ? (
+            <div className="bg-ink-800/40 border border-dashed border-slate-700/40 rounded-xl p-10 text-center text-slate-400">
+              <h3 className="font-bold text-slate-100 mb-2">No teams assigned to you for Round {round} yet</h3>
+              <p className="text-sm">The organizers will assign teams to you shortly. Check back closer to the event.</p>
+            </div>
+          ) : filteredTeams.length === 0 ? (
+            <div className="bg-ink-800/40 border border-dashed border-slate-700/40 rounded-xl p-10 text-center text-slate-400">
+              <p className="text-sm">No teams match the current filter.</p>
+            </div>
+          ) : (
+            <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+              {filteredTeams.map((t) => {
+                const scored = scoredTeamIds.has(t.id);
+                return (
+                  <div key={t.id} className="relative">
+                    {scored && (
+                      <span className="absolute top-3 right-3 z-10 text-[10px] px-2 py-0.5 rounded bg-lime-500/20 text-lime-300 border border-lime-500/40 font-semibold uppercase tracking-wider">
+                        ✓ Scored
+                      </span>
+                    )}
+                    <TeamCard
+                      team={t}
+                      expanded={false}
+                      onToggle={() => setActiveTeamId(t.id)}
+                    />
+                  </div>
+                );
+              })}
+            </section>
+          )}
+
+          {/* Chatbot — same one organizers have, scoped to the judge's assigned teams */}
+          <ChatPanel
+            teams={teams}
+            onJumpToTeam={(id) => setActiveTeamId(id)}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -275,7 +318,6 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
         </div>
       </details>
 
-      {/* Rubric — mobile-friendly: label on its own line, slider below, big number on right */}
       <div className="space-y-3">
         <h4 className="text-xs uppercase tracking-wider text-slate-400">Scorecard · each axis out of 10</h4>
         {axes.map((a) => {
