@@ -108,7 +108,7 @@ export function ChatPanel({ teams, onJumpToTeam }: Props) {
         <button
           onClick={() => setOpen(true)}
           aria-label="Open RealHack assistant"
-          className="fixed bottom-6 right-6 z-40 bg-lime-400 hover:bg-lime-300 text-ink-950 font-bold rounded-full shadow-xl shadow-lime-500/30 px-5 py-3 flex items-center gap-2 transition"
+          className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-40 bg-lime-400 hover:bg-lime-300 text-ink-950 font-bold rounded-full shadow-xl shadow-lime-500/30 px-4 py-2.5 sm:px-5 sm:py-3 text-sm flex items-center gap-2 transition"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -120,7 +120,7 @@ export function ChatPanel({ teams, onJumpToTeam }: Props) {
 
       {/* Side panel */}
       {open && (
-        <div className="fixed bottom-6 right-6 z-40 w-[400px] max-w-[92vw] h-[600px] max-h-[80vh] bg-ink-800 border border-slate-700/60 rounded-2xl shadow-2xl shadow-black/50 flex flex-col">
+        <div className="fixed inset-x-3 bottom-3 top-3 sm:inset-auto sm:bottom-6 sm:right-6 sm:top-auto sm:w-[400px] sm:max-w-[92vw] sm:h-[600px] sm:max-h-[80vh] z-40 bg-ink-800 border border-slate-700/60 rounded-2xl shadow-2xl shadow-black/50 flex flex-col">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/40">
             <div>

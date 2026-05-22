@@ -28,16 +28,16 @@ export function UploadCard({ onUploaded }: Props) {
   };
 
   return (
-    <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-5">
-      <div className="flex items-center justify-between gap-4">
-        <div>
+    <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-3 sm:gap-4 flex-wrap">
+        <div className="min-w-0">
           <h3 className="font-bold">Upload registrations</h3>
           <p className="text-sm text-slate-400">MS Forms Excel export (.xlsx)</p>
         </div>
         <button
           disabled={busy}
           onClick={() => ref.current?.click()}
-          className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-5 py-2 rounded-lg transition"
+          className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-4 sm:px-5 py-2 rounded-lg transition whitespace-nowrap"
         >
           {busy ? 'Importing…' : 'Choose file'}
         </button>

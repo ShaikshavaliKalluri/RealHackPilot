@@ -31,6 +31,9 @@ export default function App() {
   const [role, setRole] = useState<UserRole | null>(null);
   // Organizer-only: lets them preview the dashboard AS a specific judge to verify assignments.
   const [previewJudge, setPreviewJudge] = useState<{ id: number; name: string } | null>(null);
+  // Mobile hamburger menu state — on screens narrower than `lg` the nav tabs
+  // collapse into a dropdown rather than overflow horizontally.
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [authError, setAuthError] = useState<string | null>(() => {
     // Pick up any error stashed by main.tsx during MSAL bootstrap
     // (e.g. AADSTS50105 when Entra blocks a user not in the security group).
@@ -216,19 +219,30 @@ export default function App() {
     );
   }
 
+  // Tab definitions — single source of truth for both desktop horizontal nav
+  // and the mobile hamburger dropdown. Order = display order.
+  const TABS: { key: Mode; label: string; tone: string; title?: string }[] = [
+    { key: 'dashboard', label: 'Dashboard', tone: 'bg-lime-500/15 text-lime-200 border-lime-500/30' },
+    { key: 'scoring', label: 'Scoring', tone: 'bg-amber-500/15 text-amber-200 border-amber-500/30' },
+    { key: 'comms', label: 'Comms', tone: 'bg-violet-500/15 text-violet-200 border-violet-500/30' },
+    { key: 'analytics', label: 'Analytics', tone: 'bg-teal-500/15 text-teal-200 border-teal-500/30' },
+    { key: 'judges', label: 'Judges', tone: 'bg-rose-500/15 text-rose-200 border-rose-500/30' },
+    { key: 'qr', label: 'Login QR', tone: 'bg-sky-500/15 text-sky-200 border-sky-500/30', title: 'Printable QR code for judges to scan and log in' },
+  ];
+
   return (
-    <div className="min-h-screen p-8 max-w-7xl mx-auto">
-      <header className="mb-6 pb-5 border-b border-slate-800/60">
-        <div className="flex items-center justify-between gap-6 mb-5">
-          {/* Brand: official RealHack wordmark */}
+    <div className="min-h-screen p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+      <header className="mb-5 sm:mb-6 pb-4 sm:pb-5 border-b border-slate-800/60">
+        <div className="flex items-center justify-between gap-3 mb-4 sm:mb-5">
+          {/* Brand: official RealHack wordmark — smaller on mobile */}
           <img
             src="/realhack-logo.png"
             alt="RealHack 2026"
-            className="h-14 -ml-1"
+            className="h-10 sm:h-12 lg:h-14 -ml-1 shrink-0"
           />
 
-          {/* Controls */}
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Desktop controls (lg and up) */}
+          <div className="hidden lg:flex items-center gap-2 shrink-0">
             <button
               onClick={() => exportCsv().catch((e) => alert(`Export failed: ${e.message ?? e}`))}
               className="bg-ink-800/60 hover:bg-ink-800 border border-slate-700/40 hover:border-slate-600 text-slate-200 font-medium px-3 py-1.5 rounded-lg text-sm transition whitespace-nowrap"
@@ -237,43 +251,18 @@ export default function App() {
               Export CSV
             </button>
             <nav className="flex gap-1 bg-ink-900/40 border border-slate-800/60 rounded-lg p-1">
-              <button
-                onClick={() => setMode('dashboard')}
-                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'dashboard' ? 'bg-lime-500/15 text-lime-200 border-lime-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
-              >
-                Dashboard
-              </button>
-              <button
-                onClick={() => setMode('scoring')}
-                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'scoring' ? 'bg-amber-500/15 text-amber-200 border-amber-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
-              >
-                Scoring
-              </button>
-              <button
-                onClick={() => setMode('comms')}
-                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'comms' ? 'bg-violet-500/15 text-violet-200 border-violet-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
-              >
-                Comms
-              </button>
-              <button
-                onClick={() => setMode('analytics')}
-                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'analytics' ? 'bg-teal-500/15 text-teal-200 border-teal-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
-              >
-                Analytics
-              </button>
-              <button
-                onClick={() => setMode('judges')}
-                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'judges' ? 'bg-rose-500/15 text-rose-200 border-rose-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
-              >
-                Judges
-              </button>
-              <button
-                onClick={() => setMode('qr')}
-                className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${mode === 'qr' ? 'bg-sky-500/15 text-sky-200 border-sky-500/30' : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'}`}
-                title="Printable QR code for judges to scan and log in"
-              >
-                Login QR
-              </button>
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setMode(t.key)}
+                  title={t.title}
+                  className={`px-3.5 py-1.5 rounded-md text-sm font-medium transition border ${
+                    mode === t.key ? t.tone : 'text-slate-400 hover:text-white border-transparent hover:bg-ink-800/60'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
             </nav>
             {user && (
               <UserBadge
@@ -288,8 +277,62 @@ export default function App() {
               />
             )}
           </div>
+
+          {/* Mobile controls (below lg): hamburger + user avatar only */}
+          <div className="flex lg:hidden items-center gap-2 shrink-0">
+            {user && (
+              <UserBadge
+                user={user}
+                onPreviewAsJudge={
+                  (user.email || '').trim().toLowerCase() === 'shaikshavali.kalluri@realpage.com'
+                    ? (id, name) => setPreviewJudge({ id, name })
+                    : undefined
+                }
+              />
+            )}
+            <button
+              onClick={() => setMobileMenuOpen((o) => !o)}
+              aria-label="Open menu"
+              className="bg-ink-800/60 hover:bg-ink-800 border border-slate-700/40 rounded-lg p-2 transition"
+            >
+              <svg className="w-5 h-5 text-slate-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {mobileMenuOpen ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                )}
+              </svg>
+            </button>
+          </div>
         </div>
-        <h1 className="text-3xl font-extrabold tracking-tight">
+
+        {/* Mobile dropdown menu (only when open + below lg) */}
+        {mobileMenuOpen && (
+          <nav className="lg:hidden bg-ink-900/60 border border-slate-700/40 rounded-xl p-2 mb-4 space-y-1">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                onClick={() => { setMode(t.key); setMobileMenuOpen(false); }}
+                className={`w-full text-left px-3 py-2.5 rounded-md text-sm font-medium transition border ${
+                  mode === t.key ? t.tone : 'text-slate-300 hover:text-white border-transparent hover:bg-ink-800/60'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+            <button
+              onClick={() => { exportCsv().catch((e) => alert(`Export failed: ${e.message ?? e}`)); setMobileMenuOpen(false); }}
+              className="w-full text-left px-3 py-2.5 rounded-md text-sm font-medium text-slate-300 hover:text-white border border-transparent hover:bg-ink-800/60 transition flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+              </svg>
+              Export CSV
+            </button>
+          </nav>
+        )}
+
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
           {mode === 'dashboard' && <>Registration <span className="text-lime-300">Command Center</span></>}
           {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}
           {mode === 'comms' && <>Teams <span className="text-violet-300">Channels &amp; Broadcast</span></>}
@@ -386,7 +429,7 @@ export default function App() {
         const completeCount = teams.filter((t) => t.completeness_score >= 0.8).length;
         const incompleteCount = teams.length - completeCount;
         return (
-        <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-9 gap-4 mb-6">
+        <section className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2 sm:gap-3 lg:gap-4 mb-6">
           <StatCard label="Teams" value={stats.total_teams} />
           <StatCard
             label="Mentors"

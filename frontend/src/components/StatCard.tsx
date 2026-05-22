@@ -18,14 +18,14 @@ export function StatCard({ label, value, tone = 'default', onClick, active = fal
   return (
     <div
       onClick={onClick}
-      className={`bg-ink-800/60 border rounded-xl p-5 transition ${
+      className={`bg-ink-800/60 border rounded-xl p-3 sm:p-4 lg:p-5 transition ${
         clickable ? 'cursor-pointer hover:border-lime-500/40 select-none' : ''
       } ${active ? 'border-lime-500/60 ring-1 ring-lime-500/20' : 'border-slate-700/40'}`}
     >
       <div className="flex items-start justify-between">
         <div>
-          <div className={`text-3xl font-extrabold ${toneClass[tone]}`}>{value}</div>
-          <div className="text-xs uppercase tracking-wider text-slate-400 mt-1">{label}</div>
+          <div className={`text-2xl sm:text-3xl font-extrabold ${toneClass[tone]}`}>{value}</div>
+          <div className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400 mt-1 leading-tight">{label}</div>
         </div>
         {clickable && (
           <svg
