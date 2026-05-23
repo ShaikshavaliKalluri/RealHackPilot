@@ -160,7 +160,7 @@ export function SwagPanel() {
                 <span className="text-slate-500 text-xl sm:text-2xl font-normal"> / {stats.total}</span>
               </div>
               <div className="text-xs uppercase tracking-wider text-slate-400 mt-0.5">
-                T-shirts collected · {stats.pending} pending
+                Swag kits collected · {stats.pending} pending
               </div>
             </div>
             <div className="text-right">
@@ -242,7 +242,7 @@ export function SwagPanel() {
           </div>
           {country !== 'all' && country.toLowerCase() !== 'india' && (
             <div className="text-xs text-amber-300/90 mt-1.5 italic">
-              📦 Note — {country} participants typically receive t-shirts via mail. Confirm shipping address on file before marking.
+              📦 Note — {country} participants typically receive swag kits via mail. Confirm shipping address on file before marking.
             </div>
           )}
         </div>
@@ -370,7 +370,7 @@ export function SwagPanel() {
               </p>
             </div>
             <div className="p-5 space-y-4">
-              <p className="text-sm text-slate-300">Who is physically picking up this t-shirt?</p>
+              <p className="text-sm text-slate-300">Who is physically picking up this swag kit?</p>
 
               {/* Self option — big primary button */}
               <button
