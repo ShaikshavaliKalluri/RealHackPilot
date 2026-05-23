@@ -653,9 +653,13 @@ def ai_screen_one(team_id: int, db: Session = Depends(get_db)) -> dict:
 
 @app.get("/api/email/templates", response_model=list[EmailTemplateOut])
 def list_email_templates() -> list[EmailTemplateOut]:
+    # Archived templates (mentor_confirm, final_call, individual_participation
+    # for 2026 — registration closed) are kept in source so they can be
+    # un-archived for the next event, but hidden from the composer dropdown.
     return [
         EmailTemplateOut(id=t.id, label=t.label, description=t.description, audience=t.audience, subject=t.subject)
         for t in EMAIL_TEMPLATES
+        if not t.archived
     ]
 
 

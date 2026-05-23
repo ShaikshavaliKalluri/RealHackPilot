@@ -63,6 +63,7 @@ class EmailTemplate:
     subject: str
     body: str           # plain-text fallback
     body_html: str = "" # rich HTML version; used when set, else body is sent as text
+    archived: bool = False  # hidden from the composer UI; kept in source for revival next year
 
 
 # ---- HTML branded wrapper ----
@@ -234,6 +235,7 @@ TEMPLATES: list[EmailTemplate] = [
         ),
     ),
     EmailTemplate(
+        archived=True,  # not used in 2026 — kept for potential revival next year
         id="mentor_confirm",
         label="Mentor — please confirm your teams",
         description="Sent to mentors to verify their team assignment.",
@@ -275,6 +277,7 @@ TEMPLATES: list[EmailTemplate] = [
         ),
     ),
     EmailTemplate(
+        archived=True,  # registration closed May 19 — not relevant anymore
         id="final_call",
         label="Final call — May 19 deadline",
         description="Last-mile reminder before the registration deadline.",
@@ -350,6 +353,7 @@ TEMPLATES: list[EmailTemplate] = [
         ),
     ),
     EmailTemplate(
+        archived=True,  # registration closed — individual sign-up flow not relevant anymore
         id="individual_participation",
         label="Individual participation — for people without a team or idea",
         description=(
