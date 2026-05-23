@@ -4,6 +4,7 @@ import { FlagBadge } from './FlagBadge';
 import { AIScoreBlock } from './AIScoreBlock';
 import { TeamReadiness } from './TeamReadiness';
 import { TeamEditModal } from './TeamEditModal';
+import { createTeamsChannelForTeam, isSandboxMode } from '../api';
 
 interface Props {
   team: Team;
@@ -15,7 +16,34 @@ interface Props {
 
 export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Props) {
   const [editOpen, setEditOpen] = useState(false);
+  const [channelBusy, setChannelBusy] = useState(false);
+  const [channelMsg, setChannelMsg] = useState<string | null>(null);
   const pct = Math.round(team.completeness_score * 100);
+
+  const handleCreateChannel = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const inSandbox = isSandboxMode();
+    const confirmText = inSandbox
+      ? `Create a MOCK Teams channel for "${team.name}"? (Test Mode — no real channel will be created.)`
+      : `Create a real Microsoft Teams channel "2026 Team - ${team.name}" with all members + mentor? This action is logged and cannot be undone from the app.`;
+    if (!confirm(confirmText)) return;
+    setChannelBusy(true);
+    setChannelMsg(null);
+    try {
+      const r = await createTeamsChannelForTeam(team.id);
+      const verb = r.status === 'mocked' ? 'Mock channel created' : 'Channel created';
+      const detail = r.members_added != null ? ` · ${r.members_added} members added` : '';
+      const unresolved = (r.unresolved_emails && r.unresolved_emails.length)
+        ? ` · unresolved: ${r.unresolved_emails.join(', ')}`
+        : '';
+      setChannelMsg(`✓ ${verb}${detail}${unresolved}`);
+      if (onReload) onReload();
+    } catch (err: any) {
+      setChannelMsg(`✗ ${err.message ?? String(err)}`);
+    } finally {
+      setChannelBusy(false);
+    }
+  };
   const completenessTone =
     pct >= 80 ? 'text-lime-300' : pct >= 50 ? 'text-amber-400' : 'text-rose-400';
 
@@ -105,7 +133,30 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
       {expanded && (
         <div className="mt-4 pt-4 border-t border-slate-700/40 space-y-4" onClick={(e) => e.stopPropagation()}>
 
-          <div className="flex justify-end">
+          <div className="flex justify-end items-center gap-2 flex-wrap">
+            {team.has_teams_channel ? (
+              <span
+                className="text-xs px-3 py-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 flex items-center gap-1.5"
+                title={team.teams_channel_id || ''}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Teams channel created
+              </span>
+            ) : (
+              <button
+                onClick={handleCreateChannel}
+                disabled={channelBusy}
+                className="text-xs px-3 py-1 rounded-md border border-violet-500/40 hover:bg-violet-500/10 text-violet-200 disabled:opacity-40 transition flex items-center gap-1.5"
+                title="Create a private Teams channel for this team and add all members + mentor"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                {channelBusy ? 'Creating…' : 'Create Teams channel'}
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -120,6 +171,11 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
               Edit team
             </button>
           </div>
+          {channelMsg && (
+            <div className={`text-xs ${channelMsg.startsWith('✓') ? 'text-emerald-300' : 'text-rose-300'}`}>
+              {channelMsg}
+            </div>
+          )}
 
           {team.ai_scores?.summary && (
             <div className="bg-lime-500/5 border border-lime-500/20 rounded-lg p-3">

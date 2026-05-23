@@ -1,5 +1,5 @@
 import type { Team, DashboardStats, UploadResult, Member } from './types';
-import { getAccessToken } from './auth';
+import { getAccessToken, getGraphTeamsToken } from './auth';
 
 const BASE = '/api';
 
@@ -285,6 +285,42 @@ export async function deleteJudge(judgeId: number): Promise<{ deleted: boolean }
   }
   return r.json();
 }
+
+// ===== Teams channel — per-team button =====
+
+export interface CreateChannelResult {
+  channel_id: string;
+  status: 'sent' | 'mocked' | 'already_exists';
+  display_name?: string;
+  members_added?: number;
+  owners?: number;
+  unresolved_emails?: string[];
+}
+
+/**
+ * Acquire a Graph access token via MSAL (popup the first time to consent
+ * the new scopes), then POST it to the backend which uses it to call
+ * Graph and create the channel. In sandbox/Test Mode the backend skips
+ * the Graph call and just writes a mock entry, so the token can be empty.
+ */
+export async function createTeamsChannelForTeam(teamId: number): Promise<CreateChannelResult> {
+  let graphToken = '';
+  try {
+    graphToken = await getGraphTeamsToken();
+  } catch (e) {
+    if (!isSandboxMode()) throw e;
+  }
+  const r = await authFetch(`${BASE}/comms/teams/${teamId}/create-channel`, {
+    method: 'POST',
+    headers: graphToken ? { 'X-Graph-Token': graphToken } : undefined,
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Create channel failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
 
 // ---- Sandbox admin (super-admin only) ----
 

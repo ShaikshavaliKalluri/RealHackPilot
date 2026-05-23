@@ -1,10 +1,12 @@
 """Teams channels + broadcast + audit log.
 
-Today: runs in MOCK mode (we don't have the Azure AD app registration yet).
-The interface is identical to what the real Graph API integration will use,
-so swap-in is one function replacement.
+The legacy bulk paths (`create_team_channel`, `broadcast`, etc.) still run in
+MOCK mode by default because they happen server-side without a user token.
+The per-team button on the dashboard uses the new `create_team_channel_with_graph_token`
+function which takes a delegated Graph access token fetched in the browser
+via MSAL — that one ALWAYS hits real Graph (or the sandbox short-circuit).
 
-Audit log captures everything — both mocked and (when wired) real calls.
+Audit log captures everything — both mocked and real calls.
 """
 from __future__ import annotations
 
@@ -13,6 +15,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Iterable
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -23,6 +26,8 @@ from . import github as gh
 # Mode flag — flip to "graph" once the app registration is in place.
 GRAPH_MODE = os.environ.get("GRAPH_MODE", "mock")
 DUPLICATE_WINDOW_HOURS = 24
+GRAPH = "https://graph.microsoft.com/v1.0"
+PARENT_TEAM_ID = os.environ.get("GRAPH_PARENT_TEAM_ID", "")
 
 
 # ===== Audit log helpers =====
@@ -128,6 +133,163 @@ def broadcast(db: Session, message: str, team_ids: Iterable[int] | None, sent_by
         )
         posted.append(t.id)
     return {"status": status, "posted_to": len(posted), "team_ids": posted, "mode": GRAPH_MODE}
+
+
+# ===== Real Graph channel creation (per-team button) =====
+
+
+class _GraphChannelError(Exception):
+    """Raised on a non-2xx Graph response so the endpoint can return a clean 4xx."""
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.message = message
+
+
+def _graph_get_user_id(client: httpx.Client, email: str) -> str | None:
+    """Resolve an email/UPN to an Azure AD object id via Graph /users/{key}."""
+    r = client.get(f"{GRAPH}/users/{email}")
+    if r.status_code == 200:
+        return r.json().get("id")
+    return None
+
+
+def create_team_channel_with_graph_token(
+    db: Session,
+    team: Team,
+    graph_token: str,
+    sent_by_email: str | None,
+    *,
+    sandbox: bool = False,
+) -> dict:
+    """Create a private Microsoft Teams channel for this team using a delegated
+    Graph access token acquired on the client. Mirrors the CLI logic in
+    provision_team_channels.py but bound to a single team.
+
+    Args:
+        db: SQLAlchemy session (prod or sandbox depending on caller).
+        team: Team row — must not already have a channel.
+        graph_token: delegated Graph access token from MSAL (browser-side).
+        sent_by_email: email of the organizer triggering the action; logged.
+        sandbox: when True, no real Graph calls happen — we mint a fake
+            channel id, write a 'mocked' CommLog entry, and update the team
+            row in the sandbox DB. Lets organizers test the UI flow in
+            Test Mode without creating real channels in production Teams.
+
+    Returns:
+        {"channel_id": str, "status": "sent" | "mocked", "display_name": str}
+
+    Raises:
+        _GraphChannelError on any Graph failure (parent team missing, member
+        resolution failed, channel POST rejected). The endpoint translates
+        this into an HTTPException.
+    """
+    if team.has_teams_channel:
+        return {"channel_id": team.teams_channel_id, "status": "already_exists"}
+
+    display_name = f"2026 Team - {team.name}"[:50]
+    description = (team.idea or f"RealHack 2026 — {team.name}")[:1024]
+
+    # ----- Sandbox short-circuit: skip Graph, just write mock entries -----
+    if sandbox:
+        channel_id = f"sandbox-channel-{uuid.uuid4().hex[:12]}"
+        team.has_teams_channel = True
+        team.teams_channel_id = channel_id
+        team.teams_channel_created_at = datetime.utcnow()
+        log(
+            db, team.id, kind="teams_channel_create",
+            subject=f"[sandbox] Channel created: {team.name}",
+            body=f"Mock channel id: {channel_id}",
+            status="mocked",
+            sent_by_email=sent_by_email,
+        )
+        return {"channel_id": channel_id, "status": "mocked", "display_name": display_name}
+
+    # ----- Real Graph path -----
+    if not PARENT_TEAM_ID:
+        raise _GraphChannelError(500, "GRAPH_PARENT_TEAM_ID is not set on the server")
+
+    with httpx.Client(
+        headers={"Authorization": f"Bearer {graph_token}", "Content-Type": "application/json"},
+        timeout=30,
+    ) as gc:
+        # Resolve mentor + member emails to AAD object ids
+        candidates: list[tuple[str, bool]] = []  # (email, is_owner)
+        if team.mentor_email:
+            candidates.append((team.mentor_email.strip(), True))
+        for m in team.members:
+            if m.email:
+                candidates.append((m.email.strip(), False))
+
+        if not candidates:
+            raise _GraphChannelError(400, "No mentor or member emails on file for this team")
+
+        member_ids: list[str] = []
+        owner_ids: set[str] = set()
+        unresolved: list[str] = []
+        for email, is_owner in candidates:
+            uid = _graph_get_user_id(gc, email)
+            if not uid:
+                unresolved.append(email)
+                continue
+            if uid not in member_ids:
+                member_ids.append(uid)
+            if is_owner:
+                owner_ids.add(uid)
+
+        # Teams channels need at least one owner — promote first member if mentor unresolved.
+        if not owner_ids and member_ids:
+            owner_ids.add(member_ids[0])
+
+        if not member_ids:
+            raise _GraphChannelError(
+                400,
+                f"None of the team's emails could be resolved in Azure AD: {', '.join(unresolved)}",
+            )
+
+        members_payload: list[dict] = []
+        for uid in member_ids:
+            members_payload.append({
+                "@odata.type": "#microsoft.graph.aadUserConversationMember",
+                "user@odata.bind": f"{GRAPH}/users('{uid}')",
+                "roles": ["owner"] if uid in owner_ids else [],
+            })
+
+        body = {
+            "@odata.type": "#Microsoft.Graph.channel",
+            "membershipType": "private",
+            "displayName": display_name,
+            "description": description,
+            "members": members_payload,
+        }
+        r = gc.post(f"{GRAPH}/teams/{PARENT_TEAM_ID}/channels", json=body)
+        if r.status_code not in (200, 201, 202):
+            raise _GraphChannelError(
+                502,
+                f"Graph channel create failed ({r.status_code}): {r.text[:300]}",
+            )
+        channel_id = (r.json() or {}).get("id", "") if r.text else ""
+
+    # Persist + audit
+    team.has_teams_channel = True
+    team.teams_channel_id = channel_id
+    team.teams_channel_created_at = datetime.utcnow()
+    log(
+        db, team.id, kind="teams_channel_create",
+        subject=f"Channel created: {team.name}",
+        body=f"Channel ID: {channel_id} · {len(member_ids)} member(s), {len(owner_ids)} owner(s)" +
+             (f" · unresolved: {', '.join(unresolved)}" if unresolved else ""),
+        status="sent",
+        sent_by_email=sent_by_email,
+    )
+    return {
+        "channel_id": channel_id,
+        "status": "sent",
+        "display_name": display_name,
+        "members_added": len(member_ids),
+        "owners": len(owner_ids),
+        "unresolved_emails": unresolved,
+    }
 
 
 # ===== Readiness check =====

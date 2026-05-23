@@ -13,7 +13,7 @@ from typing import Any
 import csv
 import io
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, Depends
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
@@ -1204,6 +1204,53 @@ def create_channels(req: TeamChannelCreateRequest, db: Session = Depends(get_db)
         created.append(t.id)
     db.commit()
     return {"created": created, "already_existing": already, "mode": comms.GRAPH_MODE}
+
+
+@app.post("/api/comms/teams/{team_id}/create-channel", response_model=dict)
+def create_one_team_channel(
+    team_id: int,
+    request: Request,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Create a single Teams channel for the given team using a delegated
+    Graph token supplied by the browser. Per-team button on the dashboard.
+
+    The Graph token comes in the `X-Graph-Token` header — the frontend
+    acquires it via MSAL.acquireTokenSilent({scopes: [Channel.Create, ...]}).
+    In sandbox/Test Mode, the Graph call is skipped and a mock entry is
+    written instead so the UI flow can be tested without making real channels.
+    """
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+    if team.has_teams_channel:
+        raise HTTPException(status_code=409, detail="Team already has a channel")
+
+    from .db import is_sandbox_request
+    sandbox = is_sandbox_request(request)
+
+    graph_token = request.headers.get("x-graph-token", "")
+    if not sandbox and not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or None
+
+    try:
+        result = comms.create_team_channel_with_graph_token(
+            db=db,
+            team=team,
+            graph_token=graph_token,
+            sent_by_email=organizer_email,
+            sandbox=sandbox,
+        )
+    except comms._GraphChannelError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status, detail=e.message)
+    db.commit()
+    return result
 
 
 @app.post("/api/comms/teams/{team_id}/message", response_model=dict)

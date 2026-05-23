@@ -42,6 +42,45 @@ export const loginRequest = {
 // login, but kept as a named constant so callers can reason about it.
 const GRAPH_SEND_SCOPES = ['Mail.Send'];
 
+// Scopes needed to create a private Teams channel + add members.
+const GRAPH_TEAMS_CHANNEL_SCOPES = [
+  'Channel.Create',
+  'ChannelMember.ReadWrite.All',
+  'User.ReadBasic.All',
+  'Team.ReadBasic.All',
+];
+
+/**
+ * Acquire a Graph access token with the scopes needed to create a private
+ * Teams channel + add members. Used by the per-team 'Create Teams channel'
+ * button. Same pattern as getGraphSendToken — silent first, fall back to
+ * interactive consent.
+ */
+export async function getGraphTeamsToken(): Promise<string> {
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length === 0) {
+    throw new Error('Not signed in — cannot create Teams channel.');
+  }
+  const account = accounts[0];
+  try {
+    const result = await msalInstance.acquireTokenSilent({
+      scopes: GRAPH_TEAMS_CHANNEL_SCOPES,
+      account,
+    });
+    return result.accessToken;
+  } catch (e) {
+    if (e instanceof InteractionRequiredAuthError) {
+      // First-time consent — opens a popup for the user to grant the new scopes.
+      const result = await msalInstance.acquireTokenPopup({
+        scopes: GRAPH_TEAMS_CHANNEL_SCOPES,
+        account,
+      });
+      return result.accessToken;
+    }
+    throw e;
+  }
+}
+
 /**
  * Acquire a Graph-scoped ACCESS TOKEN (audience = graph.microsoft.com)
  * for the signed-in user. Different from getAccessToken() above — that
