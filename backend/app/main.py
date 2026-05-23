@@ -107,6 +107,9 @@ def _startup() -> None:
     from .db import sandbox_engine
     if sandbox_engine is not None:
         Base.metadata.create_all(bind=sandbox_engine)
+        # Run the same lightweight column migrations against sandbox so it gets
+        # any columns added to the model after the sandbox was first created.
+        lightweight_migrate(target_engine=sandbox_engine)
     backup_service.start_scheduler()
 
 

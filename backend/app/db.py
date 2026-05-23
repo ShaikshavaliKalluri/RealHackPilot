@@ -72,9 +72,15 @@ def is_sandbox_request(request: Request) -> bool:
     )
 
 
-def lightweight_migrate() -> None:
-    """SQLite-friendly inline migration: add columns the model expects but the DB lacks."""
-    insp = inspect(engine)
+def lightweight_migrate(target_engine: Engine | None = None) -> None:
+    """SQLite-friendly inline migration: add columns the model expects but the DB lacks.
+
+    Runs against the prod engine by default. Pass `target_engine=sandbox_engine`
+    to apply the same migrations to the sandbox database — needed when new
+    columns ship between sandbox creations.
+    """
+    eng = target_engine if target_engine is not None else engine
+    insp = inspect(eng)
     if "teams" not in insp.get_table_names():
         return
     existing = {c["name"] for c in insp.get_columns("teams")}
@@ -122,7 +128,7 @@ def lightweight_migrate() -> None:
         if "picked_up_by_email" not in swag_existing:
             additions.append("ALTER TABLE swag_pickups ADD COLUMN picked_up_by_email VARCHAR(255)")
     if additions:
-        with engine.begin() as conn:
+        with eng.begin() as conn:
             for sql in additions:
                 conn.execute(text(sql))
 
@@ -135,7 +141,7 @@ def lightweight_migrate() -> None:
     #   judge_score_records.judge_id -> CASCADE
     #   comm_log.team_id          -> SET NULL (preserve audit trail, null the team ref)
     # The constraint names below are Postgres's default: <table>_<column>_fkey.
-    if engine.dialect.name == "postgresql":
+    if eng.dialect.name == "postgresql":
         cascade_migrations = [
             # members.team_id -> teams.id ON DELETE CASCADE
             "ALTER TABLE members DROP CONSTRAINT IF EXISTS members_team_id_fkey",
@@ -154,7 +160,7 @@ def lightweight_migrate() -> None:
             "ALTER TABLE comm_log ADD CONSTRAINT comm_log_team_id_fkey "
             "FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE SET NULL",
         ]
-        with engine.begin() as conn:
+        with eng.begin() as conn:
             for sql in cascade_migrations:
                 try:
                     conn.execute(text(sql))
