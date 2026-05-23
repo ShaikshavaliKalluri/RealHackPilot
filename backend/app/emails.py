@@ -310,15 +310,16 @@ TEMPLATES: list[EmailTemplate] = [
         subject="Your RealHack 2026 Teams channel is live — Team {team_name}",
         body=(
             "Hi {member_first_names_or_team},\n\n"
-            "Your private Teams channel for RealHack 2026 is now live:\n"
-            "  Channel: 2026 Team - {team_name}\n\n"
+            "Your Teams channel for RealHack 2026 is now live:\n"
+            "  Channel: 2026 Team - {team_name}\n"
+            "  Open: {teams_channel_url}\n\n"
             "Mentor and all members have been added. Please use this channel for "
             "coordination, code reviews, and any organizing-team announcements.\n\n"
             "— RealHack Organizing Team"
         ),
         body_html=_html_wrap(
             "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
-            "<p>Your private Microsoft Teams channel for <strong>RealHack 2026</strong> is now live and ready for the team.</p>\n"
+            "<p>Your Microsoft Teams channel for <strong>RealHack 2026</strong> is now live and ready for the team.</p>\n"
             "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
             "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
             "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%'>\n"
@@ -333,6 +334,11 @@ TEMPLATES: list[EmailTemplate] = [
             "</table>\n"
             "</td></tr>\n"
             "</table>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' style='margin:6px auto 22px;'><tr>\n"
+            "  <td bgcolor='#0078d4' style='background-color:#0078d4;border-radius:6px;'>\n"
+            "    <a href='{teams_channel_url}' style='display:inline-block;padding:13px 26px;color:#ffffff;font-weight:700;font-size:14px;letter-spacing:.3px;text-decoration:none;'>Open in Microsoft Teams &rarr;</a>\n"
+            "  </td>\n"
+            "</tr></table>\n"
             "<h2>What to use it for</h2>\n"
             "<ul>\n"
             "  <li>Coordination, planning, and quick syncs with your team</li>\n"
@@ -420,6 +426,33 @@ def _proper_case(name: str | None) -> str:
     if not name:
         return ""
     return name.strip().title()
+
+
+def _teams_channel_url(team: Team) -> str:
+    """Build a deeplink that opens the team's Teams channel directly in the
+    Microsoft Teams client (desktop) or Teams web. Returns an empty string
+    when there's no channel yet or the parent-team / tenant config is missing
+    (e.g. in sandbox/Test Mode where Graph isn't called).
+
+    Format reference: https://learn.microsoft.com/en-us/microsoftteams/platform/concepts/build-and-test/deep-links
+    """
+    import os
+    import urllib.parse as _urlparse
+    if not team.has_teams_channel or not team.teams_channel_id:
+        return ""
+    parent = os.environ.get("GRAPH_PARENT_TEAM_ID", "")
+    tenant = os.environ.get("AZURE_TENANT_ID", "")
+    if not parent or not tenant:
+        return ""
+    # Sandbox channels start with 'sandbox-channel-' — no real Teams deeplink.
+    if team.teams_channel_id.startswith(("sandbox-", "mock-", "dryrun-")):
+        return ""
+    channel_id_enc = _urlparse.quote(team.teams_channel_id, safe="")
+    channel_name_enc = _urlparse.quote(f"2026 Team - {team.name}", safe="")
+    return (
+        f"https://teams.microsoft.com/l/channel/{channel_id_enc}/{channel_name_enc}"
+        f"?groupId={parent}&tenantId={tenant}"
+    )
 
 
 def _first_names(team: Team) -> str:
@@ -517,6 +550,7 @@ def render(template: EmailTemplate, team: Team) -> dict:
         "idea_short": _short_idea(team),                 # plain text: 200-char teaser
         "idea_full": _full_idea(team),                   # html: full idea text
         "status_summary": _status_summary(team),
+        "teams_channel_url": _teams_channel_url(team),   # Teams deeplink (empty if no channel yet)
     }
 
     def fill(s: str) -> str:
