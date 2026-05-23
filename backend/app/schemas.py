@@ -137,6 +137,32 @@ class PanelJudgesSet(BaseModel):
     judge_ids: list[int]
 
 
+# ===== Swag (t-shirt) pickup =====
+
+class SwagPersonOut(BaseModel):
+    """One person on the swag-pickup list."""
+    email: str
+    name: str
+    tshirt_size: str | None = None
+    roles: list[str] = []  # e.g. ['member:AgenTicket', 'mentor:DeepThinkers']
+    teams: list[str] = []  # team names the person is associated with
+    collected: bool = False
+    collected_at: str | None = None  # ISO timestamp when collected
+    collected_by_email: str | None = None
+    notes: str | None = None
+
+
+class SwagMarkRequest(BaseModel):
+    email: str
+    notes: str | None = None
+
+
+class SwagStats(BaseModel):
+    total: int
+    collected: int
+    pending: int
+
+
 class JudgeScoreSubmit(BaseModel):
     judge_id: int
     team_id: int

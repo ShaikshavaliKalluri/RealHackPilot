@@ -45,6 +45,7 @@ from .schemas import (
     JudgeOut, JudgeCreate, JudgeUpdate, JudgeScoreSubmit, JudgeScoreOut,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet,
+    SwagPersonOut, SwagMarkRequest, SwagStats,
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
     CommLogOut, TeamChannelCreateRequest, TeamMessageRequest, BroadcastRequest,
     CommLogCreateRequest, RepoCheckOut, ReadinessFlagsRequest,
@@ -1056,6 +1057,140 @@ def set_panel_judges(panel_id: int, req: PanelJudgesSet, db: Session = Depends(g
     db.commit()
     db.refresh(panel)
     return _panel_to_out(panel)
+
+
+# ===== Swag (t-shirt) pickup =====
+#
+# Used by organizers at the event-day pickup desk. Replaces the shared
+# Excel-tracker workflow: multiple organizers can mark people collected
+# concurrently from their phones, no merge conflicts, instant search.
+
+
+def _swag_roster(db: Session) -> list[dict]:
+    """Build the canonical pickup list — one entry per unique email across
+    all members + mentors, with their team(s), role(s), and collection state.
+    """
+    by_email: dict[str, dict] = {}
+
+    def _add(email: str | None, name: str | None, tshirt_size: str | None, role: str, team_name: str) -> None:
+        if not email:
+            return
+        key = email.strip().lower()
+        if not key:
+            return
+        if key not in by_email:
+            by_email[key] = {
+                "email": key,
+                "name": (name or "").strip() or key,
+                "tshirt_size": tshirt_size,
+                "roles": [],
+                "teams": [],
+            }
+        entry = by_email[key]
+        entry["roles"].append(f"{role}:{team_name}")
+        if team_name not in entry["teams"]:
+            entry["teams"].append(team_name)
+        # Keep the first non-empty t-shirt size we see (member + mentor may
+        # both have an entry; we trust whatever was on file first).
+        if not entry["tshirt_size"] and tshirt_size:
+            entry["tshirt_size"] = tshirt_size
+
+    for team in db.query(models.Team).all():
+        for m in team.members:
+            _add(m.email, m.name, m.tshirt_size, "member", team.name)
+        _add(team.mentor_email, team.mentor_name, team.mentor_tshirt_size, "mentor", team.name)
+
+    # Merge in collection state from swag_pickups
+    pickups = {p.email.lower(): p for p in db.query(models.SwagPickup).all()}
+    for key, entry in by_email.items():
+        p = pickups.get(key)
+        entry["collected"] = p is not None
+        entry["collected_at"] = p.collected_at.isoformat() if p else None
+        entry["collected_by_email"] = p.collected_by_email if p else None
+        entry["notes"] = p.notes if p else None
+        # Normalize size capitalization
+        if entry["tshirt_size"]:
+            entry["tshirt_size"] = entry["tshirt_size"].upper()
+
+    return list(by_email.values())
+
+
+@app.get("/api/swag/people", response_model=list[SwagPersonOut])
+def list_swag_people(db: Session = Depends(get_db)) -> list[SwagPersonOut]:
+    """Full pickup list — every unique participant + mentor with their
+    t-shirt size, team(s), and collection state. Sorted alphabetically.
+    """
+    rows = _swag_roster(db)
+    rows.sort(key=lambda r: r["name"].lower())
+    return [SwagPersonOut(**r) for r in rows]
+
+
+@app.get("/api/swag/stats", response_model=SwagStats)
+def swag_stats(db: Session = Depends(get_db)) -> SwagStats:
+    rows = _swag_roster(db)
+    total = len(rows)
+    collected = sum(1 for r in rows if r["collected"])
+    return SwagStats(total=total, collected=collected, pending=total - collected)
+
+
+@app.post("/api/swag/mark", response_model=SwagPersonOut)
+def mark_swag_collected(
+    req: SwagMarkRequest,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> SwagPersonOut:
+    """Mark a person's t-shirt as collected. Audit-logged with the organizer
+    who clicked the button. Idempotent — clicking again on an already-collected
+    row just updates the notes and timestamp without erroring.
+    """
+    email = req.email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+    # Confirm this email is actually on the pickup roster (member or mentor)
+    roster = {r["email"]: r for r in _swag_roster(db)}
+    if email not in roster:
+        raise HTTPException(status_code=404, detail=f"No participant/mentor on file with email {email}")
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or None
+
+    pickup = db.query(models.SwagPickup).filter(models.SwagPickup.email == email).first()
+    if pickup:
+        # Already collected — refresh timestamp + notes, swap in current organizer
+        pickup.collected_at = datetime.utcnow()
+        pickup.collected_by_email = organizer_email
+        if req.notes is not None:
+            pickup.notes = req.notes
+    else:
+        person = roster[email]
+        pickup = models.SwagPickup(
+            email=email,
+            person_name=person["name"],
+            tshirt_size=person["tshirt_size"],
+            collected_at=datetime.utcnow(),
+            collected_by_email=organizer_email,
+            notes=req.notes,
+        )
+        db.add(pickup)
+    db.commit()
+    # Refresh roster entry for response
+    fresh = next(r for r in _swag_roster(db) if r["email"] == email)
+    return SwagPersonOut(**fresh)
+
+
+@app.post("/api/swag/unmark", response_model=SwagPersonOut)
+def unmark_swag_collected(req: SwagMarkRequest, db: Session = Depends(get_db)) -> SwagPersonOut:
+    """Undo a mark — used if an organizer accidentally clicked the wrong person."""
+    email = req.email.strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+    db.query(models.SwagPickup).filter(models.SwagPickup.email == email).delete(synchronize_session=False)
+    db.commit()
+    roster = {r["email"]: r for r in _swag_roster(db)}
+    if email not in roster:
+        raise HTTPException(status_code=404, detail="not found after unmark")
+    return SwagPersonOut(**roster[email])
 
 
 @app.get("/api/judges/{judge_id}/assignments", response_model=list[JudgeAssignmentOut])

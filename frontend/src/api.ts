@@ -286,6 +286,65 @@ export async function deleteJudge(judgeId: number): Promise<{ deleted: boolean }
   return r.json();
 }
 
+// ===== Swag (t-shirt) pickup =====
+
+export interface SwagPerson {
+  email: string;
+  name: string;
+  tshirt_size: string | null;
+  roles: string[];
+  teams: string[];
+  collected: boolean;
+  collected_at: string | null;
+  collected_by_email: string | null;
+  notes: string | null;
+}
+
+export interface SwagStats {
+  total: number;
+  collected: number;
+  pending: number;
+}
+
+export async function fetchSwagPeople(): Promise<SwagPerson[]> {
+  const r = await authFetch(`${BASE}/swag/people`);
+  if (!r.ok) throw new Error(`Swag people fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function fetchSwagStats(): Promise<SwagStats> {
+  const r = await authFetch(`${BASE}/swag/stats`);
+  if (!r.ok) throw new Error(`Swag stats fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function markSwagCollected(email: string, notes?: string): Promise<SwagPerson> {
+  const r = await authFetch(`${BASE}/swag/mark`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, notes: notes ?? null }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Mark collected failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
+export async function unmarkSwagCollected(email: string): Promise<SwagPerson> {
+  const r = await authFetch(`${BASE}/swag/unmark`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Unmark failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
+
 // ===== Teams channel — per-team button =====
 
 export interface CreateChannelResult {

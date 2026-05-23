@@ -177,6 +177,27 @@ class JudgeScore(Base):
     team: Mapped["Team"] = relationship()
 
 
+class SwagPickup(Base):
+    """T-shirt / swag pickup tracking for event day.
+
+    One row per person (keyed by lowercased email) — same person showing up
+    as a mentor on multiple teams still picks up exactly one t-shirt. The
+    'people' list shown to organizers is computed at query time by joining
+    the Member + Team-mentor rosters against this table.
+
+    Updated by organizers at the pickup desk via the Swag tab.
+    """
+    __tablename__ = "swag_pickups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)  # lowercased
+    person_name: Mapped[str] = mapped_column(String(255))
+    tshirt_size: Mapped[str | None] = mapped_column(String(16))
+    collected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    collected_by_email: Mapped[str | None] = mapped_column(String(255))
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class CommLog(Base):
     """Audit trail for every email / Teams message / channel-create action.
 

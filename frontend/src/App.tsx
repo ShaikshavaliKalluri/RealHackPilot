@@ -4,6 +4,7 @@ import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHe
 import { JudgeDashboard } from './components/JudgeDashboard';
 import { JudgesPanel } from './components/JudgesPanel';
 import { LoginQRPage } from './components/LoginQRPage';
+import { SwagPanel } from './components/SwagPanel';
 import type { Team, DashboardStats } from './types';
 import { StatCard } from './components/StatCard';
 import { TeamCard } from './components/TeamCard';
@@ -21,7 +22,7 @@ import { WinnersBanner } from './components/WinnersBanner';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
 type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | 'unique_people' | null;
-type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics' | 'judges' | 'qr';
+type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics' | 'judges' | 'qr' | 'swag';
 
 export default function App() {
   // ---- Auth (MSAL) ----
@@ -227,6 +228,7 @@ export default function App() {
     { key: 'comms', label: 'Comms', tone: 'bg-violet-500/15 text-violet-200 border-violet-500/30' },
     { key: 'analytics', label: 'Analytics', tone: 'bg-teal-500/15 text-teal-200 border-teal-500/30' },
     { key: 'judges', label: 'Judges', tone: 'bg-rose-500/15 text-rose-200 border-rose-500/30' },
+    { key: 'swag', label: 'Swag', tone: 'bg-lime-500/15 text-lime-200 border-lime-500/30', title: 'T-shirt pickup tracker — search participants and mark collected' },
     { key: 'qr', label: 'Login QR', tone: 'bg-sky-500/15 text-sky-200 border-sky-500/30', title: 'Printable QR code for judges to scan and log in' },
   ];
 
@@ -361,6 +363,7 @@ export default function App() {
           {mode === 'analytics' && <>Analytics <span className="text-teal-300">&amp; Reporting</span></>}
           {mode === 'judges' && <>Judges <span className="text-rose-300">&amp; Assignments</span></>}
           {mode === 'qr' && <>Login <span className="text-sky-300">QR</span></>}
+          {mode === 'swag' && <>Swag <span className="text-lime-300">Pickup</span></>}
         </h1>
         <p className="text-slate-400 mt-2 text-sm">
           {mode === 'dashboard' && 'Upload the latest MS Forms export. Teams get scored on completeness, screened for duplicates and rule violations, and surfaced in one place.'}
@@ -369,6 +372,7 @@ export default function App() {
           {mode === 'analytics' && 'Location heat map, completeness distribution, AI score breakdown, top teams, flag analysis, and swag procurement summary.'}
           {mode === 'judges' && 'Add judges, mark organizers, and assign which teams each judge sees on their mobile dashboard per round.'}
           {mode === 'qr' && 'Printable QR code for the judging room — judges scan with their phone camera and sign in via Azure AD.'}
+          {mode === 'swag' && 'Event-day t-shirt pickup tracker. Search by name or email, tap to mark collected. Multiple organizers can use this simultaneously from their phones — no more shared Excel.'}
         </p>
       </header>
 
@@ -591,6 +595,8 @@ export default function App() {
       {mode === 'judges' && <JudgesPanel teams={teams} />}
 
       {mode === 'qr' && <LoginQRPage />}
+
+      {mode === 'swag' && <SwagPanel />}
 
       <EmailComposer
         open={composerOpen}
