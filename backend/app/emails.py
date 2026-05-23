@@ -169,7 +169,7 @@ TEMPLATES: list[EmailTemplate] = [
         ),
         body_html=_html_wrap(
             "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
-            "<p>You're confirmed for <strong>RealHack 2026</strong>. Below is your registration summary — if anything looks wrong, just hit reply.</p>\n"
+            "<p>You're confirmed for <strong>RealHack 2026</strong>. Below is your registration summary.</p>\n"
             "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
             "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
             "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%'>\n"
