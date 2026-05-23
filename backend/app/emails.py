@@ -114,20 +114,18 @@ def _html_wrap(content: str) -> str:
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef1f5;">
     <tr><td align="center" style="padding:28px 12px;">
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="640" style="max-width:640px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 18px rgba(10,79,153,0.10);">
-        <!-- ===== Brand row (white background so the blue wordmark pops) ===== -->
-        <tr><td bgcolor="#ffffff" align="center" style="background-color:#ffffff;padding:28px 32px 18px;text-align:center;">
-          <img src="cid:""" + LOGO_CID + """" alt="RealHack 2026" width="220" style="display:block;margin:0 auto;height:auto;max-height:60px;">
+        <!-- ===== Brand row (white, logo gets the breathing room) ===== -->
+        <tr><td bgcolor="#ffffff" align="center" style="background-color:#ffffff;padding:40px 32px 12px;text-align:center;">
+          <img src="cid:""" + LOGO_CID + """" alt="RealHack 2026" width="300" style="display:block;margin:0 auto;height:auto;max-height:80px;">
+          <p style="color:#5b6b7c;margin:14px 0 0;font-size:12px;letter-spacing:.5px;text-transform:uppercase;font-weight:600;">
+            Innovate &nbsp;&middot;&nbsp; Build &nbsp;&middot;&nbsp; Win
+          </p>
         </td></tr>
-        <!-- ===== Event-info hero strip (solid dark blue for contrast w/ white text) ===== -->
-        <tr><td class="hero-pad" bgcolor="#0a4f99" align="center" style="background-color:#0a4f99;padding:18px 32px 22px;text-align:center;border-top:3px solid #29b6f6;">
-          <p style="color:#ffffff;margin:0;font-size:14px;letter-spacing:.6px;text-transform:uppercase;font-weight:700;">
+        <!-- ===== Slim event-info strip (thin, just a brand bar) ===== -->
+        <tr><td bgcolor="#0a4f99" align="center" style="background-color:#0a4f99;padding:9px 32px;text-align:center;border-top:2px solid #29b6f6;">
+          <p style="color:#ffffff;margin:0;font-size:12px;letter-spacing:.5px;text-transform:uppercase;font-weight:600;">
             RealPage Hackathon &middot; June 18&ndash;19, 2026
           </p>
-          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:12px auto 0;"><tr>
-            <td bgcolor="#1d6bb0" style="background-color:#1d6bb0;border-radius:18px;padding:6px 16px;color:#ffffff;font-size:12px;font-weight:600;letter-spacing:.4px;">
-              Innovate &nbsp;&middot;&nbsp; Build &nbsp;&middot;&nbsp; Win
-            </td>
-          </tr></table>
         </td></tr>
         <!-- ===== Body ===== -->
         <tr><td class="body-pad">
