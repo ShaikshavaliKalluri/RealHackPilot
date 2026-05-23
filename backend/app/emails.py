@@ -74,43 +74,78 @@ def _html_wrap(content: str) -> str:
     would hide it. A thin blue accent line below the logo preserves the
     brand-color signal.
     """
-    return f"""<!DOCTYPE html>
+    # The template uses table-based layout for Outlook compatibility (CSS
+    # grid/flex don't render in Outlook desktop). Styles live in <style> AND
+    # inline on critical elements as a fallback. The CSS curly braces are
+    # left as single-brace because we no longer use str.format() at render
+    # time — emails.fill() uses str.replace() per-token now.
+    return """<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="x-apple-disable-message-reformatting">
+  <title>RealHack 2026</title>
   <style>
-    body {{margin:0;padding:0;background:#f0f2f5;font-family:-apple-system,Segoe UI,Arial,sans-serif;}}
-    .wrap {{max-width:600px;margin:24px auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.08);}}
-    .hdr {{background:#ffffff;padding:24px 32px 18px;border-bottom:3px solid #0078d4;}}
-    .hdr img {{display:block;height:42px;width:auto;margin-bottom:8px;}}
-    .hdr p {{color:#5b6b7c;margin:0;font-size:12px;letter-spacing:.2px;}}
-    .bdy {{padding:28px 32px;color:#222;font-size:15px;line-height:1.65;}}
-    .bdy p {{margin:0 0 14px;}}
-    .bdy ul {{margin:8px 0 14px;padding-left:22px;}}
-    .bdy li {{margin:4px 0;}}
-    .bdy .label {{font-weight:600;color:#333;}}
-    .bdy .info-block {{background:#f4f8fd;border-left:3px solid #0078d4;border-radius:4px;padding:12px 16px;margin:14px 0;font-size:14px;}}
-    .bdy .fields {{background:#fff8f0;border-left:3px solid #e67e00;border-radius:4px;padding:12px 16px;margin:14px 0;font-size:14px;}}
-    .ftr {{background:#f8f8f8;padding:14px 32px;color:#999;font-size:12px;border-top:1px solid #eee;}}
-    .ftr a {{color:#0078d4;text-decoration:none;}}
-    a {{color:#0078d4;}}
+    body { margin:0; padding:0; background:#eef1f5; font-family:'Segoe UI', -apple-system, BlinkMacSystemFont, Arial, sans-serif; -webkit-font-smoothing:antialiased; }
+    table { border-collapse:collapse; }
+    a { color:#0078d4; text-decoration:none; }
+    .container { max-width:640px; margin:0 auto; background:#ffffff; }
+    .hero { background:linear-gradient(135deg, #0a4f99 0%, #0078d4 55%, #29b6f6 100%); padding:36px 32px 32px; text-align:center; }
+    .hero-logo { display:block; height:46px; width:auto; margin:0 auto 10px; }
+    .hero-tag { color:#e3f2fd; font-size:13px; letter-spacing:.6px; text-transform:uppercase; font-weight:600; margin:0; }
+    .hero-pill { display:inline-block; background:rgba(255,255,255,0.14); color:#ffffff; padding:6px 14px; border-radius:18px; font-size:12px; font-weight:600; margin-top:14px; letter-spacing:.4px; }
+    .body-pad { padding:32px 36px 8px; color:#2a2f36; font-size:15px; line-height:1.65; }
+    .body-pad p { margin:0 0 14px; }
+    .body-pad ul { margin:8px 0 16px; padding-left:22px; }
+    .body-pad li { margin:6px 0; }
+    .body-pad strong { color:#1a1f26; }
+    .body-pad h2 { color:#0a4f99; font-size:18px; margin:24px 0 10px; font-weight:700; }
+    .info-card { background:#f4f8fd; border-left:4px solid #0078d4; border-radius:6px; padding:16px 20px; margin:18px 0; font-size:14px; }
+    .info-card .label { display:block; font-weight:700; color:#0a4f99; font-size:11px; text-transform:uppercase; letter-spacing:.6px; margin-top:8px; }
+    .info-card .label:first-child { margin-top:0; }
+    .info-card .value { display:block; color:#1a1f26; margin:2px 0 6px; }
+    .fields { background:#fff8eb; border-left:4px solid #f59e00; border-radius:6px; padding:16px 20px; margin:18px 0; font-size:14px; color:#1a1f26; }
+    .fields strong { color:#b8590a; }
+    .cta-row { padding:8px 0 22px; text-align:center; }
+    .cta { display:inline-block; background:#0078d4; color:#ffffff !important; padding:13px 30px; border-radius:6px; font-weight:700; font-size:14px; letter-spacing:.3px; }
+    .footer { background:#f4f6f9; padding:22px 36px; border-top:1px solid #e5e9ef; color:#6b7280; font-size:12px; line-height:1.6; text-align:center; }
+    .footer .brand { color:#0a4f99; font-weight:700; }
+    .footer a { color:#0078d4; }
+    @media (max-width:600px) {
+      .body-pad { padding:24px 22px 6px; font-size:14.5px; }
+      .hero { padding:28px 20px; }
+      .info-card, .fields { padding:14px 16px; }
+      .footer { padding:18px 22px; }
+    }
   </style>
 </head>
-<body>
-  <div class="wrap">
-    <div class="hdr">
-      <img src="cid:{LOGO_CID}" alt="RealHack 2026">
-      <p>June 18–19 &nbsp;·&nbsp; RealPage Hackathon</p>
-    </div>
-    <div class="bdy">
-{content}
-    </div>
-    <div class="ftr">
-      RealHack Organizing Team &nbsp;·&nbsp;
-      <a href="mailto:RealHack@realpage.com">RealHack@realpage.com</a>
-    </div>
-  </div>
+<body style="margin:0;padding:0;background:#eef1f5;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef1f5;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="container" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 18px rgba(10,79,153,0.10);">
+        <tr><td class="hero">
+          <img src="cid:""" + LOGO_CID + """" alt="RealHack 2026" class="hero-logo" style="filter:brightness(0) invert(1);">
+          <p class="hero-tag">RealPage Hackathon · June 18&ndash;19, 2026</p>
+          <span class="hero-pill">Innovate · Build · Win</span>
+        </td></tr>
+        <tr><td class="body-pad">
+""" + content + """
+        </td></tr>
+        <tr><td class="footer">
+          <p style="margin:0 0 6px;">
+            <span class="brand">RealHack Organizing Team</span>
+          </p>
+          <p style="margin:0;">
+            <a href="mailto:RealHack@realpage.com">RealHack@realpage.com</a>
+          </p>
+          <p style="margin:10px 0 0;color:#9ca3af;font-size:11px;">
+            &copy; 2026 RealPage, Inc.&nbsp;·&nbsp;Internal Hackathon
+          </p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
 </body>
 </html>"""
 
@@ -137,22 +172,29 @@ TEMPLATES: list[EmailTemplate] = [
             "— RealHack Organizing Team"
         ),
         body_html=_html_wrap(
-            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
-            "      <p>You're confirmed for <strong>RealHack 2026</strong> (June 18–19). Here's your registration summary:</p>\n"
-            "      <div class='info-block'>\n"
-            "        <p class='label'>Team &nbsp;·&nbsp; {team_name}</p>\n"
-            "        <p><span class='label'>Mentor:</span> {mentor_name}</p>\n"
-            "        <p><span class='label'>Members:</span><br>{member_list}</p>\n"
-            "        <p><span class='label'>Idea on file:</span> {idea_short}</p>\n"
-            "      </div>\n"
-            "      <p><strong>Next steps:</strong></p>\n"
-            "      <ul>\n"
-            "        <li>Your private Teams channel will be created in the next few days.</li>\n"
-            "        <li>Watch your inbox for the kickoff and schedule details.</li>\n"
-            "        <li>Your mentor will reach out to align before the event.</li>\n"
-            "      </ul>\n"
-            "      <p>If anything above looks wrong, reply to "
-            "<a href='mailto:RealHack@realpage.com'>RealHack@realpage.com</a>.</p>"
+            "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "<p>You're confirmed for <strong>RealHack 2026</strong>. Below is your registration summary "
+            "— if anything looks wrong, just hit reply.</p>\n"
+            "<div class='info-card'>\n"
+            "  <span class='label'>Team</span>\n"
+            "  <span class='value'><strong>{team_name}</strong></span>\n"
+            "  <span class='label'>Mentor</span>\n"
+            "  <span class='value'>{mentor_name}</span>\n"
+            "  <span class='label'>Members</span>\n"
+            "  <span class='value'>{member_list}</span>\n"
+            "  <span class='label'>Idea on file</span>\n"
+            "  <span class='value'>{idea_short}</span>\n"
+            "</div>\n"
+            "<h2>What happens next</h2>\n"
+            "<ul>\n"
+            "  <li>A private <strong>Microsoft Teams channel</strong> will be set up for your team in the next few days.</li>\n"
+            "  <li>Watch your inbox for the <strong>kickoff message</strong> and event-day schedule.</li>\n"
+            "  <li>Your <strong>mentor will reach out</strong> to align on the problem statement before the event.</li>\n"
+            "</ul>\n"
+            "<p>Questions or corrections? Reply to this thread or write to "
+            "<a href='mailto:RealHack@realpage.com'>RealHack@realpage.com</a>.</p>\n"
+            "<p style='margin-top:22px;'>See you on <strong>June 18&ndash;19</strong>!<br>"
+            "<span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
         ),
     ),
     EmailTemplate(

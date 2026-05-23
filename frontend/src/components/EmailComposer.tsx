@@ -555,9 +555,9 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                   }}
                   disabled={sending !== null}
                   className="text-xs px-3 py-1.5 rounded bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold transition"
-                  title="Open each email in Outlook for manual send (no logo, plain text)"
+                  title="Opens each email as a draft in Outlook for manual review/send. Plain text only — Outlook strips HTML/logo from mailto: links. Use 'Send branded' for the full RealHack design."
                 >
-                  Open all in Outlook
+                  Open all in Outlook (plain text)
                 </button>
                 <button
                   onClick={() => {
