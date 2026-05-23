@@ -6,7 +6,8 @@ import {
   type SwagPerson,
 } from '../api';
 
-type Filter = 'all' | 'pending' | 'collected';
+type StatusFilter = 'all' | 'pending' | 'collected';
+type CountryFilter = string; // 'all' | 'India' | 'US' | …
 
 /**
  * T-shirt / swag pickup tab.
@@ -16,17 +17,28 @@ type Filter = 'all' | 'pending' | 'collected';
  * Multiple organizers can work the desk concurrently — each tap goes straight
  * to the API, no shared Excel, no merge conflicts.
  *
- * Design intentionally mobile-first: big tap targets, single column on phone,
- * sticky search bar so scrolling the list doesn't push search off-screen.
+ * Country filter: in-person pickup is India-only at the event venue;
+ * other-country people get their t-shirts shipped via mail. Filter lets the
+ * pickup-desk organizer focus on India + lets the shipping desk see the
+ * non-India list separately.
+ *
+ * Collect-on-behalf-of: when someone (e.g. a teammate) shows their ID and
+ * signs for an absent person, the organizer captures who-physically-picked-up
+ * before confirming. Audit-logged separately from which organizer marked it.
  */
 export function SwagPanel() {
   const [people, setPeople] = useState<SwagPerson[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState<Filter>('all');
+  const [status, setStatus] = useState<StatusFilter>('all');
+  const [country, setCountry] = useState<CountryFilter>('all');
   const [busyEmail, setBusyEmail] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  // Pickup-by modal state
+  const [pickupModal, setPickupModal] = useState<SwagPerson | null>(null);
+  const [byName, setByName] = useState('');
+  const [byEmail, setByEmail] = useState('');
 
   const reload = async () => {
     setLoading(true);
@@ -49,13 +61,39 @@ export function SwagPanel() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const handleMark = async (p: SwagPerson) => {
+  const openPickupModal = (p: SwagPerson) => {
+    setPickupModal(p);
+    setByName('');
+    setByEmail('');
+  };
+
+  const closePickupModal = () => {
+    setPickupModal(null);
+    setByName('');
+    setByEmail('');
+  };
+
+  const submitPickup = async (mode: 'self' | 'on-behalf') => {
+    if (!pickupModal) return;
+    if (mode === 'on-behalf' && !byName.trim() && !byEmail.trim()) {
+      setErr('Enter at least a name or email of the person collecting on behalf');
+      return;
+    }
+    const p = pickupModal;
+    closePickupModal();
     setBusyEmail(p.email);
     setErr(null);
     try {
-      const updated = await markSwagCollected(p.email);
+      const updated = await markSwagCollected(p.email, {
+        pickedUpByName: mode === 'on-behalf' ? byName.trim() || null : null,
+        pickedUpByEmail: mode === 'on-behalf' ? byEmail.trim().toLowerCase() || null : null,
+      });
       setPeople((prev) => prev.map((x) => (x.email === p.email ? updated : x)));
-      setToast(`✓ Collected — ${p.name}`);
+      setToast(
+        mode === 'on-behalf'
+          ? `✓ Collected on behalf — ${p.name}`
+          : `✓ Collected — ${p.name}`,
+      );
     } catch (e: any) {
       setErr(e.message || String(e));
     } finally {
@@ -78,11 +116,19 @@ export function SwagPanel() {
     }
   };
 
+  // Distinct countries present in the roster (used to populate the country pills)
+  const countries = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of people) if (p.country) set.add(p.country);
+    return Array.from(set).sort();
+  }, [people]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = people;
-    if (filter === 'pending') list = list.filter((p) => !p.collected);
-    if (filter === 'collected') list = list.filter((p) => p.collected);
+    if (status === 'pending') list = list.filter((p) => !p.collected);
+    if (status === 'collected') list = list.filter((p) => p.collected);
+    if (country !== 'all') list = list.filter((p) => (p.country ?? 'Unknown') === country);
     if (q) {
       list = list.filter((p) =>
         p.name.toLowerCase().includes(q) ||
@@ -91,7 +137,7 @@ export function SwagPanel() {
       );
     }
     return list;
-  }, [people, search, filter]);
+  }, [people, search, status, country]);
 
   const stats = useMemo(() => {
     const total = people.length;
@@ -103,7 +149,7 @@ export function SwagPanel() {
 
   return (
     <div className="space-y-4">
-      {/* Sticky header — counter + progress + search + filter */}
+      {/* Sticky header — counter + progress + search + filters */}
       <div className="sticky top-0 z-10 bg-ink-950/95 backdrop-blur -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2 pb-3 border-b border-slate-800/60">
         <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 sm:p-5">
           {/* Counter row */}
@@ -129,7 +175,7 @@ export function SwagPanel() {
               style={{ width: `${pct}%` }}
             />
           </div>
-          {/* Search + filter */}
+          {/* Search */}
           <input
             type="text"
             placeholder="Search by name, email, or team…"
@@ -138,13 +184,48 @@ export function SwagPanel() {
             autoFocus
             className="w-full bg-ink-900 border border-slate-700/40 rounded-lg px-4 py-3 text-base focus:outline-none focus:border-lime-500/60 mb-2.5"
           />
+          {/* Country filter pills */}
+          {countries.length > 0 && (
+            <div className="flex gap-1.5 flex-wrap mb-2.5">
+              <button
+                onClick={() => setCountry('all')}
+                className={`text-xs px-3 py-1.5 rounded-full font-semibold transition border ${
+                  country === 'all'
+                    ? 'bg-sky-500/20 border-sky-500/60 text-sky-200'
+                    : 'bg-ink-900/40 border-slate-700/40 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                All countries ({people.length})
+              </button>
+              {countries.map((c) => {
+                const count = people.filter((p) => (p.country ?? 'Unknown') === c).length;
+                const isIndia = c.toLowerCase() === 'india';
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setCountry(c)}
+                    className={`text-xs px-3 py-1.5 rounded-full font-semibold transition border ${
+                      country === c
+                        ? isIndia
+                          ? 'bg-amber-500/20 border-amber-500/60 text-amber-200'
+                          : 'bg-sky-500/20 border-sky-500/60 text-sky-200'
+                        : 'bg-ink-900/40 border-slate-700/40 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    {c} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {/* Status filter pills */}
           <div className="flex gap-1 bg-ink-900/60 border border-slate-700/40 rounded-lg p-1">
-            {(['all', 'pending', 'collected'] as Filter[]).map((f) => (
+            {(['all', 'pending', 'collected'] as StatusFilter[]).map((f) => (
               <button
                 key={f}
-                onClick={() => setFilter(f)}
+                onClick={() => setStatus(f)}
                 className={`flex-1 px-3 py-2 rounded text-sm font-semibold capitalize transition ${
-                  filter === f ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'
+                  status === f ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'
                 }`}
               >
                 {f}{f !== 'all' && (
@@ -157,7 +238,13 @@ export function SwagPanel() {
           </div>
           <div className="text-xs text-slate-500 mt-2">
             Showing {filtered.length} of {people.length}
+            {country !== 'all' && <span className="text-slate-600"> · filtered by {country}</span>}
           </div>
+          {country !== 'all' && country.toLowerCase() !== 'india' && (
+            <div className="text-xs text-amber-300/90 mt-1.5 italic">
+              📦 Note — {country} participants typically receive t-shirts via mail. Confirm shipping address on file before marking.
+            </div>
+          )}
         </div>
       </div>
 
@@ -186,6 +273,7 @@ export function SwagPanel() {
                 ? p.teams[0]
                 : `${p.teams[0]} +${p.teams.length - 1}`;
             const roleLabel = p.roles.some((r) => r.startsWith('mentor:')) ? 'Mentor' : 'Member';
+            const isIndia = (p.country || '').toLowerCase() === 'india';
             return (
               <div
                 key={p.email}
@@ -204,6 +292,15 @@ export function SwagPanel() {
                           Size {p.tshirt_size}
                         </span>
                       )}
+                      {p.country && (
+                        <span className={`text-[11px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${
+                          isIndia
+                            ? 'bg-amber-500/15 text-amber-200 border-amber-500/40'
+                            : 'bg-sky-500/15 text-sky-200 border-sky-500/40'
+                        }`}>
+                          {p.country}
+                        </span>
+                      )}
                       <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-600/30 text-slate-300 border border-slate-600/40 font-semibold uppercase tracking-wider">
                         {roleLabel}
                       </span>
@@ -215,6 +312,12 @@ export function SwagPanel() {
                         ✓ Collected {new Date(p.collected_at).toLocaleString()}
                         {p.collected_by_email && (
                           <span className="text-slate-500"> by {p.collected_by_email}</span>
+                        )}
+                        {p.picked_up_by_name && (
+                          <div className="text-amber-300/90 mt-0.5">
+                            📋 Picked up by <strong>{p.picked_up_by_name}</strong>
+                            {p.picked_up_by_email && <span className="text-slate-500"> · {p.picked_up_by_email}</span>}
+                          </div>
                         )}
                       </div>
                     )}
@@ -230,7 +333,7 @@ export function SwagPanel() {
                       </button>
                     ) : (
                       <button
-                        onClick={() => handleMark(p)}
+                        onClick={() => openPickupModal(p)}
                         disabled={isBusy}
                         className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2.5 rounded-lg text-sm transition"
                       >
@@ -249,6 +352,68 @@ export function SwagPanel() {
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-lime-400 text-ink-950 px-5 py-3 rounded-lg shadow-lg shadow-lime-500/30 font-bold text-sm">
           {toast}
+        </div>
+      )}
+
+      {/* Pickup-by modal */}
+      {pickupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={closePickupModal}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-ink-800 border border-lime-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden"
+          >
+            <div className="bg-gradient-to-br from-lime-500/20 to-emerald-500/10 p-4 border-b border-lime-500/40">
+              <h3 className="font-bold text-lime-200">Confirm pickup — {pickupModal.name}</h3>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Size {pickupModal.tshirt_size || '—'}
+                {pickupModal.country && <> · {pickupModal.country}</>}
+              </p>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-sm text-slate-300">Who is physically picking up this t-shirt?</p>
+
+              {/* Self option — big primary button */}
+              <button
+                onClick={() => submitPickup('self')}
+                className="w-full bg-lime-400 hover:bg-lime-300 text-ink-950 font-bold px-4 py-3 rounded-lg text-base transition"
+              >
+                {pickupModal.name.split(' ')[0]} is picking up themselves
+              </button>
+
+              <div className="text-center text-xs text-slate-500 uppercase tracking-wider">— or —</div>
+
+              {/* Collect-on-behalf inputs */}
+              <div className="space-y-2">
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Someone else collecting on behalf</p>
+                <input
+                  type="text"
+                  placeholder="Their name (ID check)"
+                  value={byName}
+                  onChange={(e) => setByName(e.target.value)}
+                  className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2.5 text-sm focus:outline-none focus:border-lime-500/60"
+                />
+                <input
+                  type="email"
+                  placeholder="Their RealPage email"
+                  value={byEmail}
+                  onChange={(e) => setByEmail(e.target.value)}
+                  className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2.5 text-sm focus:outline-none focus:border-lime-500/60"
+                />
+                <button
+                  onClick={() => submitPickup('on-behalf')}
+                  disabled={!byName.trim() && !byEmail.trim()}
+                  className="w-full bg-amber-400 hover:bg-amber-300 disabled:opacity-40 disabled:cursor-not-allowed text-ink-950 font-bold px-4 py-2.5 rounded-lg text-sm transition"
+                >
+                  Mark collected on behalf
+                </button>
+              </div>
+            </div>
+            <div className="px-5 pb-5 text-right">
+              <button onClick={closePickupModal} className="text-sm text-slate-400 hover:text-white">
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

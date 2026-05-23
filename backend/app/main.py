@@ -1066,13 +1066,40 @@ def set_panel_judges(panel_id: int, req: PanelJudgesSet, db: Session = Depends(g
 # concurrently from their phones, no merge conflicts, instant search.
 
 
+def _normalize_country(raw: str | None) -> str | None:
+    """Map common location strings to a canonical country name for the swag UI."""
+    if not raw:
+        return None
+    s = raw.strip().lower()
+    if not s:
+        return None
+    mapping = {
+        "us": "US",
+        "usa": "US",
+        "united states": "US",
+        "united states of america": "US",
+        "india": "India",
+        "in": "India",
+        "philippines": "Philippines",
+        "ph": "Philippines",
+        "uk": "UK",
+        "united kingdom": "UK",
+        "canada": "Canada",
+        "ca": "Canada",
+        "romania": "Romania",
+        "mexico": "Mexico",
+    }
+    return mapping.get(s, raw.strip())
+
+
 def _swag_roster(db: Session) -> list[dict]:
     """Build the canonical pickup list — one entry per unique email across
-    all members + mentors, with their team(s), role(s), and collection state.
+    all members + mentors, with their team(s), role(s), country, and
+    collection state.
     """
     by_email: dict[str, dict] = {}
 
-    def _add(email: str | None, name: str | None, tshirt_size: str | None, role: str, team_name: str) -> None:
+    def _add(email: str | None, name: str | None, tshirt_size: str | None, country: str | None, role: str, team_name: str) -> None:
         if not email:
             return
         key = email.strip().lower()
@@ -1083,6 +1110,7 @@ def _swag_roster(db: Session) -> list[dict]:
                 "email": key,
                 "name": (name or "").strip() or key,
                 "tshirt_size": tshirt_size,
+                "country": _normalize_country(country),
                 "roles": [],
                 "teams": [],
             }
@@ -1090,15 +1118,17 @@ def _swag_roster(db: Session) -> list[dict]:
         entry["roles"].append(f"{role}:{team_name}")
         if team_name not in entry["teams"]:
             entry["teams"].append(team_name)
-        # Keep the first non-empty t-shirt size we see (member + mentor may
-        # both have an entry; we trust whatever was on file first).
+        # Keep first non-empty values seen (member + mentor rows may have
+        # different completeness; trust whatever appeared first).
         if not entry["tshirt_size"] and tshirt_size:
             entry["tshirt_size"] = tshirt_size
+        if not entry["country"] and country:
+            entry["country"] = _normalize_country(country)
 
     for team in db.query(models.Team).all():
         for m in team.members:
-            _add(m.email, m.name, m.tshirt_size, "member", team.name)
-        _add(team.mentor_email, team.mentor_name, team.mentor_tshirt_size, "mentor", team.name)
+            _add(m.email, m.name, m.tshirt_size, m.location, "member", team.name)
+        _add(team.mentor_email, team.mentor_name, team.mentor_tshirt_size, team.mentor_location, "mentor", team.name)
 
     # Merge in collection state from swag_pickups
     pickups = {p.email.lower(): p for p in db.query(models.SwagPickup).all()}
@@ -1107,6 +1137,8 @@ def _swag_roster(db: Session) -> list[dict]:
         entry["collected"] = p is not None
         entry["collected_at"] = p.collected_at.isoformat() if p else None
         entry["collected_by_email"] = p.collected_by_email if p else None
+        entry["picked_up_by_name"] = p.picked_up_by_name if p else None
+        entry["picked_up_by_email"] = p.picked_up_by_email if p else None
         entry["notes"] = p.notes if p else None
         # Normalize size capitalization
         if entry["tshirt_size"]:
@@ -1156,10 +1188,15 @@ def mark_swag_collected(
     organizer_email = (profile.get("email") or "").strip().lower() or None
 
     pickup = db.query(models.SwagPickup).filter(models.SwagPickup.email == email).first()
+    # Normalize on-behalf-of fields (treat empty strings as None)
+    pby_name = (req.picked_up_by_name or "").strip() or None
+    pby_email = (req.picked_up_by_email or "").strip().lower() or None
     if pickup:
         # Already collected — refresh timestamp + notes, swap in current organizer
         pickup.collected_at = datetime.utcnow()
         pickup.collected_by_email = organizer_email
+        pickup.picked_up_by_name = pby_name
+        pickup.picked_up_by_email = pby_email
         if req.notes is not None:
             pickup.notes = req.notes
     else:
@@ -1170,6 +1207,8 @@ def mark_swag_collected(
             tshirt_size=person["tshirt_size"],
             collected_at=datetime.utcnow(),
             collected_by_email=organizer_email,
+            picked_up_by_name=pby_name,
+            picked_up_by_email=pby_email,
             notes=req.notes,
         )
         db.add(pickup)

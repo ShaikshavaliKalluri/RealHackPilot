@@ -194,7 +194,13 @@ class SwagPickup(Base):
     person_name: Mapped[str] = mapped_column(String(255))
     tshirt_size: Mapped[str | None] = mapped_column(String(16))
     collected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    # Organizer who clicked the 'Mark collected' button.
     collected_by_email: Mapped[str | None] = mapped_column(String(255))
+    # Person who physically picked up the t-shirt. Null = picked up by the
+    # owner themselves; otherwise the name/email of whoever showed an ID
+    # card and signed for it on behalf of the registered participant.
+    picked_up_by_name: Mapped[str | None] = mapped_column(String(255))
+    picked_up_by_email: Mapped[str | None] = mapped_column(String(255))
     notes: Mapped[str | None] = mapped_column(Text)
 
 

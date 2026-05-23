@@ -292,11 +292,14 @@ export interface SwagPerson {
   email: string;
   name: string;
   tshirt_size: string | null;
+  country: string | null;
   roles: string[];
   teams: string[];
   collected: boolean;
   collected_at: string | null;
   collected_by_email: string | null;
+  picked_up_by_name: string | null;
+  picked_up_by_email: string | null;
   notes: string | null;
 }
 
@@ -318,11 +321,19 @@ export async function fetchSwagStats(): Promise<SwagStats> {
   return r.json();
 }
 
-export async function markSwagCollected(email: string, notes?: string): Promise<SwagPerson> {
+export async function markSwagCollected(
+  email: string,
+  opts: { notes?: string | null; pickedUpByName?: string | null; pickedUpByEmail?: string | null } = {},
+): Promise<SwagPerson> {
   const r = await authFetch(`${BASE}/swag/mark`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, notes: notes ?? null }),
+    body: JSON.stringify({
+      email,
+      notes: opts.notes ?? null,
+      picked_up_by_name: opts.pickedUpByName ?? null,
+      picked_up_by_email: opts.pickedUpByEmail ?? null,
+    }),
   });
   if (!r.ok) {
     const t = await r.text();

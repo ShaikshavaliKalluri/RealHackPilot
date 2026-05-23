@@ -113,6 +113,14 @@ def lightweight_migrate() -> None:
         member_existing = {c["name"] for c in insp.get_columns("members")}
         if "address" not in member_existing:
             additions.append("ALTER TABLE members ADD COLUMN address TEXT")
+
+    # Swag pickups — added late, may not be present in older DBs.
+    if "swag_pickups" in insp.get_table_names():
+        swag_existing = {c["name"] for c in insp.get_columns("swag_pickups")}
+        if "picked_up_by_name" not in swag_existing:
+            additions.append("ALTER TABLE swag_pickups ADD COLUMN picked_up_by_name VARCHAR(255)")
+        if "picked_up_by_email" not in swag_existing:
+            additions.append("ALTER TABLE swag_pickups ADD COLUMN picked_up_by_email VARCHAR(255)")
     if additions:
         with engine.begin() as conn:
             for sql in additions:

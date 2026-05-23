@@ -144,17 +144,24 @@ class SwagPersonOut(BaseModel):
     email: str
     name: str
     tshirt_size: str | None = None
+    country: str | None = None  # 'India', 'US', 'Philippines', etc. — used for filtering pickup vs shipment lists
     roles: list[str] = []  # e.g. ['member:AgenTicket', 'mentor:DeepThinkers']
     teams: list[str] = []  # team names the person is associated with
     collected: bool = False
     collected_at: str | None = None  # ISO timestamp when collected
-    collected_by_email: str | None = None
+    collected_by_email: str | None = None  # organizer who marked it
+    picked_up_by_name: str | None = None   # person who physically picked up (null = self)
+    picked_up_by_email: str | None = None
     notes: str | None = None
 
 
 class SwagMarkRequest(BaseModel):
     email: str
     notes: str | None = None
+    # Optional collect-on-behalf-of fields. If both empty, treat as
+    # the person picking up for themselves.
+    picked_up_by_name: str | None = None
+    picked_up_by_email: str | None = None
 
 
 class SwagStats(BaseModel):
