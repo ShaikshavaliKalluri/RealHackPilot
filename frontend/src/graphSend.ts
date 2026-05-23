@@ -60,6 +60,10 @@ export interface GraphSendOpts {
   bcc?: string[];
   /** Optional Reply-To override. */
   replyTo?: string[];
+  /** Optional 'From' address — used to send AS a shared mailbox. Requires the
+   * signed-in user to have Send-As permission on the target address; if the
+   * tenant rejects it Graph returns a 403 ErrorSendAsDenied. */
+  fromAddress?: string | null;
 }
 
 interface GraphAddress {
@@ -87,6 +91,12 @@ export async function sendEmailViaGraph(opts: GraphSendOpts): Promise<void> {
   if (opts.cc && opts.cc.length) message.ccRecipients = toAddrs(opts.cc);
   if (opts.bcc && opts.bcc.length) message.bccRecipients = toAddrs(opts.bcc);
   if (opts.replyTo && opts.replyTo.length) message.replyTo = toAddrs(opts.replyTo);
+  if (opts.fromAddress) {
+    // 'from' tells Graph to send AS this address (Send-As semantics). The
+    // signed-in user must have Send-As permission on it; otherwise Graph
+    // returns 403 ErrorSendAsDenied.
+    message.from = { emailAddress: { address: opts.fromAddress } };
+  }
 
   if (useHtml) {
     const logoB64 = await loadLogoBase64();

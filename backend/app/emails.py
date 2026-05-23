@@ -101,7 +101,7 @@ def _html_wrap(content: str) -> str:
   <div class="wrap">
     <div class="hdr">
       <img src="cid:{LOGO_CID}" alt="RealHack 2026">
-      <p>June 18–19 &nbsp;·&nbsp; RealPage Internal Hackathon</p>
+      <p>June 18–19 &nbsp;·&nbsp; RealPage Hackathon</p>
     </div>
     <div class="bdy">
 {content}
@@ -397,11 +397,15 @@ def render(template: EmailTemplate, team: Team) -> dict:
     }
 
     def fill(s: str) -> str:
-        try:
-            return s.format(**tokens)
-        except Exception:
-            # Best-effort: fail open if a token is missing
-            return s
+        # str.replace per token instead of str.format(**tokens) — the HTML
+        # templates contain inline CSS like `body {margin:0; ...}` whose curly
+        # braces look like format-spec markers to str.format() and cause the
+        # whole substitution to throw (then silently return the unrendered
+        # string with literal {team_name} etc. visible in the email).
+        result = s
+        for key, value in tokens.items():
+            result = result.replace("{" + key + "}", str(value))
+        return result
 
     if template.audience == "mentor":
         to_emails = [team.mentor_email] if team.mentor_email else []

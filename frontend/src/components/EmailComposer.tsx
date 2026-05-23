@@ -225,6 +225,11 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
           to,
           cc: ccList.length ? ccList : undefined,
           bcc: bccList.length ? bccList : undefined,
+          // Send AS the shared mailbox so recipients see the email from
+          // 'RealHack' rather than from whichever organizer is composing.
+          // Requires the signed-in user to have Send-As permission on the
+          // RealHack mailbox; Graph returns 403 if not.
+          fromAddress: 'RealHack@realpage.com',
         });
         await logSend(email);
       } catch (e: unknown) {
