@@ -79,6 +79,12 @@ def _html_wrap(content: str) -> str:
     # inline on critical elements as a fallback. The CSS curly braces are
     # left as single-brace because we no longer use str.format() at render
     # time — emails.fill() uses str.replace() per-token now.
+    # Outlook desktop ignores `background:linear-gradient(...)` and the CSS
+    # `filter` property, so the previous gradient hero ended up rendering as
+    # plain white with the blue logo on white + invisible white text. Now we
+    # use a SOLID dark-blue hero (bgcolor + inline style — both belt and
+    # suspenders for Outlook) and a white wordmark image-on-blue, no CSS
+    # filter required.
     return """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -90,58 +96,48 @@ def _html_wrap(content: str) -> str:
     body { margin:0; padding:0; background:#eef1f5; font-family:'Segoe UI', -apple-system, BlinkMacSystemFont, Arial, sans-serif; -webkit-font-smoothing:antialiased; }
     table { border-collapse:collapse; }
     a { color:#0078d4; text-decoration:none; }
-    .container { max-width:640px; margin:0 auto; background:#ffffff; }
-    .hero { background:linear-gradient(135deg, #0a4f99 0%, #0078d4 55%, #29b6f6 100%); padding:36px 32px 32px; text-align:center; }
-    .hero-logo { display:block; height:46px; width:auto; margin:0 auto 10px; }
-    .hero-tag { color:#e3f2fd; font-size:13px; letter-spacing:.6px; text-transform:uppercase; font-weight:600; margin:0; }
-    .hero-pill { display:inline-block; background:rgba(255,255,255,0.14); color:#ffffff; padding:6px 14px; border-radius:18px; font-size:12px; font-weight:600; margin-top:14px; letter-spacing:.4px; }
     .body-pad { padding:32px 36px 8px; color:#2a2f36; font-size:15px; line-height:1.65; }
     .body-pad p { margin:0 0 14px; }
     .body-pad ul { margin:8px 0 16px; padding-left:22px; }
     .body-pad li { margin:6px 0; }
     .body-pad strong { color:#1a1f26; }
     .body-pad h2 { color:#0a4f99; font-size:18px; margin:24px 0 10px; font-weight:700; }
-    .info-card { background:#f4f8fd; border-left:4px solid #0078d4; border-radius:6px; padding:16px 20px; margin:18px 0; font-size:14px; }
-    .info-card .label { display:block; font-weight:700; color:#0a4f99; font-size:11px; text-transform:uppercase; letter-spacing:.6px; margin-top:8px; }
-    .info-card .label:first-child { margin-top:0; }
-    .info-card .value { display:block; color:#1a1f26; margin:2px 0 6px; }
-    .fields { background:#fff8eb; border-left:4px solid #f59e00; border-radius:6px; padding:16px 20px; margin:18px 0; font-size:14px; color:#1a1f26; }
-    .fields strong { color:#b8590a; }
-    .cta-row { padding:8px 0 22px; text-align:center; }
-    .cta { display:inline-block; background:#0078d4; color:#ffffff !important; padding:13px 30px; border-radius:6px; font-weight:700; font-size:14px; letter-spacing:.3px; }
-    .footer { background:#f4f6f9; padding:22px 36px; border-top:1px solid #e5e9ef; color:#6b7280; font-size:12px; line-height:1.6; text-align:center; }
-    .footer .brand { color:#0a4f99; font-weight:700; }
-    .footer a { color:#0078d4; }
     @media (max-width:600px) {
       .body-pad { padding:24px 22px 6px; font-size:14.5px; }
-      .hero { padding:28px 20px; }
-      .info-card, .fields { padding:14px 16px; }
-      .footer { padding:18px 22px; }
+      .hero-pad { padding:28px 20px !important; }
+      .info-pad { padding:14px 16px !important; }
+      .footer-pad { padding:18px 22px !important; }
     }
   </style>
 </head>
 <body style="margin:0;padding:0;background:#eef1f5;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#eef1f5;">
     <tr><td align="center" style="padding:28px 12px;">
-      <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="container" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 18px rgba(10,79,153,0.10);">
-        <tr><td class="hero">
-          <img src="cid:""" + LOGO_CID + """" alt="RealHack 2026" class="hero-logo" style="filter:brightness(0) invert(1);">
-          <p class="hero-tag">RealPage Hackathon · June 18&ndash;19, 2026</p>
-          <span class="hero-pill">Innovate · Build · Win</span>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="640" style="max-width:640px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 18px rgba(10,79,153,0.10);">
+        <!-- ===== Brand row (white background so the blue wordmark pops) ===== -->
+        <tr><td bgcolor="#ffffff" align="center" style="background-color:#ffffff;padding:28px 32px 18px;text-align:center;">
+          <img src="cid:""" + LOGO_CID + """" alt="RealHack 2026" width="220" style="display:block;margin:0 auto;height:auto;max-height:60px;">
         </td></tr>
+        <!-- ===== Event-info hero strip (solid dark blue for contrast w/ white text) ===== -->
+        <tr><td class="hero-pad" bgcolor="#0a4f99" align="center" style="background-color:#0a4f99;padding:18px 32px 22px;text-align:center;border-top:3px solid #29b6f6;">
+          <p style="color:#ffffff;margin:0;font-size:14px;letter-spacing:.6px;text-transform:uppercase;font-weight:700;">
+            RealPage Hackathon &middot; June 18&ndash;19, 2026
+          </p>
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:12px auto 0;"><tr>
+            <td bgcolor="#1d6bb0" style="background-color:#1d6bb0;border-radius:18px;padding:6px 16px;color:#ffffff;font-size:12px;font-weight:600;letter-spacing:.4px;">
+              Innovate &nbsp;&middot;&nbsp; Build &nbsp;&middot;&nbsp; Win
+            </td>
+          </tr></table>
+        </td></tr>
+        <!-- ===== Body ===== -->
         <tr><td class="body-pad">
 """ + content + """
         </td></tr>
-        <tr><td class="footer">
-          <p style="margin:0 0 6px;">
-            <span class="brand">RealHack Organizing Team</span>
-          </p>
-          <p style="margin:0;">
-            <a href="mailto:RealHack@realpage.com">RealHack@realpage.com</a>
-          </p>
-          <p style="margin:10px 0 0;color:#9ca3af;font-size:11px;">
-            &copy; 2026 RealPage, Inc.&nbsp;·&nbsp;Internal Hackathon
-          </p>
+        <!-- ===== Footer ===== -->
+        <tr><td class="footer-pad" bgcolor="#f4f6f9" style="background-color:#f4f6f9;padding:22px 36px;border-top:1px solid #e5e9ef;color:#6b7280;font-size:12px;line-height:1.6;text-align:center;">
+          <p style="margin:0 0 6px;color:#0a4f99;font-weight:700;">RealHack Organizing Team</p>
+          <p style="margin:0;"><a href="mailto:RealHack@realpage.com" style="color:#0078d4;">RealHack@realpage.com</a></p>
+          <p style="margin:10px 0 0;color:#9ca3af;font-size:11px;">&copy; 2026 RealPage, Inc.</p>
         </td></tr>
       </table>
     </td></tr>
@@ -173,27 +169,37 @@ TEMPLATES: list[EmailTemplate] = [
         ),
         body_html=_html_wrap(
             "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
-            "<p>You're confirmed for <strong>RealHack 2026</strong>. Below is your registration summary "
-            "— if anything looks wrong, just hit reply.</p>\n"
-            "<div class='info-card'>\n"
-            "  <span class='label'>Team</span>\n"
-            "  <span class='value'><strong>{team_name}</strong></span>\n"
-            "  <span class='label'>Mentor</span>\n"
-            "  <span class='value'>{mentor_name}</span>\n"
-            "  <span class='label'>Members</span>\n"
-            "  <span class='value'>{member_list}</span>\n"
-            "  <span class='label'>Idea on file</span>\n"
-            "  <span class='value'>{idea_short}</span>\n"
-            "</div>\n"
+            "<p>You're confirmed for <strong>RealHack 2026</strong>. Below is your registration summary — if anything looks wrong, just hit reply.</p>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
+            "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%'>\n"
+            "  <tr><td style='padding-bottom:14px;'>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Team</div>\n"
+            "    <div style='color:#1a1f26;font-size:15px;font-weight:700;'>{team_name}</div>\n"
+            "  </td></tr>\n"
+            "  <tr><td style='padding-bottom:14px;'>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Mentor</div>\n"
+            "    <div style='color:#1a1f26;font-size:14px;'>{mentor_name}</div>\n"
+            "  </td></tr>\n"
+            "  <tr><td style='padding-bottom:14px;'>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Members</div>\n"
+            "    <div style='color:#1a1f26;font-size:14px;'>{member_list_html}</div>\n"
+            "  </td></tr>\n"
+            "  <tr><td>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Idea on file</div>\n"
+            "    <div style='color:#1a1f26;font-size:14px;line-height:1.55;'>{idea_full}</div>\n"
+            "  </td></tr>\n"
+            "</table>\n"
+            "</td></tr>\n"
+            "</table>\n"
             "<h2>What happens next</h2>\n"
             "<ul>\n"
             "  <li>A private <strong>Microsoft Teams channel</strong> will be set up for your team in the next few days.</li>\n"
             "  <li>Watch your inbox for the <strong>kickoff message</strong> and event-day schedule.</li>\n"
             "  <li>Your <strong>mentor will reach out</strong> to align on the problem statement before the event.</li>\n"
             "</ul>\n"
-            "<p>Questions or corrections? Reply to this thread or write to "
-            "<a href='mailto:RealHack@realpage.com'>RealHack@realpage.com</a>.</p>\n"
-            "<p style='margin-top:22px;'>See you on <strong>June 18&ndash;19</strong>!<br>"
+            "<p>Questions or corrections? Reply to this thread or write to <a href='mailto:RealHack@realpage.com'>RealHack@realpage.com</a>.</p>\n"
+            "<p style='margin-top:22px;'>See you on <strong>June 18&ndash;19</strong>!<br>\n"
             "<span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
         ),
     ),
@@ -391,6 +397,9 @@ def _first_names(team: Team) -> str:
 
 
 def _member_list(team: Team) -> str:
+    """Plain-text member list — used in `body` (the .txt fallback). Keeps the
+    detailed format with name · email · country so org leads can see contact
+    info at a glance when reading the text version."""
     if not team.members:
         return "  (no members listed)"
     lines = []
@@ -404,6 +413,28 @@ def _member_list(team: Team) -> str:
     return "\n".join(lines)
 
 
+def _member_list_html(team: Team) -> str:
+    """HTML member list — names only, one per line. Cleaner for the branded
+    email (emails + locations clutter the visual and add no value to the
+    recipient, who is the member themselves)."""
+    if not team.members:
+        return "<em style='color:#6b7280;'>No members listed yet</em>"
+    items = []
+    for m in team.members:
+        name = (m.name or "—").strip()
+        items.append(
+            "<div style='padding:6px 0;border-bottom:1px solid #e5e9ef;'>"
+            f"<span style='color:#1a1f26;'>{name}</span>"
+            "</div>"
+        )
+    # Last row shouldn't have a bottom border for a cleaner look
+    if items:
+        items[-1] = items[-1].replace(
+            ";border-bottom:1px solid #e5e9ef;", ";"
+        )
+    return "".join(items)
+
+
 def _status_summary(team: Team) -> str:
     flags = team.flags or []
     if team.completeness_score >= 0.8 and not flags:
@@ -415,12 +446,20 @@ def _status_summary(team: Team) -> str:
 
 
 def _short_idea(team: Team) -> str:
+    """Trimmed idea for the plain-text body — keeps the .txt fallback short."""
     s = (team.idea or "").strip()
     if not s:
         return "(no idea provided)"
     if len(s) > 200:
         return s[:200].rsplit(" ", 1)[0] + "…"
     return s
+
+
+def _full_idea(team: Team) -> str:
+    """Full idea text for the HTML body — no truncation. The HTML wraps and
+    the recipient should see the whole thing, not a teaser ending in '…'."""
+    s = (team.idea or "").strip()
+    return s if s else "(no idea provided)"
 
 
 def render(template: EmailTemplate, team: Team) -> dict:
@@ -432,9 +471,11 @@ def render(template: EmailTemplate, team: Team) -> dict:
         "team_name": team.name,
         "mentor_name": team.mentor_name or "(mentor not listed)",
         "member_first_names_or_team": _first_names(team) or "team",
-        "member_list": _member_list(team),
+        "member_list": _member_list(team),               # plain text: name · email · country
+        "member_list_html": _member_list_html(team),     # html: names only, one per line
         "missing_fields_block": missing_block,
-        "idea_short": _short_idea(team),
+        "idea_short": _short_idea(team),                 # plain text: 200-char teaser
+        "idea_full": _full_idea(team),                   # html: full idea text
         "status_summary": _status_summary(team),
     }
 

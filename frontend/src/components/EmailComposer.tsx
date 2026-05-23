@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchEmailTemplates, renderEmails, appendCommLog, checkDuplicate, type EmailTemplate, type RenderedEmail } from '../api';
-import { sendEmailViaGraph } from '../graphSend';
+import { sendEmailViaGraph, openDraftInOutlook } from '../graphSend';
 import type { Team } from '../types';
 
 interface Props {
@@ -544,20 +544,31 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                   Send branded
                 </button>
                 <button
-                  onClick={() => {
-                    rendered.forEach((e) => {
-                      const hasRecipients = (effectiveToOverride && effectiveToOverride.length > 0) || e.to.length > 0;
-                      if (hasRecipients) {
-                        window.open(mailtoLink(e, overrides), '_blank');
-                        logSend(e);
+                  onClick={async () => {
+                    for (const e of rendered) {
+                      const to = effectiveToOverride && effectiveToOverride.length > 0 ? effectiveToOverride : e.to;
+                      if (!to.length) continue;
+                      try {
+                        await openDraftInOutlook({
+                          subject: e.subject,
+                          bodyHtml: e.body_html,
+                          bodyText: e.body,
+                          to,
+                          cc: ccList.length ? ccList : undefined,
+                          bcc: bccList.length ? bccList : undefined,
+                          fromAddress: 'RealHack@realpage.com',
+                        });
+                        await logSend(e);
+                      } catch (err: any) {
+                        alert(`Open in Outlook failed for ${e.team_name}: ${err.message ?? String(err)}`);
                       }
-                    });
+                    }
                   }}
                   disabled={sending !== null}
                   className="text-xs px-3 py-1.5 rounded bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold transition"
-                  title="Opens each email as a draft in Outlook for manual review/send. Plain text only — Outlook strips HTML/logo from mailto: links. Use 'Send branded' for the full RealHack design."
+                  title="Creates a draft in your Outlook with the full HTML branding/logo, opens Outlook Web in a new tab so you can review/edit before clicking Send yourself."
                 >
-                  Open all in Outlook (plain text)
+                  Open as branded draft in Outlook
                 </button>
                 <button
                   onClick={() => {

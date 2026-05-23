@@ -42,6 +42,27 @@ export const loginRequest = {
 // login, but kept as a named constant so callers can reason about it.
 const GRAPH_SEND_SCOPES = ['Mail.Send'];
 
+// Scope needed to create a draft message (no send). Used by the
+// 'Open in Outlook' branded flow — we POST a draft to Graph then open
+// the deeplink so Outlook web shows the full HTML/logo design.
+const GRAPH_DRAFT_SCOPES = ['Mail.ReadWrite'];
+
+export async function getGraphDraftToken(): Promise<string> {
+  const accounts = msalInstance.getAllAccounts();
+  if (accounts.length === 0) throw new Error('Not signed in.');
+  const account = accounts[0];
+  try {
+    const result = await msalInstance.acquireTokenSilent({ scopes: GRAPH_DRAFT_SCOPES, account });
+    return result.accessToken;
+  } catch (e) {
+    if (e instanceof InteractionRequiredAuthError) {
+      const result = await msalInstance.acquireTokenPopup({ scopes: GRAPH_DRAFT_SCOPES, account });
+      return result.accessToken;
+    }
+    throw e;
+  }
+}
+
 // Scopes needed to create a private Teams channel + add members.
 const GRAPH_TEAMS_CHANNEL_SCOPES = [
   'Channel.Create',

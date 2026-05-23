@@ -12,7 +12,7 @@
  * would require the Mail.Send.Shared delegated scope, which our tenant
  * doesn't grant on this app, so /me/sendMail is the path we use.
  */
-import { getGraphSendToken } from './auth';
+import { getGraphSendToken, getGraphDraftToken } from './auth';
 
 export const LOGO_CID = 'realhack-logo';
 
@@ -136,4 +136,65 @@ export async function sendEmailViaGraph(opts: GraphSendOpts): Promise<void> {
     detail = (await r.text().catch(() => '')).slice(0, 300);
   }
   throw new Error(`Graph /sendMail failed (${r.status}): ${detail}`);
+}
+
+
+/**
+ * Create a Graph draft and open it in Outlook web for manual review/send.
+ * Returns nothing — but opens a new tab with the draft already populated
+ * with HTML body, CID logo attached, and all recipients filled in.
+ *
+ * The draft sits in your Drafts folder until you click Send in Outlook.
+ * Different from sendEmailViaGraph (which sends immediately).
+ */
+export async function openDraftInOutlook(opts: GraphSendOpts): Promise<void> {
+  const token = await getGraphDraftToken();
+  const useHtml = !!opts.bodyHtml;
+  const message: Record<string, unknown> = {
+    subject: opts.subject,
+    body: {
+      contentType: useHtml ? 'HTML' : 'Text',
+      content: useHtml ? opts.bodyHtml : opts.bodyText,
+    },
+    toRecipients: toAddrs(opts.to),
+  };
+  if (opts.cc && opts.cc.length) message.ccRecipients = toAddrs(opts.cc);
+  if (opts.bcc && opts.bcc.length) message.bccRecipients = toAddrs(opts.bcc);
+  if (opts.replyTo && opts.replyTo.length) message.replyTo = toAddrs(opts.replyTo);
+  if (opts.fromAddress) message.from = { emailAddress: { address: opts.fromAddress } };
+
+  if (useHtml) {
+    const logoB64 = await loadLogoBase64();
+    if (logoB64) {
+      message.attachments = [{
+        '@odata.type': '#microsoft.graph.fileAttachment',
+        name: 'realhack-logo.png',
+        contentType: 'image/png',
+        contentId: LOGO_CID,
+        isInline: true,
+        contentBytes: logoB64,
+      }];
+    }
+  }
+
+  const r = await fetch('https://graph.microsoft.com/v1.0/me/messages', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(message),
+  });
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    throw new Error(`Graph draft create failed (${r.status}): ${t.slice(0, 300)}`);
+  }
+  const draft = await r.json();
+  const draftId = draft.id as string | undefined;
+  if (!draftId) throw new Error('Draft created but no id returned by Graph.');
+
+  // Open the draft in Outlook web — works on any RealPage employee's machine
+  // since OWA is part of the Microsoft 365 suite.
+  const url = `https://outlook.office.com/mail/deeplink/compose?itemid=${encodeURIComponent(draftId)}`;
+  window.open(url, '_blank');
 }
