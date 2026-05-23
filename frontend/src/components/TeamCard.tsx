@@ -160,6 +160,32 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                // Build a mailto: link with members in To, mentor + default
+                // org CCs in Cc, an empty subject + body so the organizer
+                // types the message in Outlook itself. window.open in a new
+                // tab so the dashboard stays put.
+                const memberEmails = team.members.map((m) => m.email).filter((x): x is string => !!x);
+                const ccList: string[] = [];
+                if (team.mentor_email) ccList.push(team.mentor_email);
+                ccList.push('RealHack@realpage.com', 'bhaskar.jaddu@RealPage.com', 'Suneel.Nallu@RealPage.com');
+                const params = new URLSearchParams();
+                params.set('cc', ccList.join(','));
+                params.set('subject', `RealHack 2026 — Team ${team.name}`);
+                const url = `mailto:${memberEmails.join(',')}?${params.toString().replace(/\+/g, '%20')}`;
+                window.open(url, '_blank');
+              }}
+              disabled={team.members.every((m) => !m.email)}
+              className="text-xs px-3 py-1 rounded-md border border-amber-500/40 hover:bg-amber-500/10 text-amber-200 disabled:opacity-40 transition flex items-center gap-1.5"
+              title="Open Outlook with this team's members in To and the mentor + organizers in Cc"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              Send mail
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
                 setEditOpen(true);
               }}
               className="text-xs px-3 py-1 rounded-md border border-sky-500/40 hover:bg-sky-500/10 text-sky-200 transition flex items-center gap-1.5"
