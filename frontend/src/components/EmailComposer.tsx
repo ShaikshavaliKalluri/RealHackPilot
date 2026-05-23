@@ -544,31 +544,20 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                   Send branded
                 </button>
                 <button
-                  onClick={async () => {
-                    for (const e of rendered) {
-                      const to = effectiveToOverride && effectiveToOverride.length > 0 ? effectiveToOverride : e.to;
-                      if (!to.length) continue;
-                      try {
-                        await openDraftInOutlook({
-                          subject: e.subject,
-                          bodyHtml: e.body_html,
-                          bodyText: e.body,
-                          to,
-                          cc: ccList.length ? ccList : undefined,
-                          bcc: bccList.length ? bccList : undefined,
-                          fromAddress: 'RealHack@realpage.com',
-                        });
-                        await logSend(e);
-                      } catch (err: any) {
-                        alert(`Open in Outlook failed for ${e.team_name}: ${err.message ?? String(err)}`);
+                  onClick={() => {
+                    rendered.forEach((e) => {
+                      const hasRecipients = (effectiveToOverride && effectiveToOverride.length > 0) || e.to.length > 0;
+                      if (hasRecipients) {
+                        window.open(mailtoLink(e, overrides), '_blank');
+                        logSend(e);
                       }
-                    }
+                    });
                   }}
                   disabled={sending !== null}
                   className="text-xs px-3 py-1.5 rounded bg-ink-800 hover:bg-ink-800/70 border border-slate-700/40 text-slate-200 font-semibold transition"
-                  title="Creates a draft in your Outlook with the full HTML branding/logo, opens Outlook Web in a new tab so you can review/edit before clicking Send yourself."
+                  title="Opens each email in Outlook as a plain-text compose window so you can review/edit before sending. Outlook strips HTML from mailto: — use 'Send branded' to send with the full design."
                 >
-                  Open as branded draft in Outlook
+                  Open all in Outlook (plain text)
                 </button>
                 <button
                   onClick={() => {
