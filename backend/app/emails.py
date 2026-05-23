@@ -381,12 +381,24 @@ def _missing_fields(team: Team) -> list[str]:
     return missing
 
 
+def _proper_case(name: str | None) -> str:
+    """Normalize a person's name to Title Case regardless of how it was typed
+    in the form. RealPage's MS Forms export has a mix of ALL CAPS, lowercase,
+    and Title Case names from different registrants — emails should read
+    uniformly to a recipient so we normalize on render. Uses .title() which
+    handles apostrophes and hyphens correctly for typical names.
+    """
+    if not name:
+        return ""
+    return name.strip().title()
+
+
 def _first_names(team: Team) -> str:
     names: list[str] = []
     for m in team.members[:4]:
         first = (m.name or "").strip().split(" ")[0]
         if first:
-            names.append(first)
+            names.append(_proper_case(first))
     if not names:
         return "team"
     if len(names) == 1:
@@ -397,12 +409,14 @@ def _first_names(team: Team) -> str:
 def _member_list(team: Team) -> str:
     """Plain-text member list — used in `body` (the .txt fallback). Keeps the
     detailed format with name · email · country so org leads can see contact
-    info at a glance when reading the text version."""
+    info at a glance when reading the text version. Name normalized to
+    Title Case so 'DEEPTHI DINGARI' and 'srinivas chilakamarri' render as
+    'Deepthi Dingari' and 'Srinivas Chilakamarri'."""
     if not team.members:
         return "  (no members listed)"
     lines = []
     for m in team.members:
-        bits = [m.name or "—"]
+        bits = [_proper_case(m.name) or "—"]
         if m.email:
             bits.append(m.email)
         if m.location:
@@ -412,14 +426,13 @@ def _member_list(team: Team) -> str:
 
 
 def _member_list_html(team: Team) -> str:
-    """HTML member list — names only, one per line. Cleaner for the branded
-    email (emails + locations clutter the visual and add no value to the
-    recipient, who is the member themselves)."""
+    """HTML member list — names only, one per line, Title-Cased. Cleaner for
+    the branded email."""
     if not team.members:
         return "<em style='color:#6b7280;'>No members listed yet</em>"
     items = []
     for m in team.members:
-        name = (m.name or "—").strip()
+        name = _proper_case(m.name) or "—"
         items.append(
             "<div style='padding:6px 0;border-bottom:1px solid #e5e9ef;'>"
             f"<span style='color:#1a1f26;'>{name}</span>"
@@ -467,7 +480,7 @@ def render(template: EmailTemplate, team: Team) -> dict:
 
     tokens = {
         "team_name": team.name,
-        "mentor_name": team.mentor_name or "(mentor not listed)",
+        "mentor_name": _proper_case(team.mentor_name) or "(mentor not listed)",
         "member_first_names_or_team": _first_names(team) or "team",
         "member_list": _member_list(team),               # plain text: name · email · country
         "member_list_html": _member_list_html(team),     # html: names only, one per line
