@@ -185,7 +185,7 @@ TEMPLATES: list[EmailTemplate] = [
             "  </td></tr>\n"
             "  <tr><td>\n"
             "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Idea on file</div>\n"
-            "    <div style='color:#1a1f26;font-size:14px;line-height:1.55;'>{idea_full}</div>\n"
+            "    <div style='color:#1a1f26;font-size:14px;line-height:1.55;text-align:justify;'>{idea_full}</div>\n"
             "  </td></tr>\n"
             "</table>\n"
             "</td></tr>\n"
