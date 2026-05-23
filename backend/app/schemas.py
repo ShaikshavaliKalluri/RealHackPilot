@@ -338,6 +338,26 @@ class RoundSummary(BaseModel):
     scored_team_count: int    # how many of them have at least one judge score
 
 
+class TeamCreate(BaseModel):
+    """Payload for manually creating a new team via the dashboard.
+    Bypasses the MS Forms import flow — used when an organizer needs to add
+    a team that came in by email / Teams chat / late-registration."""
+    name: str
+    mentor_name: str | None = None
+    mentor_email: str | None = None
+    mentor_location: str | None = None
+    mentor_tshirt_size: str | None = None
+    mentor_address: str | None = None
+    idea: str | None = None
+    tools: str | None = None
+    approach: str | None = None
+    viability: str | None = None
+    business_value: str | None = None
+    repo_url: str | None = None
+    members: list["MemberCreate"] = []  # forward ref; resolved below
+    edit_reason: str | None = None
+
+
 class TeamPatch(BaseModel):
     """Partial-update payload for a team. Every field is optional — only
     keys present in the request body are written. Audit log records the
@@ -376,6 +396,10 @@ class MemberPatch(BaseModel):
     tshirt_size: str | None = None
     address: str | None = None
     edit_reason: str | None = None
+
+
+# Resolve forward reference TeamCreate -> MemberCreate now that both are defined.
+TeamCreate.model_rebuild()
 
 
 class EmailTemplateOut(BaseModel):

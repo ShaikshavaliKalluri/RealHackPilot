@@ -731,6 +731,41 @@ async function readErr(r: Response, fallback: string): Promise<string> {
   return `${fallback} (${r.status})`;
 }
 
+export interface NewMemberPayload {
+  name: string;
+  email?: string | null;
+  location?: string | null;
+  tshirt_size?: string | null;
+  address?: string | null;
+}
+
+export interface NewTeamPayload {
+  name: string;
+  mentor_name?: string | null;
+  mentor_email?: string | null;
+  mentor_location?: string | null;
+  mentor_tshirt_size?: string | null;
+  mentor_address?: string | null;
+  idea?: string | null;
+  tools?: string | null;
+  approach?: string | null;
+  viability?: string | null;
+  business_value?: string | null;
+  repo_url?: string | null;
+  members?: NewMemberPayload[];
+  edit_reason?: string | null;
+}
+
+export async function createTeam(payload: NewTeamPayload): Promise<Team> {
+  const r = await authFetch(`${BASE}/teams`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) throw new Error(await readErr(r, 'Team create failed'));
+  return r.json();
+}
+
 export async function updateTeam(teamId: number, patch: TeamEditPatch): Promise<Team> {
   const r = await authFetch(`${BASE}/teams/${teamId}`, {
     method: 'PATCH',

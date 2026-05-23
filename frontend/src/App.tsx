@@ -5,6 +5,7 @@ import { JudgeDashboard } from './components/JudgeDashboard';
 import { JudgesPanel } from './components/JudgesPanel';
 import { LoginQRPage } from './components/LoginQRPage';
 import { SwagPanel } from './components/SwagPanel';
+import { CreateTeamModal } from './components/CreateTeamModal';
 import type { Team, DashboardStats } from './types';
 import { StatCard } from './components/StatCard';
 import { TeamCard } from './components/TeamCard';
@@ -35,6 +36,7 @@ export default function App() {
   // Mobile hamburger menu state — on screens narrower than `lg` the nav tabs
   // collapse into a dropdown rather than overflow horizontally.
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [createTeamOpen, setCreateTeamOpen] = useState(false);
   const [authError, setAuthError] = useState<string | null>(() => {
     // Pick up any error stashed by main.tsx during MSAL bootstrap
     // (e.g. AADSTS50105 when Entra blocks a user not in the security group).
@@ -364,8 +366,21 @@ export default function App() {
       <>
       <WinnersBanner teams={teams} onJumpToTeam={jumpToTeam} />
 
-      <section className="mb-6">
-        <UploadCard onUploaded={reload} />
+      <section className="mb-6 flex gap-3 items-stretch flex-wrap">
+        <div className="flex-1 min-w-[280px]">
+          <UploadCard onUploaded={reload} />
+        </div>
+        <button
+          onClick={() => setCreateTeamOpen(true)}
+          className="bg-ink-800/60 hover:bg-ink-800 border border-slate-700/40 hover:border-lime-500/40 rounded-xl p-5 transition flex items-center gap-3 min-w-[200px]"
+          title="Manually add a team that didn't come through the MS Forms import"
+        >
+          <div className="w-10 h-10 rounded-full bg-lime-500/15 border border-lime-500/40 flex items-center justify-center text-lime-300 text-xl font-bold shrink-0">+</div>
+          <div className="text-left">
+            <div className="font-bold text-slate-100">Add team manually</div>
+            <div className="text-xs text-slate-400 mt-0.5">For late registrations</div>
+          </div>
+        </button>
       </section>
 
       <section className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -598,6 +613,13 @@ export default function App() {
         userEmail={user?.email}
         onClose={() => setComposerOpen(false)}
       />
+
+      {createTeamOpen && (
+        <CreateTeamModal
+          onClose={() => setCreateTeamOpen(false)}
+          onCreated={async () => { setCreateTeamOpen(false); await reload(); }}
+        />
+      )}
 
       <ChatPanel teams={teams} onJumpToTeam={jumpToTeam} />
     </div>

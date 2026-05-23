@@ -51,7 +51,7 @@ from .schemas import (
     CommLogCreateRequest, RepoCheckOut, ReadinessFlagsRequest,
     ChatRequest, ChatResponse,
     RoundAdvanceRequest, WinnersSetRequest, RoundSummary,
-    TeamPatch, MemberCreate, MemberPatch, MemberOut,
+    TeamCreate, TeamPatch, MemberCreate, MemberPatch, MemberOut,
 )
 
 
@@ -1600,6 +1600,80 @@ def _audit_team_edit(
         status="sent",
         sent_by_email=editor_email,
     )
+
+
+@app.post("/api/teams", response_model=TeamOut)
+def create_team_manual(
+    req: TeamCreate,
+    db: Session = Depends(get_db),
+    claims: dict = Depends(require_auth),
+) -> models.Team:
+    """Manually add a new team to the dashboard (without going through the
+    MS Forms Excel import). Used for late registrations, special cases, or
+    teams that came in by other channels. Triggers the screener at the end
+    so the new team gets a completeness score + flags like any imported team.
+    """
+    name = (req.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="team name is required")
+
+    # Soft duplicate-check: case-insensitive name match
+    existing = db.query(models.Team).filter(models.Team.name.ilike(name)).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"A team named '{name}' already exists")
+
+    team = models.Team(
+        name=name,
+        mentor_name=(req.mentor_name or "").strip() or None,
+        mentor_email=(req.mentor_email or "").strip().lower() or None,
+        mentor_location=(req.mentor_location or "").strip() or None,
+        mentor_tshirt_size=(req.mentor_tshirt_size or "").strip().upper() or None,
+        mentor_address=(req.mentor_address or "").strip() or None,
+        idea=(req.idea or "").strip() or None,
+        tools=(req.tools or "").strip() or None,
+        approach=(req.approach or "").strip() or None,
+        viability=(req.viability or "").strip() or None,
+        business_value=(req.business_value or "").strip() or None,
+        repo_url=(req.repo_url or "").strip() or None,
+        raw={},  # no MS Forms row to preserve
+    )
+    db.add(team)
+    db.flush()  # populate team.id before adding members
+
+    for idx, m in enumerate(req.members or [], start=1):
+        m_name = (m.name or "").strip()
+        if not m_name:
+            continue
+        db.add(models.Member(
+            team_id=team.id,
+            name=m_name,
+            email=(m.email or "").strip().lower() or None,
+            location=(m.location or "").strip() or None,
+            tshirt_size=(m.tshirt_size or "").strip().upper() or None,
+            address=(m.address or "").strip() or None,
+            position=idx,
+        ))
+
+    db.flush()
+
+    # Run the screener so completeness + flags get computed before the team
+    # appears on the dashboard.
+    try:
+        screener.screen_all(db)
+    except Exception:
+        # Don't block creation if the screener hiccups — flags can be recomputed later.
+        pass
+
+    db.commit()
+    db.refresh(team)
+    _audit_team_edit(
+        db, team_id=team.id,
+        summary=f"Created team '{team.name}' manually with {len(team.members)} member(s)",
+        reason=req.edit_reason,
+        editor_email=_signed_in_email(claims),
+    )
+    db.commit()
+    return team
 
 
 @app.patch("/api/teams/{team_id}", response_model=TeamOut)
