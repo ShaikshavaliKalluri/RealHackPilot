@@ -206,7 +206,7 @@ TEMPLATES: list[EmailTemplate] = [
         label="Fix-it — incomplete submission",
         description="Sent to teams whose submission is missing or vague in critical fields.",
         audience="team",
-        subject="RealHack 2026 — please complete your submission for {team_name}",
+        subject="Action needed — complete your RealHack 2026 submission for Team {team_name}",
         body=(
             "Hi {member_first_names_or_team},\n\n"
             "Thanks for registering team {team_name} for RealHack 2026.\n\n"
@@ -220,15 +220,17 @@ TEMPLATES: list[EmailTemplate] = [
             "— RealHack Organizing Team"
         ),
         body_html=_html_wrap(
-            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
-            "      <p>Thanks for registering team <strong>{team_name}</strong> for RealHack 2026.</p>\n"
-            "      <p>When we reviewed your submission, the following field(s) were either "
-            "empty, marked TBD, or too brief to evaluate:</p>\n"
-            "      <div class='fields'>{missing_fields_block}</div>\n"
-            "      <p>Could you update the registration with a more detailed answer for each "
-            "of the above? <strong>The deadline is May 19, 2026 and will not be extended.</strong></p>\n"
-            "      <p>If you're unsure what to write or want to discuss the idea, your mentor "
-            "<strong>{mentor_name}</strong> is available to help.</p>"
+            "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "<p>Thanks for registering Team <strong>{team_name}</strong> for RealHack 2026. When we reviewed your submission, the following fields were either empty, marked TBD, or too brief to evaluate:</p>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#fff8eb;border-radius:8px;border-left:4px solid #f59e00;'>\n"
+            "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
+            "  <div style='font-weight:700;color:#b8590a;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px;'>Needs your attention</div>\n"
+            "  <div style='color:#1a1f26;font-size:14px;line-height:1.7;white-space:pre-line;'>{missing_fields_block}</div>\n"
+            "</td></tr>\n"
+            "</table>\n"
+            "<p>Please update the registration with a more detailed answer for each item above. <strong>The deadline is May 19, 2026 and will not be extended.</strong></p>\n"
+            "<p>If you're unsure what to write or want to discuss the idea, your mentor <strong>{mentor_name}</strong> is available to help.</p>\n"
+            "<p style='margin-top:22px;'><span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
         ),
     ),
     EmailTemplate(
@@ -236,7 +238,7 @@ TEMPLATES: list[EmailTemplate] = [
         label="Mentor — please confirm your teams",
         description="Sent to mentors to verify their team assignment.",
         audience="mentor",
-        subject="RealHack 2026 — please confirm you'll mentor {team_name}",
+        subject="Please confirm — you're the mentor for Team {team_name} at RealHack 2026",
         body=(
             "Hi {mentor_name},\n\n"
             "Team {team_name} listed you as their mentor for RealHack 2026 (June 18–19).\n\n"
@@ -247,16 +249,29 @@ TEMPLATES: list[EmailTemplate] = [
             "— RealHack Organizing Team"
         ),
         body_html=_html_wrap(
-            "      <p>Hi <strong>{mentor_name}</strong>,</p>\n"
-            "      <p>Team <strong>{team_name}</strong> listed you as their mentor for RealHack 2026 (June 18–19).</p>\n"
-            "      <div class='info-block'>\n"
-            "        <p class='label'>Team members:</p>\n"
-            "        <p>{member_list}</p>\n"
-            "        <p class='label'>Idea on file:</p>\n"
-            "        <p>{idea_short}</p>\n"
-            "      </div>\n"
-            "      <p>Please reply to confirm you're available to mentor this team. If you can't, "
-            "let us know so we can help the team find another mentor before the deadline.</p>"
+            "<p>Hi <strong>{mentor_name}</strong>,</p>\n"
+            "<p>Team <strong>{team_name}</strong> listed you as their mentor for RealHack 2026. Here's the team you'd be mentoring:</p>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
+            "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%'>\n"
+            "  <tr><td style='padding-bottom:14px;'>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Team</div>\n"
+            "    <div style='color:#1a1f26;font-size:15px;font-weight:700;'>{team_name}</div>\n"
+            "  </td></tr>\n"
+            "  <tr><td style='padding-bottom:14px;'>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Members</div>\n"
+            "    <div style='color:#1a1f26;font-size:14px;'>{member_list_html}</div>\n"
+            "  </td></tr>\n"
+            "  <tr><td>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Idea on file</div>\n"
+            "    <div style='color:#1a1f26;font-size:14px;line-height:1.55;text-align:justify;'>{idea_full}</div>\n"
+            "  </td></tr>\n"
+            "</table>\n"
+            "</td></tr>\n"
+            "</table>\n"
+            "<p><strong>Please reply to confirm you're available to mentor this team.</strong> If you can't, let us know so we can help the team find another mentor before the deadline.</p>\n"
+            "<p style='margin-top:22px;'>Thanks for supporting RealHack 2026.<br>\n"
+            "<span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
         ),
     ),
     EmailTemplate(
@@ -264,7 +279,7 @@ TEMPLATES: list[EmailTemplate] = [
         label="Final call — May 19 deadline",
         description="Last-mile reminder before the registration deadline.",
         audience="team",
-        subject="RealHack 2026 — final reminder: registration closes May 19",
+        subject="Final reminder — RealHack 2026 registration closes May 19",
         body=(
             "Hi {member_first_names_or_team},\n\n"
             "Quick reminder: RealHack 2026 registration closes on May 19, 2026 and the "
@@ -274,14 +289,17 @@ TEMPLATES: list[EmailTemplate] = [
             "— RealHack Organizing Team"
         ),
         body_html=_html_wrap(
-            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
-            "      <p>Quick reminder: <strong>RealHack 2026 registration closes on May 19, 2026</strong> "
-            "and the deadline will not be extended.</p>\n"
-            "      <div class='info-block'>\n"
-            "        <p class='label'>Status for team {team_name}:</p>\n"
-            "        <p>{status_summary}</p>\n"
-            "      </div>\n"
-            "      <p>If any details still need updating, please update them today.</p>"
+            "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "<p>Quick reminder: <strong>RealHack 2026 registration closes on May 19, 2026</strong> and the deadline will not be extended.</p>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
+            "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
+            "  <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Status for Team {team_name}</div>\n"
+            "  <div style='color:#1a1f26;font-size:14px;line-height:1.55;'>{status_summary}</div>\n"
+            "</td></tr>\n"
+            "</table>\n"
+            "<p>If any details still need updating, please update them today.</p>\n"
+            "<p style='margin-top:22px;'>See you on <strong>June 18&ndash;19</strong>.<br>\n"
+            "<span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
         ),
     ),
     EmailTemplate(
@@ -289,26 +307,40 @@ TEMPLATES: list[EmailTemplate] = [
         label="Teams channel ready",
         description="Sent once the Teams channel for a team has been created.",
         audience="team",
-        subject="RealHack 2026 — your Teams channel is live for {team_name}",
+        subject="Your RealHack 2026 Teams channel is live — Team {team_name}",
         body=(
             "Hi {member_first_names_or_team},\n\n"
             "Your private Teams channel for RealHack 2026 is now live:\n"
-            "  Channel: RealHack 2026 / {team_name}\n\n"
+            "  Channel: 2026 Team - {team_name}\n\n"
             "Mentor and all members have been added. Please use this channel for "
             "coordination, code reviews, and any organizing-team announcements.\n\n"
             "— RealHack Organizing Team"
         ),
         body_html=_html_wrap(
-            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
-            "      <p>Your private Teams channel for RealHack 2026 is now live.</p>\n"
-            "      <div class='info-block'>\n"
-            "        <p class='label'>Channel name</p>\n"
-            "        <p>2026 Team - {team_name}</p>\n"
-            "        <p class='label'>Members added</p>\n"
-            "        <p>Your mentor and all team members have already been added.</p>\n"
-            "      </div>\n"
-            "      <p>Use this channel for coordination, code reviews, and any "
-            "organizing-team announcements.</p>"
+            "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "<p>Your private Microsoft Teams channel for <strong>RealHack 2026</strong> is now live and ready for the team.</p>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
+            "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%'>\n"
+            "  <tr><td style='padding-bottom:14px;'>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Channel name</div>\n"
+            "    <div style='color:#1a1f26;font-size:15px;font-weight:700;'>2026 Team - {team_name}</div>\n"
+            "  </td></tr>\n"
+            "  <tr><td>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Members added</div>\n"
+            "    <div style='color:#1a1f26;font-size:14px;'>Your mentor and all team members have already been added.</div>\n"
+            "  </td></tr>\n"
+            "</table>\n"
+            "</td></tr>\n"
+            "</table>\n"
+            "<h2>What to use it for</h2>\n"
+            "<ul>\n"
+            "  <li>Coordination, planning, and quick syncs with your team</li>\n"
+            "  <li>Code reviews and link-sharing for your repo</li>\n"
+            "  <li>Catching organizing-team announcements during the event</li>\n"
+            "</ul>\n"
+            "<p style='margin-top:22px;'>See you on <strong>June 18&ndash;19</strong>.<br>\n"
+            "<span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
         ),
     ),
     EmailTemplate(
@@ -348,25 +380,22 @@ TEMPLATES: list[EmailTemplate] = [
             "RealHack Team"
         ),
         body_html=_html_wrap(
-            "      <p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
-            "      <p>Thank you for your interest in participating in <strong>RealHack 2026</strong>!</p>\n"
-            "      <p>If you're interested but don't currently have a <strong>problem statement, idea, "
-            "or team</strong>, you can still register as an individual.</p>\n"
-            "      <p><strong>Here's how to proceed:</strong></p>\n"
-            "      <p>Please click on the Individual Registration link: "
-            "<a href='&lt;INSERT_INDIVIDUAL_REGISTRATION_LINK_HERE&gt;'>Individual Registration</a></p>\n"
-            "      <p><strong>Then follow whichever option applies to you:</strong></p>\n"
-            "      <ul>\n"
-            "        <li><strong>If you already have an idea:</strong> Complete the Idea section "
-            "in the registration form along with the required basic details.</li>\n"
-            "        <li><strong>If you'd like to participate but don't have an idea or a team:</strong> "
-            "Fill in only the basic registration details (the first section of the form).</li>\n"
-            "      </ul>\n"
-            "      <p>The organizing committee will make every effort to help place individual "
-            "registrants into teams based on the information provided. However, please note that "
-            "<strong>team allocation and participation cannot be guaranteed</strong>.</p>\n"
-            "      <p>If you have any questions, feel free to reach out. We look forward to your "
-            "participation in RealHack 2026!</p>"
+            "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "<p>Thank you for your interest in participating in <strong>RealHack 2026</strong>! If you don't currently have a problem statement, idea, or team, you can still register as an individual and we'll try to match you with a team.</p>\n"
+            "<h2>How to register</h2>\n"
+            "<p>Click the Individual Registration link: <a href='&lt;INSERT_INDIVIDUAL_REGISTRATION_LINK_HERE&gt;'><strong>Individual Registration</strong></a></p>\n"
+            "<p>Then follow whichever option applies to you:</p>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
+            "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
+            "  <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px;'>If you already have an idea</div>\n"
+            "  <div style='color:#1a1f26;font-size:14px;line-height:1.55;margin-bottom:14px;'>Complete the Idea section in the registration form along with the required basic details.</div>\n"
+            "  <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px;'>If you don't have an idea or a team</div>\n"
+            "  <div style='color:#1a1f26;font-size:14px;line-height:1.55;'>Fill in only the basic registration details (the first section of the form).</div>\n"
+            "</td></tr>\n"
+            "</table>\n"
+            "<p>The organizing committee will make every effort to place individual registrants into teams based on the information provided. Please note that <strong>team allocation and participation cannot be guaranteed</strong>.</p>\n"
+            "<p>Questions? Reply to this thread or write to <a href='mailto:RealHack@realpage.com'>RealHack@realpage.com</a>. We look forward to your participation in RealHack 2026.</p>\n"
+            "<p style='margin-top:22px;'><span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
         ),
     ),
 ]
