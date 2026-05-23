@@ -150,7 +150,7 @@ TEMPLATES: list[EmailTemplate] = [
         label="Welcome — registration confirmed",
         description="Sent to team members right after a clean registration.",
         audience="team",
-        subject="RealHack 2026 — your team {team_name} is registered",
+        subject="Welcome to RealHack 2026 — Team {team_name}",
         body=(
             "Hi {member_first_names_or_team},\n\n"
             "You're confirmed for RealHack 2026 (June 18–19).\n\n"
