@@ -1602,6 +1602,117 @@ def _audit_team_edit(
     )
 
 
+@app.get("/api/export-msforms.xlsx")
+def export_msforms_xlsx(db: Session = Depends(get_db)) -> StreamingResponse:
+    """Export current team + member state as an .xlsx whose column layout
+    matches what the MS Forms importer reads. Use this BEFORE re-uploading
+    a fresh Excel so manual additions / edits don't get wiped — workflow is:
+
+        1. Download this file (current state, MS-Forms-compatible).
+        2. Open in Excel, make edits (add late teams, fix typos, etc).
+        3. Re-upload via the dashboard's 'Upload registrations' card.
+
+    Format: one row per team. Member slots 1-5; mentor + member t-shirt
+    addresses use the 'opted for US or PH as location[N]' columns the
+    importer expects.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Registrations"
+
+    # Columns mirror the MS Forms export — names match what _find_col()
+    # in importer.py looks for. Keep the order stable so a diff between
+    # exports is meaningful.
+    headers = [
+        "ID", "Start time", "Completion time", "Email",
+        "Team Name",
+        "Mentor Name", "Mentor Email", "Mentor Location", "Mentor T-Shirt Size",
+        "Enter your mailing address if you opted for US or PH as location",  # mentor address
+    ]
+    # 5 member slots — Member N Name/Email/Location/T-Shirt Size + slot N+1 address
+    for n in range(1, 6):
+        headers.extend([
+            f"Member {n} Name",
+            f"Member {n} Email",
+            f"Member {n} Location",
+            f"Member {n} T-Shirt Size",
+            f"Enter your mailing address if you opted for US or PH as location{n + 1}",
+        ])
+    headers.extend([
+        "Idea / Problem Statement",
+        "Tech Stack / Tools",
+        "Approach",
+        "Viability",
+        "Business Value",
+    ])
+    ws.append(headers)
+
+    # Style header row — bold + light fill so it reads as a header in Excel.
+    bold = Font(bold=True)
+    fill = PatternFill(start_color="FFE3E8F0", end_color="FFE3E8F0", fill_type="solid")
+    for col_idx in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.font = bold
+        cell.fill = fill
+
+    teams = db.query(models.Team).order_by(models.Team.id.asc()).all()
+    for t in teams:
+        row: list = [
+            t.external_id or t.id,
+            "",  # Start time — not stored; left blank for fresh imports
+            t.submitted_at.isoformat() if t.submitted_at else "",
+            "",  # Email of submitter — not stored as a separate field
+            t.name or "",
+            t.mentor_name or "",
+            t.mentor_email or "",
+            t.mentor_location or "",
+            t.mentor_tshirt_size or "",
+            t.mentor_address or "",
+        ]
+        # Pad / fill 5 member slots
+        sorted_members = sorted(t.members, key=lambda m: m.position or 0)
+        for n in range(1, 6):
+            m = sorted_members[n - 1] if n - 1 < len(sorted_members) else None
+            row.extend([
+                (m.name if m else "") or "",
+                (m.email if m else "") or "",
+                (m.location if m else "") or "",
+                (m.tshirt_size if m else "") or "",
+                (m.address if m else "") or "",
+            ])
+        row.extend([
+            t.idea or "",
+            t.tools or "",
+            t.approach or "",
+            t.viability or "",
+            t.business_value or "",
+        ])
+        ws.append(row)
+
+    # Auto-size — set reasonable widths so the file isn't a strip of '###'.
+    width_hints = {
+        "Team Name": 24, "Mentor Name": 24, "Mentor Email": 30,
+        "Idea / Problem Statement": 60, "Tech Stack / Tools": 40,
+        "Approach": 50, "Viability": 50, "Business Value": 50,
+    }
+    for col_idx, header in enumerate(headers, start=1):
+        col_letter = ws.cell(row=1, column=col_idx).column_letter
+        ws.column_dimensions[col_letter].width = width_hints.get(header, 18)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"realhack_2026_registrations_{datetime.utcnow().strftime('%Y%m%d_%H%M')}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.post("/api/teams", response_model=TeamOut)
 def create_team_manual(
     req: TeamCreate,

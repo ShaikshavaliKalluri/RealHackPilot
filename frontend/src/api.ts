@@ -756,6 +756,27 @@ export interface NewTeamPayload {
   edit_reason?: string | null;
 }
 
+/**
+ * Download current team roster as a MS-Forms-compatible .xlsx so organizers
+ * can edit it locally and re-upload without losing manual additions.
+ */
+export async function downloadMsFormsExport(): Promise<void> {
+  const r = await authFetch(`${BASE}/export-msforms.xlsx`);
+  if (!r.ok) throw new Error(`Export failed: ${r.status}`);
+  const blob = await r.blob();
+  const cd = r.headers.get('Content-Disposition') || '';
+  const match = cd.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : 'realhack_registrations.xlsx';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export async function createTeam(payload: NewTeamPayload): Promise<Team> {
   const r = await authFetch(`${BASE}/teams`, {
     method: 'POST',
