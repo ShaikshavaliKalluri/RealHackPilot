@@ -1623,31 +1623,37 @@ def export_msforms_xlsx(db: Session = Depends(get_db)) -> StreamingResponse:
     ws = wb.active
     ws.title = "Registrations"
 
-    # Columns mirror the MS Forms export — names match what _find_col()
-    # in importer.py looks for. Keep the order stable so a diff between
-    # exports is meaningful.
+    # Column layout mirrors EXACTLY the original MS Forms registration export
+    # (RealHack 2026 form). Quirks preserved on purpose:
+    #   * 'Team Name2' (literal, with the trailing 2 — Forms duplicate-field artefact)
+    #   * 'Member1 Name' / 'Member 1 Email' inconsistent spacing
+    #   * Non-breaking-space (U+00A0, '\xa0') in t-shirt/location columns
+    #   * 'Member4\xa0Location' specifically lacks the space between
+    #     'Member' and '4' that other members have.
+    # The importer's fuzzy column matcher handles any of these spellings,
+    # but matching the source exactly makes diffs on the file readable.
+    NBSP = "\xa0"
     headers = [
-        "ID", "Start time", "Completion time", "Email",
-        "Team Name",
-        "Mentor Name", "Mentor Email", "Mentor Location", "Mentor T-Shirt Size",
+        "ID", "Start time", "Completion time", "Email", "Name", "Last modified time",
+        "Team Name2",
+        "Idea/Problem statement", "Tech stack",
+        "Approach towards the solution", "Viability of the Solution", "Business value",
+        "Mentor Name", "Mentor Email", "Mentor T-shirt Size", "Mentor Location",
         "Enter your mailing address if you opted for US or PH as location",  # mentor address
     ]
-    # 5 member slots — Member N Name/Email/Location/T-Shirt Size + slot N+1 address
-    for n in range(1, 6):
-        headers.extend([
-            f"Member {n} Name",
-            f"Member {n} Email",
-            f"Member {n} Location",
-            f"Member {n} T-Shirt Size",
-            f"Enter your mailing address if you opted for US or PH as location{n + 1}",
-        ])
-    headers.extend([
-        "Idea / Problem Statement",
-        "Tech Stack / Tools",
-        "Approach",
-        "Viability",
-        "Business Value",
-    ])
+    # Members 1-5 — 5 columns each, preserving the exact label idiosyncrasies.
+    member_headers = [
+        # (name, email, t-shirt, location)
+        ("Member1 Name",  "Member 1 Email",  f"Member 1{NBSP}T-shirt Size",  f"Member 1{NBSP}Location"),
+        ("Member 2{NBSP}Name".format(NBSP=NBSP), "Member 2 Email", f"Member 2{NBSP}T-shirt Size", f"Member 2{NBSP}Location"),
+        ("Member 3{NBSP}Name".format(NBSP=NBSP), "Member 3 Email", f"Member 3{NBSP}T-shirt Size", f"Member 3{NBSP}Location"),
+        ("Member 4{NBSP}Name".format(NBSP=NBSP), "Member 4 Email", f"Member 4{NBSP}T-shirt Size", f"Member4{NBSP}Location"),  # Forms typo: no space before 4
+        ("Member 5{NBSP}Name".format(NBSP=NBSP), "Member 5 Email", f"Member 5{NBSP}T-shirt Size", f"Member 5{NBSP}Location"),
+    ]
+    for n, (nm, em, ts, loc) in enumerate(member_headers, start=1):
+        headers.extend([nm, em, ts, loc])
+        # Address slot N+1 (MS Forms uses '...location2' for member 1, '...location3' for member 2, etc.)
+        headers.append(f"Enter your mailing address if you opted for US or PH as location{n + 1}")
     ws.append(headers)
 
     # Style header row — bold + light fill so it reads as a header in Excel.
@@ -1660,47 +1666,52 @@ def export_msforms_xlsx(db: Session = Depends(get_db)) -> StreamingResponse:
 
     teams = db.query(models.Team).order_by(models.Team.id.asc()).all()
     for t in teams:
+        # First 6 system columns (ID, Start time, Completion time, Email,
+        # Name, Last modified time) are blank/synthetic for fresh re-imports.
+        submitter_email = t.mentor_email or (t.members[0].email if t.members else "")
+        completion_iso = t.submitted_at.isoformat() if t.submitted_at else ""
         row: list = [
             t.external_id or t.id,
-            "",  # Start time — not stored; left blank for fresh imports
-            t.submitted_at.isoformat() if t.submitted_at else "",
-            "",  # Email of submitter — not stored as a separate field
-            t.name or "",
+            "",                # Start time (not preserved)
+            completion_iso,    # Completion time
+            submitter_email,   # Email — best-effort: submitter is usually the mentor
+            t.mentor_name or "",  # Name (whoever filled in the form)
+            "",                # Last modified time
+            t.name or "",      # Team Name2
+            t.idea or "",
+            t.tools or "",
+            t.approach or "",
+            t.viability or "",
+            t.business_value or "",
             t.mentor_name or "",
             t.mentor_email or "",
-            t.mentor_location or "",
             t.mentor_tshirt_size or "",
+            t.mentor_location or "",
             t.mentor_address or "",
         ]
-        # Pad / fill 5 member slots
+        # 5 member slots: name, email, t-shirt, location, address
         sorted_members = sorted(t.members, key=lambda m: m.position or 0)
         for n in range(1, 6):
             m = sorted_members[n - 1] if n - 1 < len(sorted_members) else None
             row.extend([
                 (m.name if m else "") or "",
                 (m.email if m else "") or "",
-                (m.location if m else "") or "",
                 (m.tshirt_size if m else "") or "",
+                (m.location if m else "") or "",
                 (m.address if m else "") or "",
             ])
-        row.extend([
-            t.idea or "",
-            t.tools or "",
-            t.approach or "",
-            t.viability or "",
-            t.business_value or "",
-        ])
         ws.append(row)
 
-    # Auto-size — set reasonable widths so the file isn't a strip of '###'.
+    # Reasonable column widths so the file is readable in Excel.
     width_hints = {
-        "Team Name": 24, "Mentor Name": 24, "Mentor Email": 30,
-        "Idea / Problem Statement": 60, "Tech Stack / Tools": 40,
-        "Approach": 50, "Viability": 50, "Business Value": 50,
+        "Team Name2": 24, "Mentor Name": 24, "Mentor Email": 30, "Email": 28,
+        "Idea/Problem statement": 60, "Tech stack": 40,
+        "Approach towards the solution": 50,
+        "Viability of the Solution": 50, "Business value": 50,
     }
     for col_idx, header in enumerate(headers, start=1):
         col_letter = ws.cell(row=1, column=col_idx).column_letter
-        ws.column_dimensions[col_letter].width = width_hints.get(header, 18)
+        ws.column_dimensions[col_letter].width = width_hints.get(header, 22)
 
     buf = io.BytesIO()
     wb.save(buf)
