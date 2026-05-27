@@ -61,9 +61,9 @@ SCOPES = [
 GRAPH = "https://graph.microsoft.com/v1.0"
 
 # Naming convention agreed with organizing team:
-#   "2026 Team - <Team name>"
+#   "2026 <Team name>"
 # Max channel-display-name is 50 chars in Graph — long team names will be truncated.
-CHANNEL_NAME_PREFIX = "2026 Team - "
+CHANNEL_NAME_PREFIX = "2026 "
 
 
 # ===== Output helpers =====

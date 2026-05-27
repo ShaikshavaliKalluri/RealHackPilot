@@ -187,7 +187,7 @@ def create_team_channel_with_graph_token(
     if team.has_teams_channel:
         return {"channel_id": team.teams_channel_id, "status": "already_exists"}
 
-    display_name = f"2026 Team - {team.name}"[:50]
+    display_name = f"2026 {team.name}"[:50]
     description = (team.idea or f"RealHack 2026 — {team.name}")[:1024]
 
     # ----- Sandbox short-circuit: skip Graph, just write mock entries -----

@@ -308,23 +308,23 @@ TEMPLATES: list[EmailTemplate] = [
         audience="team",
         subject="Your RealHack 2026 Teams channel is live — Team {team_name}",
         body=(
-            "Hi {member_first_names_or_team},\n\n"
-            "Your Teams channel for RealHack 2026 is now live:\n"
-            "  Channel: 2026 Team - {team_name}\n"
+            "Hi {team_name} team,\n\n"
+            "Your Microsoft Teams channel for RealHack 2026 is now live and ready for the team.\n\n"
+            "  Channel: 2026 {team_name}\n"
             "  Open: {teams_channel_url}\n\n"
             "Mentor and all members have been added. Please use this channel for "
             "coordination, code reviews, and any organizing-team announcements.\n\n"
             "Team RealHack"
         ),
         body_html=_html_wrap(
-            "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
+            "<p>Hi <strong>{team_name}</strong> team,</p>\n"
             "<p>Your Microsoft Teams channel for <strong>RealHack 2026</strong> is now live and ready for the team.</p>\n"
             "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
             "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
             "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%'>\n"
             "  <tr><td style='padding-bottom:14px;'>\n"
             "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Channel name</div>\n"
-            "    <div style='color:#1a1f26;font-size:15px;font-weight:700;'>2026 Team - {team_name}</div>\n"
+            "    <div style='color:#1a1f26;font-size:15px;font-weight:700;'>2026 {team_name}</div>\n"
             "  </td></tr>\n"
             "  <tr><td>\n"
             "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>Members added</div>\n"
@@ -448,7 +448,7 @@ def _teams_channel_url(team: Team) -> str:
     if team.teams_channel_id.startswith(("sandbox-", "mock-", "dryrun-")):
         return ""
     channel_id_enc = _urlparse.quote(team.teams_channel_id, safe="")
-    channel_name_enc = _urlparse.quote(f"2026 Team - {team.name}", safe="")
+    channel_name_enc = _urlparse.quote(f"2026 {team.name}", safe="")
     return (
         f"https://teams.microsoft.com/l/channel/{channel_id_enc}/{channel_name_enc}"
         f"?groupId={parent}&tenantId={tenant}"
