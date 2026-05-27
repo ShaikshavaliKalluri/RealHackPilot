@@ -122,10 +122,13 @@ def _html_wrap(content: str) -> str:
             Innovate &nbsp;&middot;&nbsp; Build &nbsp;&middot;&nbsp; Win
           </p>
         </td></tr>
-        <!-- ===== Slim event-info strip (thin, just a brand bar) ===== -->
-        <tr><td bgcolor="#0a4f99" align="center" style="background-color:#0a4f99;padding:9px 32px;text-align:center;border-top:2px solid #29b6f6;">
-          <p style="color:#ffffff;margin:0;font-size:12px;letter-spacing:.5px;text-transform:uppercase;font-weight:600;">
-            RealPage Hackathon &middot; June 18&ndash;19, 2026
+        <!-- ===== Slim event-info strip (two-line: tagline + dates) ===== -->
+        <tr><td bgcolor="#0a4f99" align="center" style="background-color:#0a4f99;padding:11px 32px 12px;text-align:center;border-top:2px solid #29b6f6;">
+          <p style="color:#ffffff;margin:0 0 2px;font-size:12px;letter-spacing:.5px;text-transform:uppercase;font-weight:700;">
+            A RealPage Hackathon
+          </p>
+          <p style="color:#dbe9f7;margin:0;font-size:11px;letter-spacing:.5px;font-weight:600;">
+            June 18&ndash;19, 2026
           </p>
         </td></tr>
         <!-- ===== Body ===== -->
@@ -153,8 +156,8 @@ TEMPLATES: list[EmailTemplate] = [
         audience="team",
         subject="Welcome to RealHack 2026 — Team {team_name}",
         body=(
-            "Hi {member_first_names_or_team},\n\n"
-            "You're confirmed for RealHack 2026 (June 18–19).\n\n"
+            "Hi {team_name} team,\n\n"
+            "Your team registration is confirmed for RealHack 2026 (June 18–19). Below is the team summary.\n\n"
             "Team: {team_name}\n"
             "Mentor: {mentor_name}\n"
             "Members:\n{member_list}\n\n"
@@ -167,8 +170,8 @@ TEMPLATES: list[EmailTemplate] = [
             "— RealHack Organizing Team"
         ),
         body_html=_html_wrap(
-            "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
-            "<p>You're confirmed for <strong>RealHack 2026</strong>. Below is your registration summary.</p>\n"
+            "<p>Hi <strong>{team_name}</strong> team,</p>\n"
+            "<p>Your team registration is confirmed for <strong>RealHack 2026</strong>. Below is the team summary.</p>\n"
             "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
             "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
             "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%'>\n"
