@@ -135,12 +135,6 @@ def _html_wrap(content: str) -> str:
         <tr><td class="body-pad">
 """ + content + """
         </td></tr>
-        <!-- ===== Footer ===== -->
-        <tr><td class="footer-pad" bgcolor="#f4f6f9" style="background-color:#f4f6f9;padding:22px 36px;border-top:1px solid #e5e9ef;color:#6b7280;font-size:12px;line-height:1.6;text-align:center;">
-          <p style="margin:0 0 6px;color:#0a4f99;font-weight:700;">RealHack Organizing Team</p>
-          <p style="margin:0;"><a href="mailto:RealHack@realpage.com" style="color:#0078d4;">RealHack@realpage.com</a></p>
-          <p style="margin:10px 0 0;color:#9ca3af;font-size:11px;">&copy; 2026 RealPage, Inc.</p>
-        </td></tr>
       </table>
     </td></tr>
   </table>
@@ -163,11 +157,11 @@ TEMPLATES: list[EmailTemplate] = [
             "Members:\n{member_list}\n\n"
             "Idea on file:\n  {idea_short}\n\n"
             "Next steps:\n"
-            "  1. Your Teams channel will be created in the next few days.\n"
+            "  1. A Microsoft Teams channel will be set up for your team in the next few days.\n"
             "  2. Watch your inbox for the kickoff message.\n"
             "  3. Mentor will reach out to align before the event.\n\n"
             "If anything above looks wrong, reply to RealHack@realpage.com.\n\n"
-            "— RealHack Organizing Team"
+            "Team RealHack"
         ),
         body_html=_html_wrap(
             "<p>Hi <strong>{team_name}</strong> team,</p>\n"
@@ -196,13 +190,12 @@ TEMPLATES: list[EmailTemplate] = [
             "</table>\n"
             "<h2>What happens next</h2>\n"
             "<ul>\n"
-            "  <li>A private <strong>Microsoft Teams channel</strong> will be set up for your team in the next few days.</li>\n"
+            "  <li>A <strong>Microsoft Teams channel</strong> will be set up for your team in the next few days.</li>\n"
             "  <li>Watch your inbox for the <strong>kickoff message</strong> and event-day schedule.</li>\n"
             "  <li>Your <strong>mentor will reach out</strong> to align on the problem statement before the event.</li>\n"
             "</ul>\n"
             "<p>Questions or corrections? Reply to this thread or write to <a href='mailto:RealHack@realpage.com'>RealHack@realpage.com</a>.</p>\n"
-            "<p style='margin-top:22px;'>See you on <strong>June 18&ndash;19</strong>!<br>\n"
-            "<span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
+            "<p style='margin-top:22px;'><span style='color:#0a4f99;font-weight:700;'>Team RealHack</span></p>"
         ),
     ),
     EmailTemplate(
@@ -221,7 +214,7 @@ TEMPLATES: list[EmailTemplate] = [
             "the above? The deadline is May 19, 2026 and will not be extended.\n\n"
             "If you're unsure what to write or want to discuss the idea, your mentor "
             "({mentor_name}) is available to help.\n\n"
-            "— RealHack Organizing Team"
+            "Team RealHack"
         ),
         body_html=_html_wrap(
             "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
@@ -234,7 +227,7 @@ TEMPLATES: list[EmailTemplate] = [
             "</table>\n"
             "<p>Please update the registration with a more detailed answer for each item above. <strong>The deadline is May 19, 2026 and will not be extended.</strong></p>\n"
             "<p>If you're unsure what to write or want to discuss the idea, your mentor <strong>{mentor_name}</strong> is available to help.</p>\n"
-            "<p style='margin-top:22px;'><span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
+            "<p style='margin-top:22px;'><span style='color:#0a4f99;font-weight:700;'>Team RealHack</span></p>"
         ),
     ),
     EmailTemplate(
@@ -251,7 +244,7 @@ TEMPLATES: list[EmailTemplate] = [
             "Idea on file:\n  {idea_short}\n\n"
             "Please reply to confirm you're available to mentor this team. If you can't, "
             "let us know so we can help the team find another mentor before the deadline.\n\n"
-            "— RealHack Organizing Team"
+            "Team RealHack"
         ),
         body_html=_html_wrap(
             "<p>Hi <strong>{mentor_name}</strong>,</p>\n"
@@ -276,7 +269,7 @@ TEMPLATES: list[EmailTemplate] = [
             "</table>\n"
             "<p><strong>Please reply to confirm you're available to mentor this team.</strong> If you can't, let us know so we can help the team find another mentor before the deadline.</p>\n"
             "<p style='margin-top:22px;'>Thanks for supporting RealHack 2026.<br>\n"
-            "<span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
+            "<span style='color:#0a4f99;font-weight:700;'>Team RealHack</span></p>"
         ),
     ),
     EmailTemplate(
@@ -292,7 +285,7 @@ TEMPLATES: list[EmailTemplate] = [
             "deadline will not be extended.\n\n"
             "Your team {team_name} is currently {status_summary}.\n\n"
             "If any details still need updating, please update them today.\n\n"
-            "— RealHack Organizing Team"
+            "Team RealHack"
         ),
         body_html=_html_wrap(
             "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
@@ -305,7 +298,7 @@ TEMPLATES: list[EmailTemplate] = [
             "</table>\n"
             "<p>If any details still need updating, please update them today.</p>\n"
             "<p style='margin-top:22px;'>See you on <strong>June 18&ndash;19</strong>.<br>\n"
-            "<span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
+            "<span style='color:#0a4f99;font-weight:700;'>Team RealHack</span></p>"
         ),
     ),
     EmailTemplate(
@@ -321,7 +314,7 @@ TEMPLATES: list[EmailTemplate] = [
             "  Open: {teams_channel_url}\n\n"
             "Mentor and all members have been added. Please use this channel for "
             "coordination, code reviews, and any organizing-team announcements.\n\n"
-            "— RealHack Organizing Team"
+            "Team RealHack"
         ),
         body_html=_html_wrap(
             "<p>Hi <strong>{member_first_names_or_team}</strong>,</p>\n"
@@ -352,7 +345,7 @@ TEMPLATES: list[EmailTemplate] = [
             "  <li>Catching organizing-team announcements during the event</li>\n"
             "</ul>\n"
             "<p style='margin-top:22px;'>See you on <strong>June 18&ndash;19</strong>.<br>\n"
-            "<span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
+            "<span style='color:#0a4f99;font-weight:700;'>Team RealHack</span></p>"
         ),
     ),
     EmailTemplate(
@@ -408,7 +401,7 @@ TEMPLATES: list[EmailTemplate] = [
             "</table>\n"
             "<p>The organizing committee will make every effort to place individual registrants into teams based on the information provided. Please note that <strong>team allocation and participation cannot be guaranteed</strong>.</p>\n"
             "<p>Questions? Reply to this thread or write to <a href='mailto:RealHack@realpage.com'>RealHack@realpage.com</a>. We look forward to your participation in RealHack 2026.</p>\n"
-            "<p style='margin-top:22px;'><span style='color:#0a4f99;font-weight:700;'>— The RealHack Organizing Team</span></p>"
+            "<p style='margin-top:22px;'><span style='color:#0a4f99;font-weight:700;'>Team RealHack</span></p>"
         ),
     ),
 ]
