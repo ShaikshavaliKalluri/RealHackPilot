@@ -344,8 +344,7 @@ TEMPLATES: list[EmailTemplate] = [
             "  <li>Code reviews and link-sharing for your repo</li>\n"
             "  <li>Catching organizing-team announcements during the event</li>\n"
             "</ul>\n"
-            "<p style='margin-top:22px;'>See you on <strong>June 18&ndash;19</strong>.<br>\n"
-            "<span style='color:#0a4f99;font-weight:700;'>Team RealHack</span></p>"
+            "<p style='margin-top:22px;'><span style='color:#0a4f99;font-weight:700;'>Team RealHack</span></p>"
         ),
     ),
     EmailTemplate(
