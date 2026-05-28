@@ -1,78 +1,182 @@
 # RealHack Pilot
 
-## What This Repo Is
+> Loaded automatically by Claude Code when you open a session in this repo.
+> Read it as "things to know before changing anything."
 
-Internal ops platform for **RealHack 2026** (RealPage's internal hackathon, June 18–19, 2026). FastAPI + SQLAlchemy backend with a React 18 + TypeScript + Vite frontend, backed by PostgreSQL. Handles team registration ingest from MS Forms, AI screening, judge scoring, tournament progression, Teams channel provisioning, and bulk email via Microsoft Graph.
+## What this is
 
-Repo: github.com/ShaikshavaliKalluri/RealHackPilot (public).
+Internal ops platform for **RealHack 2026** (RealPage's internal hackathon, June 18-19, 2026).
+**In production** at <https://realhack.realpage.com>. Used daily by 5 organizers + 23 judges.
 
-## Commands
+Handles the full lifecycle: registration import (MS Forms Excel) → AI screening → panel
+judging → branded email comms → real Microsoft Teams channel creation → swag distribution
+→ analytics & exports.
+
+Repo: <https://github.com/ShaikshavaliKalluri/RealHackPilot>
+
+## Stack
+
+| Layer | Tech | Notes |
+|-------|------|-------|
+| Frontend | React 18 + Vite + TypeScript + Tailwind | Built to `frontend/dist`, served by nginx |
+| Backend | FastAPI + SQLAlchemy + Postgres | `backend/app/`, run as systemd unit `realhack-pilot` |
+| Auth | MSAL.js + Azure AD | Entra app `4c55dc04-7f4b-4765-8ae5-bc69f52ab98e` |
+| Email | Graph `/sendMail` as `RealHack@realpage.com` | Shaik has Send-As granted; real send is wired |
+| Teams channels | Graph `/teams/{id}/channels` POST | Per-team button on Dashboard. Naming: `"2026 {team_name}"` |
+| AI | OpenAI gpt-4o / gpt-4o-mini | Screening + chatbot. Anthropic fallback in `llm.py` |
+| DB | Postgres on `rcapaydbpgr001:5432` | `realhack_pilot` (prod) + `realhack_pilot_sandbox` (Test Mode) |
+| Deploy target | Rocky Linux VM `rcapaywwaiw002` | Public access via Akamai → `realhack.realpage.com` |
+
+## Status: LIVE PRODUCTION
+
+This serves real organizers TODAY. Every change should:
+1. Be tested in **Test Mode** (the sandbox DB) first — see `.claude/skills/test-mode.md`
+2. Be type-checked: `cd frontend && npx tsc -b`
+3. Ship via the standard deploy script — see `.claude/skills/deploy.md`
+
+## Local development
 
 ```powershell
-# --- Backend (FastAPI) ---
+# Backend
 cd backend
 .\.venv\Scripts\Activate.ps1
 uvicorn app.main:app --reload --port 8000
-# API docs: http://localhost:8000/docs
+# Docs: http://localhost:8000/docs
 
-# --- Frontend (Vite) ---
+# Frontend
 cd frontend
-npm run dev   # http://localhost:5173
+npm run dev      # http://localhost:5173
 
-# --- Deploy to prod (rcapaywwaiw002) ---
-ssh rcapaywwaiw002
-sudo bash /opt/realhack-pilot/app/deploy/update.sh
-
-# --- Bulk email (Graph /sendMail, OAuth code flow) ---
-cd backend
-python send_emails.py --template confirm_registration --dry-run
-python send_emails.py --template confirm_registration --cc-organizer
-
-# --- Channel provisioning (per-team Teams channels) ---
-python provision_team_channels.py --dry-run
-
-# --- One-off: verify Graph auth works for current user ---
-python verify_graph_auth.py
+# Type-check before commit
+cd frontend; npx tsc -b
 ```
 
-## Structure
+## Deploy
 
-- `backend/app/main.py` — FastAPI app, all `/api/*` routes, JWT middleware
-- `backend/app/auth.py` — PyJWT validator (Entra JWKS, validates `aud=client_id`)
-- `backend/app/models.py` — SQLAlchemy models. `Team.advanced_to_round` (1→4) drives tournament progression; `Team.final_position` (1/2/3) drives podium
-- `backend/app/db.py` — Session + `lightweight_migrate()` (idempotent column/FK adds on startup)
-- `backend/app/screener.py` — Rules-based screening flags (duplicates, bad emails, team-name-is-member, etc.)
-- `backend/app/ai_screener.py` — LLM scoring (OpenAI primary, Anthropic fallback); runs in background thread
-- `backend/app/emails.py` — Template renderer; every template has both plaintext + `body_html`
-- `backend/app/chat.py` — Organizer Q&A bot (passes JSON team context to LLM)
-- `backend/app/comms.py` — Graph wrapper for `/users/<shared>/sendMail` (Send-As) → `/me/sendMail` fallback
-- `backend/send_emails.py`, `provision_team_channels.py` — CLI tools using OAuth code flow with localhost loopback (RFC 8252)
-- `frontend/src/App.tsx` — Auth gate (`useIsAuthenticated`), mode router (`dashboard | judge | scoring | comms | analytics`)
-- `frontend/src/auth.ts` — MSAL config; `getAccessToken()` returns the **ID token**, not the access token
-- `frontend/src/api.ts` — `authFetch()` wrapper that auto-retries on 401 with `forceRefresh`
-- `deploy/update.sh` — Pull, install deps, build frontend, restart systemd unit
-- `docs/DEMO_GUIDE.md` — Organizer walkthrough (share with Aarthi/Sandeep)
+```bash
+ssh skalluri@rcapaywwaiw002
+sudo rm -rf /opt/realhack-pilot/app/frontend/dist
+sudo bash /opt/realhack-pilot/app/deploy/update.sh
+```
 
-## Code Conventions
+Pulls latest from GitHub → installs deps → rebuilds frontend → restarts systemd unit + nginx.
 
-- **Frontend auth**: always send the ID token in `Authorization: Bearer ...`. The backend validates `aud == AZURE_CLIENT_ID`, so access tokens (which have Graph as audience) will 401.
-- **Token refresh**: `acquireTokenSilent` does NOT always refresh ID tokens. Use `ssoSilent` (hidden iframe) when forcing refresh. `authFetch` already does this on 401.
-- **All `/api/*` routes require auth**. Exempt list lives in `main.py` middleware (`/api/health`, `/docs`, `/openapi.json`).
-- **Hook order**: ALL React hooks must run before the auth-gate early-returns in `App.tsx` — moving them after causes React #310 ("rendered more hooks than during previous render").
-- **DB migrations**: prefer adding to `lightweight_migrate()` in `db.py` over standalone migration scripts. It runs on every app start, uses `IF NOT EXISTS` / `DROP CONSTRAINT IF EXISTS`, and is idempotent. Postgres-specific DDL is fenced behind a dialect check.
-- **FK strategy**: `members.team_id` and `judge_score_records.{team_id,judge_id}` use `ON DELETE CASCADE` so re-uploading the MS Forms export is safe. `comm_log.team_id` uses `ON DELETE SET NULL` to preserve the audit trail.
-- **LLM calls**: always go through `llm.py` (handles OpenAI → Anthropic fallback). `gpt-4o` for screening, `gpt-4o-mini` for the chatbot.
-- **Long-running endpoints** (AI screening, channel provisioning) must run in a background thread + expose a `/status` polling endpoint. Sync endpoints time out at the nginx layer (~60s).
-- **Email body**: always set both `body` (plaintext) and `body_html` in templates. `send_emails.py` prefers HTML when available. `_html_wrap()` in `emails.py` wraps content with the branded header (wordmark PNG inlined via CID, blue accent strip below).
-- **Inline brand logo in emails**: HTML templates reference the wordmark via `<img src="cid:realhack-logo">`. `get_logo_attachment()` in `emails.py` returns the Graph `fileAttachment` dict (base64 PNG, `isInline=True`, `contentId=LOGO_CID`). `send_emails.py` loads it once at startup and passes via `send_one(..., inline_attachments=[...])`. Source-of-truth PNG lives at `frontend/public/realhack-logo.png` — backend reads it via relative path, no duplicate copy.
-- **Never commit `.env`**. `AZURE_CLIENT_SECRET`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` live there.
+## Key conventions
 
-## Domain Context
+### Tournament — two rounds, not three
+The hackathon runs **2 rounds**. Round 2 IS the finals — `OrganizerScoring` crowns
+finalists directly from the R2 leaderboard. `[1, 2]` everywhere, not `[1, 2, 3]`.
 
-- **Rounds**: R1 (quick test) → R2 (presentation) → R3 (finals) → Winners. Teams advance via `Team.advanced_to_round` (default 1; bumps to 2/3/4). JudgeMode filters teams with `advanced_to_round >= currentRound`. Only the top 20 of R1 advance to R2 (default), top 10 of R2 to R3, top 3 of R3 to Winners.
-- **Winners**: `Team.final_position` 1/2/3 (gold/silver/bronze) drives the `WinnersBanner` on the Dashboard.
-- **Send-As mailbox**: `RealHack@realpage.com` is a shared mailbox. When `GRAPH_MAIL_FROM` is set in `.env` (current state), sends use `/users/<shared>/sendMail` and emails go out from the shared mailbox identity. Send-As permission is granted to Shaikshavali as of 2026-05-21. If blanked, the code falls back to `/me/sendMail` (sends from the signed-in user personally).
-- **Auth gate**: Entra app reg `4c55dc04-7f4b-4765-8ae5-bc69f52ab98e` has Assignment Required = Yes, and only the `AGAa-RealHack-Pilot-Users` security group is assigned. The group membership check is enforced at sign-in by Entra, not by our backend.
-- **Postgres**: lives on `rcapaydbpgr001:5432`, separate VM from the app server `rcapaywwaiw002`. App connects as the `postgres` user (trust auth from the app server). No password in `.env` for that reason.
-- **MS Forms ingest**: every re-upload of the Excel export does an upsert keyed by `(team_name, lead_email)`. Cascade FKs let us safely re-import without orphaned member/score rows.
-- **AI screening flags**: `team_name_is_member` (compact-whitespace comparison), `bad_email` / `bad_mentor_email` (only malformed or non-realpage-domain — `no_first_last_separator` was dropped after PPendekanti@RealPage.com false-positive).
+### Finalists are flexible
+The Crown Finalists modal lets organizers pick top 3 / 5 / 7 / 10 — not locked to a podium.
+`Team.final_position` holds any rank (1..N).
+
+### Panel-based judging
+Round assignments use **Panels** (`panels`, `panel_teams`, `panel_judges` tables) — a panel
+groups N teams with M judges. Each judge in a panel scores every team in the panel.
+The legacy `judge_assignments` table is kept for backwards compat but unused.
+
+### Test Mode (sandbox DB)
+Super-admin only (gated to `shaikshavali.kalluri@realpage.com`). Toggling sends
+`x-sandbox: true` on every request; `get_db` routes the session to
+`realhack_pilot_sandbox`. Use this for ANY destructive flow (advancing teams, crowning,
+bulk emails, channel creation, manual data edits). Refresh from prod on demand via the
+in-app button.
+
+### Protected accounts
+Three emails can never be deleted or downgraded from organizer (enforced client + server):
+- `shaikshavali.kalluri@realpage.com` (super-admin only — also the only one with Test Mode + Preview-as-judge)
+- `bhaskar.jaddu@realpage.com`
+- `suneel.nallu@realpage.com`
+
+### Editions
+`HACK_YEAR='2026'` lives in `frontend/src/components/Analytics.tsx`. Bump for 2027 — all
+exports + section titles update automatically.
+
+### Re-uploads TRUNCATE — preserve manual additions
+Uploading a fresh MS Forms Excel wipes `teams + members`. Before re-uploading, hit
+**Download current Excel** in the Dashboard to grab a MS-Forms-compatible snapshot that
+includes manually-added teams. Edit then re-upload — no data loss.
+
+### Migrations live in `lightweight_migrate`
+Adding a column? Update `models.py` AND add an `ALTER TABLE` to
+`backend/app/db.py::lightweight_migrate`. Startup runs it against **both** prod and
+sandbox engines, so a missed migration = 500 in Test Mode only.
+
+### Email templates use `str.replace`, not `str.format`
+The HTML email shell has inline CSS with `{margin:0;...}` which trips `str.format`.
+`emails.py::render::fill` does per-token `str.replace` for that reason. Don't change it back.
+
+## Repo layout
+
+```
+backend/
+├── app/
+│   ├── main.py            # FastAPI routes + startup
+│   ├── config.py          # pydantic-settings, env-driven (.env file)
+│   ├── db.py              # engines, sessions, lightweight_migrate (BOTH prod + sandbox)
+│   ├── auth.py            # MSAL ID-token validation
+│   ├── models.py          # ORM — Team, Member, Judge, Panel, JudgeScore, SwagPickup, ...
+│   ├── schemas.py         # Pydantic request/response shapes
+│   ├── importer.py        # MS Forms .xlsx → Team/Member rows
+│   ├── screener.py        # completeness % + flags
+│   ├── ai_screen.py       # OpenAI scoring (bg thread)
+│   ├── emails.py          # branded HTML email templates
+│   ├── comms.py           # real Teams channel creation via Graph
+│   └── judging.py         # panels + scoring
+├── provision_team_channels.py   # CLI fallback for bulk channel creation
+├── send_emails.py               # CLI fallback for bulk email
+├── verify_graph_auth.py         # quick Graph auth sanity-check
+└── requirements.txt
+
+frontend/
+├── src/
+│   ├── App.tsx            # role router (organizer / judge / super-admin / unregistered)
+│   ├── auth.ts            # MSAL config + token helpers
+│   ├── api.ts             # authFetch + 60+ typed API helpers
+│   ├── graphSend.ts       # direct Graph email send from browser
+│   └── components/
+│       ├── TeamCard.tsx         # team card with Create Channel + Send mail + Edit
+│       ├── JudgeDashboard.tsx   # mobile-first judge view (replaces old JudgeMode)
+│       ├── JudgesPanel.tsx      # panels CRUD, distribute, move teams/judges, print sheet
+│       ├── SwagPanel.tsx        # event-day swag pickup tracker
+│       ├── EmailComposer.tsx    # bulk welcome/channel-ready via Graph /sendMail
+│       ├── Analytics.tsx        # all charts + CSV exports (includes round-results)
+│       ├── CreateTeamModal.tsx  # manually add a team
+│       ├── LoginQRPage.tsx      # printable login QR for judging room
+│       └── ...
+
+deploy/
+├── realhack-pilot.nginx.conf
+├── realhack-pilot.service
+└── update.sh
+```
+
+## Skills available in this repo
+
+Under `.claude/skills/` — invoke from Claude Code with `/skill <name>`:
+
+- **deploy** — push, deploy, verify
+- **test-mode** — work safely in the sandbox DB
+- **run-screener** — re-run completeness + flags after data changes
+- **add-endpoint** — add a new FastAPI endpoint following project conventions
+
+## Common pitfalls
+
+- **Forgetting to clear `dist/` before rebuilding** → frontend changes don't ship.
+  `sudo rm -rf /opt/realhack-pilot/app/frontend/dist && sudo bash .../update.sh`.
+- **Browser cache holding the old JS bundle** → use incognito or Ctrl+Shift+R.
+- **Adding a column without `lightweight_migrate`** → sandbox 500s. Always add the ALTER.
+- **Hook order in `App.tsx`** → all React hooks MUST run before the auth-gate early returns,
+  otherwise React #310 ("rendered more hooks than during previous render").
+- **Sending the access token to the backend** → backend validates `aud=client_id` so only
+  the ID token works. `authFetch` already uses the right one.
+- **`f"...{var}..."` inside HTML email content** → safe because we use `str.replace`,
+  not `str.format`. If you ever switch back to `.format()`, you'll need to `{{` escape
+  every CSS brace.
+
+## Domain context
+
+- **Currently in the system:** 95 teams, ~510 unique people, 28 judges/organizers, 0 panels yet (to be created).
+- **Mentor for Team "Deep Thinkers" (now "RealVibes"):** Shaikshavali Kalluri.
+- **Sister project:** [RealVibes](https://github.com/ShaikshavaliKalluri/RealVibes) — the 2026 RealHack submission by Team RealVibes. Multi-event umbrella platform that RealHack Pilot will eventually be absorbed into.
