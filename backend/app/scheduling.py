@@ -199,6 +199,144 @@ def _format_schedule_block(schedule: list[tuple[models.Team, datetime, datetime]
     return "\n".join(lines)
 
 
+def _html_escape(text: str) -> str:
+    """HTML-escape so team names with special chars render safely in the email body."""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+
+
+_DATE_SUFFIX = {1: "st", 2: "nd", 3: "rd"}
+
+
+def _ordinal_date(d: datetime) -> str:
+    """Render a date as '18th June' / '19th June' style (matching the
+    ShortHack 2025 schedule template the organizing team is reusing)."""
+    n = d.day
+    suffix = "th" if 11 <= n <= 13 else _DATE_SUFFIX.get(n % 10, "th")
+    return f"{n}{suffix} {d.strftime('%B')}"
+
+
+def _format_schedule_html(
+    schedule: list[tuple[models.Team, datetime, datetime]],
+    panel_name: str,
+    day_date: datetime,
+) -> str:
+    """HTML schedule table — 4 columns matching the ShortHack 2025 template:
+    Team Name | Panel | Slot (date) | Time.
+
+    Inline styles only — Outlook desktop ignores <style> blocks. A BREAK
+    row spans all 4 columns where lunch falls (13:00 – 14:00 IST).
+    """
+    if not schedule:
+        return "<p><em>(no teams scheduled for this day)</em></p>"
+
+    date_label = _ordinal_date(day_date)
+    rows_html: list[str] = []
+    last_was_morning = True
+    for team, start, _end in schedule:
+        if last_was_morning and start.hour >= LUNCH_END[0]:
+            rows_html.append(
+                "<tr style='background:#dbe9f7;'>"
+                "<td colspan='4' style='padding:10px 12px;border:1px solid #c9d6e8;text-align:center;"
+                "font-weight:700;color:#0a4f99;letter-spacing:.5px;'>BREAK</td>"
+                "</tr>"
+            )
+            last_was_morning = False
+
+        rows_html.append(
+            "<tr>"
+            "<td style='padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;'>"
+            f"<strong style='color:#1a1f26;'>{_html_escape(team.name)}</strong></td>"
+            "<td style='padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;'>"
+            f"{_html_escape(panel_name)}</td>"
+            "<td style='padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;'>"
+            f"{date_label}</td>"
+            "<td style='padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;"
+            "font-family:Consolas,monospace;text-align:right;'>"
+            f"{start.strftime('%H:%M')}</td>"
+            "</tr>"
+        )
+
+    return (
+        "<table cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;"
+        "max-width:680px;font-family:Segoe UI,-apple-system,BlinkMacSystemFont,Arial,sans-serif;"
+        "font-size:14px;margin:14px 0;'>"
+        "<thead>"
+        "<tr style='background:#0a4f99;color:#ffffff;'>"
+        "<th style='padding:10px 12px;text-align:left;border:1px solid #0a4f99;font-weight:700;'>Team Name</th>"
+        "<th style='padding:10px 12px;text-align:left;border:1px solid #0a4f99;font-weight:700;'>Panel</th>"
+        "<th style='padding:10px 12px;text-align:left;border:1px solid #0a4f99;font-weight:700;'>Slot</th>"
+        "<th style='padding:10px 12px;text-align:right;border:1px solid #0a4f99;font-weight:700;'>Time</th>"
+        "</tr>"
+        "</thead>"
+        f"<tbody>{''.join(rows_html)}</tbody>"
+        "</table>"
+    )
+
+
+def _build_invite_body_html(
+    panel: models.Panel,
+    day: int,
+    schedule: list[tuple[models.Team, datetime, datetime]],
+    day_date: datetime,
+) -> str:
+    """Branded HTML body for the calendar invite — matches the ShortHack 2025
+    schedule template: 'Hi All' greeting, 'Guidelines for the Demo' numbered
+    list, then the schedule table.
+
+    Inline styles only since this is pasted into Outlook compose; Outlook
+    desktop ignores <style> blocks and class selectors.
+    """
+    return (
+        "<div style='font-family:Segoe UI,-apple-system,BlinkMacSystemFont,Arial,sans-serif;"
+        "color:#2a2f36;font-size:14.5px;line-height:1.6;max-width:720px;'>"
+
+        # Greeting
+        "<p style='margin:0 0 12px;'>Hi All,</p>"
+
+        # Excitement line
+        "<p style='margin:0 0 18px;'>"
+        f"We are excited to invite you to <strong>RealHack 2026</strong> — "
+        f"{_html_escape(panel.name)} — Day {day} demos!"
+        "</p>"
+
+        # Guidelines section
+        "<h3 style='margin:18px 0 8px;font-size:15px;color:#0a4f99;"
+        "text-decoration:underline;font-weight:700;'>"
+        "Guidelines for the Demo"
+        "</h3>"
+        "<ol style='margin:0 0 18px;padding-left:22px;'>"
+        "<li style='margin:6px 0;'>"
+        "Time for Demo + Q&amp;A is <strong>15 minutes</strong> only."
+        "</li>"
+        "<li style='margin:6px 0;'>"
+        "It is advised to share the screen from the same laptop for both "
+        "Presentation and Demo, so that we can keep the time on tab."
+        "</li>"
+        "<li style='margin:6px 0;'>"
+        "Teams should be available online <strong>30 minutes</strong> prior "
+        "to the allocated time slot."
+        "</li>"
+        "</ol>"
+
+        # Schedule table
+        f"{_format_schedule_html(schedule, panel.name, day_date)}"
+
+        # Sign-off
+        "<p style='margin:22px 0 0;font-size:13px;'>"
+        "Questions? Reply to this invite or write to "
+        "<a href='mailto:RealHack@realpage.com' style='color:#0078d4;'>RealHack@realpage.com</a>."
+        "</p>"
+        "<p style='margin:14px 0 0;font-size:13px;'>"
+        "— <strong style='color:#0a4f99;'>RealHack 2026 Organizing Team</strong>"
+        "</p>"
+        "</div>"
+    )
+
+
 def _collect_attendees(
     panel: models.Panel,
     schedule: list[tuple[models.Team, datetime, datetime]],
@@ -268,16 +406,34 @@ def build_panel_invite_meta(panel: models.Panel, day: int) -> dict:
         f"Slot length: {SLOT_MINUTES} minutes\n\n"
         f"— RealHack 2026 Organizing Team"
     )
+    body_html = _build_invite_body_html(panel, day, schedule, day_start)
+
+    # Flat schedule rows for the frontend modal's preview table — same 4 columns
+    # as the email body (Team / Panel / Slot date / Time start).
+    date_label = _ordinal_date(day_start)
+    schedule_rows = [
+        {
+            "team": team.name,
+            "panel": panel.name,
+            "slot": date_label,
+            "time": start.strftime("%H:%M"),
+            "mentor": (team.mentor_name or "").strip().title(),
+        }
+        for team, start, _end in schedule
+    ]
 
     return {
         "subject": summary,
         "body": body,
+        "body_html": body_html,
         "start_iso": day_start.isoformat(),
         "end_iso": day_end.isoformat(),
         "location": "Microsoft Teams Meeting",
         "required_emails": [email for email, _ in required],
         "optional_emails": [email for email, _ in optional],
         "team_count": len(schedule),
+        "schedule": schedule_rows,
+        "day_label": day_start.strftime("%A, %B %d, %Y"),
     }
 
 

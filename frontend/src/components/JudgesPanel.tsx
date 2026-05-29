@@ -14,7 +14,6 @@ import {
   setPanelJudges,
   downloadPanelInvite,
   fetchPanelInviteMeta,
-  buildOutlookComposeUrl,
   type Panel,
   type PanelInviteMeta,
 } from '../api';
@@ -55,12 +54,13 @@ export function JudgesPanel({ teams }: Props) {
   const [movingJudgesFromPanelId, setMovingJudgesFromPanelId] = useState<number | null>(null);
   // Print-sheet modal state
   const [printingPanelId, setPrintingPanelId] = useState<number | null>(null);
-  // Outlook-invite prep modal state (new Outlook deeplink + clipboard flow)
+  // Outlook-invite prep modal state — single workspace where the organizer
+  // copies subject / body / attendee lists to paste into a manually-opened
+  // Outlook new-meeting compose dialog.
   const [inviteMeta, setInviteMeta] = useState<
-    | { meta: PanelInviteMeta; panelName: string; day: 1 | 2; outlookUrl: string }
+    | { meta: PanelInviteMeta; panelName: string; day: 1 | 2 }
     | null
   >(null);
-  const [inviteCopiedTarget, setInviteCopiedTarget] = useState<'required' | 'optional' | null>(null);
 
   const reloadJudges = async () => {
     setJudgesLoading(true);
@@ -160,26 +160,10 @@ export function JudgesPanel({ teams }: Props) {
     }
   };
 
-  const handleOpenInviteInOutlook = async (panel: Panel, day: 1 | 2) => {
+  const handleOpenInviteWorkspace = async (panel: Panel, day: 1 | 2) => {
     try {
       const meta = await fetchPanelInviteMeta(panel.id, day);
-      const outlookUrl = buildOutlookComposeUrl(meta);
-      // Pre-copy required attendees so the user lands in Outlook with the
-      // most painful piece already on the clipboard — they just Ctrl+V into
-      // the Required field.
-      try {
-        await navigator.clipboard.writeText(meta.required_emails.join('; '));
-        setInviteCopiedTarget('required');
-      } catch {
-        // Some browsers block clipboard without user gesture chain — modal
-        // gives them a manual "Copy" button as fallback.
-        setInviteCopiedTarget(null);
-      }
-      // Open Outlook in a new tab. Some browsers will block this if the chain
-      // from the click was broken by the await; the modal also has a manual
-      // "Open Outlook" button as a fallback.
-      window.open(outlookUrl, '_blank', 'noopener');
-      setInviteMeta({ meta, panelName: panel.name, day, outlookUrl });
+      setInviteMeta({ meta, panelName: panel.name, day });
     } catch (e: any) {
       alert(`Day ${day} invite failed: ${e?.message ?? e}`);
     }
@@ -466,16 +450,16 @@ export function JudgesPanel({ teams }: Props) {
                     {p.team_ids.length > 0 && (
                       <>
                         <button
-                          onClick={() => handleOpenInviteInOutlook(p, 1)}
+                          onClick={() => handleOpenInviteWorkspace(p, 1)}
                           className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Open Day 1 (June 18) invite in Outlook Web; required attendees copied to clipboard for one-paste insertion"
+                          title="Open the Day 1 (June 18) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
                         >
                           📅 Day 1 invite
                         </button>
                         <button
-                          onClick={() => handleOpenInviteInOutlook(p, 2)}
+                          onClick={() => handleOpenInviteWorkspace(p, 2)}
                           className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Open Day 2 (June 19) invite in Outlook Web; required attendees copied to clipboard for one-paste insertion"
+                          title="Open the Day 2 (June 19) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
                         >
                           📅 Day 2 invite
                         </button>
@@ -725,9 +709,7 @@ export function JudgesPanel({ teams }: Props) {
           panelName={inviteMeta.panelName}
           day={inviteMeta.day}
           meta={inviteMeta.meta}
-          outlookUrl={inviteMeta.outlookUrl}
-          autoCopiedTarget={inviteCopiedTarget}
-          onClose={() => { setInviteMeta(null); setInviteCopiedTarget(null); }}
+          onClose={() => setInviteMeta(null)}
         />
       )}
     </div>
@@ -735,115 +717,217 @@ export function JudgesPanel({ teams }: Props) {
 }
 
 
-// ===== Outlook-invite prep modal =====
+// ===== Outlook-invite prep workspace =====
 //
-// Shows after the user clicks "Day N invite". The Outlook Web compose tab has
-// already been opened in a new window by the parent; this modal exists to
-// give the user the rest of what they need to assemble the meeting:
-//   - confirm Required attendees were copied to clipboard (re-copy button)
-//   - copy the Optional organizers list with one click
-//   - re-open Outlook if the popup got blocked
+// Single workspace where the organizer copies every piece of the invite
+// (subject, body as rich HTML, required-attendee list, organizer CC list)
+// to paste into a manually-opened Outlook new-meeting compose dialog.
+// No auto-open of Outlook — the organizer drives the Outlook side; this
+// modal just hands them what they need with one-click copy.
 
 interface InvitePrepModalProps {
   panelName: string;
   day: 1 | 2;
   meta: PanelInviteMeta;
-  outlookUrl: string;
-  autoCopiedTarget: 'required' | 'optional' | null;
   onClose: () => void;
 }
 
-function InvitePrepModal({ panelName, day, meta, outlookUrl, autoCopiedTarget, onClose }: InvitePrepModalProps) {
-  const [lastCopied, setLastCopied] = useState<'required' | 'optional' | null>(autoCopiedTarget);
+type CopyTarget = 'subject' | 'body' | 'required' | 'optional';
 
-  const copy = async (which: 'required' | 'optional') => {
-    const list = which === 'required' ? meta.required_emails : meta.optional_emails;
+async function copyRichTextOrPlain(html: string, plainFallback: string): Promise<boolean> {
+  if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
     try {
-      await navigator.clipboard.writeText(list.join('; '));
-      setLastCopied(which);
+      const item = new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([plainFallback], { type: 'text/plain' }),
+      });
+      await navigator.clipboard.write([item]);
+      return true;
+    } catch {
+      // fall through
+    }
+  }
+  await navigator.clipboard.writeText(plainFallback);
+  return false;
+}
+
+function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps) {
+  const [lastCopied, setLastCopied] = useState<CopyTarget | null>(null);
+
+  const flashCopied = (target: CopyTarget) => {
+    setLastCopied(target);
+    window.setTimeout(() => {
+      setLastCopied((cur) => (cur === target ? null : cur));
+    }, 2200);
+  };
+
+  const copyPlain = async (target: CopyTarget, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      flashCopied(target);
     } catch (e: any) {
-      alert(`Copy failed: ${e?.message ?? e}. Select the list manually below and Ctrl+C.`);
+      alert(`Copy failed: ${e?.message ?? e}. Select the value below and Ctrl+C manually.`);
+    }
+  };
+
+  const copyBody = async () => {
+    try {
+      await copyRichTextOrPlain(meta.body_html, meta.body);
+      flashCopied('body');
+    } catch (e: any) {
+      alert(`Copy failed: ${e?.message ?? e}. Open the HTML preview below and copy manually.`);
     }
   };
 
   const dayLabel = day === 1 ? 'June 18' : 'June 19';
+  const copyLabel = (target: CopyTarget, defaultText: string) =>
+    lastCopied === target ? '✓ Copied' : defaultText;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-2xl bg-ink-800 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden max-h-[90vh] flex flex-col">
-        <div className="bg-gradient-to-br from-amber-500/25 to-orange-500/15 p-4 border-b border-amber-500/40">
-          <h3 className="font-bold text-amber-200">📅 {panelName} — Day {day} invite ready</h3>
-          <p className="text-xs text-slate-300 mt-0.5">
-            {dayLabel}, 2026 · 9:00 AM – 5:00 PM IST · {meta.team_count} team{meta.team_count === 1 ? '' : 's'}
-          </p>
-        </div>
-        <div className="p-5 overflow-y-auto text-sm text-slate-200 space-y-4">
-          <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
-            <p className="text-slate-300 mb-2">
-              <strong className="text-amber-200">Outlook Web</strong> should have opened in a new tab with subject, time, body, and location pre-filled. Now finish it like this:
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-4xl bg-ink-800 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden max-h-[92vh] flex flex-col">
+        <div className="bg-gradient-to-br from-amber-500/25 to-orange-500/15 p-4 border-b border-amber-500/40 flex items-start justify-between">
+          <div>
+            <h3 className="font-bold text-amber-200 text-base">📅 {panelName} — Day {day} invite workspace</h3>
+            <p className="text-xs text-slate-300 mt-0.5">
+              {dayLabel}, 2026 · 9:00 AM – 5:00 PM IST · {meta.team_count} team{meta.team_count === 1 ? '' : 's'} ·
+              Lunch 13:00 – 14:00 · 15-min slots
             </p>
-            <ol className="list-decimal list-inside space-y-1.5 text-slate-300">
-              <li>
-                <strong className="text-slate-100">Required:</strong> click the field → <kbd className="px-1.5 py-0.5 text-xs rounded bg-slate-700 border border-slate-600">Ctrl + V</kbd>{' '}
-                {lastCopied === 'required' ? (
-                  <span className="text-emerald-300">(✓ {meta.required_emails.length} emails already on your clipboard)</span>
-                ) : (
-                  <span className="text-amber-200">(click the Copy button below first)</span>
-                )}
-              </li>
-              <li>
-                <strong className="text-slate-100">Optional:</strong> click <em>Show Optional</em> in Outlook → click the field → copy and paste the {meta.optional_emails.length} organizer emails using the button below
-              </li>
-              <li>Review subject, body, attendees — tweak anything that needs fixing</li>
-              <li>Click <strong className="text-slate-100">Send</strong></li>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-slate-300 hover:text-white text-xl leading-none px-1"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="p-5 overflow-y-auto text-sm text-slate-200 space-y-4">
+          {/* Steps */}
+          <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
+            <h4 className="text-xs font-bold text-amber-200 uppercase tracking-wide mb-2">How to use this</h4>
+            <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-sm">
+              <li>Open Outlook → <strong className="text-slate-100">New meeting</strong></li>
+              <li>Copy each piece below with the buttons → paste into the matching Outlook field</li>
+              <li>Set the time: <strong className="text-slate-100">{dayLabel}, 2026 · 9:00 AM – 5:00 PM (IST)</strong></li>
+              <li>Toggle <strong className="text-slate-100">Teams meeting</strong> on</li>
+              <li>Review attendees + body, then <strong className="text-slate-100">Send</strong></li>
             </ol>
           </div>
 
+          {/* Subject */}
+          <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
+            <div className="flex items-center justify-between gap-3 mb-1.5">
+              <h4 className="text-sm font-semibold text-slate-100">Subject</h4>
+              <button
+                onClick={() => copyPlain('subject', meta.subject)}
+                className={`text-xs px-2.5 py-1 rounded border transition ${lastCopied === 'subject' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200' : 'border-amber-500/40 hover:border-amber-500/70 text-amber-200'}`}
+              >
+                {copyLabel('subject', '📋 Copy')}
+              </button>
+            </div>
+            <p className="text-slate-300 text-sm break-words font-mono">{meta.subject}</p>
+          </div>
+
+          {/* Body */}
+          <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-100">Body (branded HTML)</h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Paste into Outlook's meeting-body field — Outlook will keep the formatting (greeting, guidelines, table).
+                </p>
+              </div>
+              <button
+                onClick={copyBody}
+                className={`text-xs px-2.5 py-1 rounded border transition ${lastCopied === 'body' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200' : 'border-amber-500/40 hover:border-amber-500/70 text-amber-200'}`}
+              >
+                {copyLabel('body', '📋 Copy body')}
+              </button>
+            </div>
+            <div
+              className="bg-white text-slate-900 rounded p-3 max-h-72 overflow-y-auto text-sm"
+              dangerouslySetInnerHTML={{ __html: meta.body_html }}
+            />
+          </div>
+
+          {/* Attendee groups */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-sm font-semibold text-slate-100">Required ({meta.required_emails.length})</h4>
                 <button
-                  onClick={() => copy('required')}
-                  className={`text-xs px-2 py-1 rounded border transition ${lastCopied === 'required' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200' : 'border-amber-500/40 hover:border-amber-500/70 text-amber-200'}`}
+                  onClick={() => copyPlain('required', meta.required_emails.join('; '))}
+                  className={`text-xs px-2.5 py-1 rounded border transition ${lastCopied === 'required' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200' : 'border-amber-500/40 hover:border-amber-500/70 text-amber-200'}`}
                 >
-                  {lastCopied === 'required' ? '✓ Copied' : '📋 Copy'}
+                  {copyLabel('required', '📋 Copy')}
                 </button>
               </div>
-              <p className="text-xs text-slate-400">Team members + mentors + panel judges</p>
+              <p className="text-xs text-slate-400">Team members + mentors (judges informed separately)</p>
             </div>
 
             <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-sm font-semibold text-slate-100">Optional ({meta.optional_emails.length})</h4>
                 <button
-                  onClick={() => copy('optional')}
-                  className={`text-xs px-2 py-1 rounded border transition ${lastCopied === 'optional' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200' : 'border-amber-500/40 hover:border-amber-500/70 text-amber-200'}`}
+                  onClick={() => copyPlain('optional', meta.optional_emails.join('; '))}
+                  className={`text-xs px-2.5 py-1 rounded border transition ${lastCopied === 'optional' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200' : 'border-amber-500/40 hover:border-amber-500/70 text-amber-200'}`}
                 >
-                  {lastCopied === 'optional' ? '✓ Copied' : '📋 Copy'}
+                  {copyLabel('optional', '📋 Copy')}
                 </button>
               </div>
-              <p className="text-xs text-slate-400 break-words">
-                {meta.optional_emails.join(', ')}
-              </p>
+              <p className="text-xs text-slate-400 break-words">{meta.optional_emails.join(', ')}</p>
             </div>
           </div>
 
+          {/* Tabular schedule preview */}
           <details className="bg-ink-900/40 border border-slate-700/40 rounded-lg p-3">
-            <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200">If Outlook Web didn't open in a new tab</summary>
-            <div className="mt-2 text-xs text-slate-300 space-y-2">
-              <p>Your browser may have blocked the popup. Open it manually:</p>
-              <a
-                href={outlookUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-block text-xs px-3 py-1.5 rounded border border-amber-500/40 hover:border-amber-500/70 hover:bg-amber-500/10 text-amber-200 transition"
-              >
-                Open Outlook Web →
-              </a>
+            <summary className="cursor-pointer text-xs font-bold text-slate-300 uppercase tracking-wide hover:text-slate-100">
+              Schedule preview ({meta.schedule.length} teams)
+            </summary>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-ink-900/80 text-amber-200">
+                    <th className="px-3 py-2 text-left border border-slate-700/60">Team Name</th>
+                    <th className="px-3 py-2 text-left border border-slate-700/60">Panel</th>
+                    <th className="px-3 py-2 text-left border border-slate-700/60">Slot</th>
+                    <th className="px-3 py-2 text-right border border-slate-700/60">Time</th>
+                    <th className="px-3 py-2 text-left border border-slate-700/60">Mentor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {meta.schedule.map((row, i) => {
+                    const isLunchTransition =
+                      i > 0 &&
+                      meta.schedule[i - 1].time < '13:00' &&
+                      row.time >= '14:00';
+                    return (
+                      <>
+                        {isLunchTransition && (
+                          <tr key={`break-${i}`}>
+                            <td colSpan={5} className="px-3 py-2 text-center font-bold text-sky-300 bg-sky-500/10 border border-slate-700/60">
+                              BREAK
+                            </td>
+                          </tr>
+                        )}
+                        <tr key={`row-${i}`} className="hover:bg-ink-900/60">
+                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-100 font-medium">{row.team}</td>
+                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300">{row.panel}</td>
+                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300">{row.slot}</td>
+                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300 text-right font-mono">{row.time}</td>
+                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-400">{row.mentor || '—'}</td>
+                        </tr>
+                      </>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </details>
         </div>
+
         <div className="p-3 border-t border-slate-700/60 flex justify-end">
           <button
             onClick={onClose}

@@ -620,15 +620,26 @@ export async function downloadPanelInvite(panelId: number, day: 1 | 2): Promise<
   URL.revokeObjectURL(url);
 }
 
+export interface ScheduleRow {
+  team: string;
+  panel: string;
+  slot: string;  // date label, e.g. '18th June'
+  time: string; // start time HH:MM
+  mentor: string;
+}
+
 export interface PanelInviteMeta {
   subject: string;
   body: string;
+  body_html: string;
   start_iso: string;
   end_iso: string;
   location: string;
   required_emails: string[];
   optional_emails: string[];
   team_count: number;
+  schedule: ScheduleRow[];
+  day_label: string;
 }
 
 export async function fetchPanelInviteMeta(panelId: number, day: 1 | 2): Promise<PanelInviteMeta> {
