@@ -32,9 +32,10 @@ from . import comms
 from . import backup as backup_service
 from . import llm as llm_service
 from . import chat as chat_service
+from . import scheduling
 from .auth import require_auth, fetch_profile, build_profile_payload
 from fastapi import Security
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 _bearer_scheme = HTTPBearer(auto_error=False)
@@ -1060,6 +1061,48 @@ def set_panel_judges(panel_id: int, req: PanelJudgesSet, db: Session = Depends(g
     db.commit()
     db.refresh(panel)
     return _panel_to_out(panel)
+
+
+@app.get("/api/panels/{panel_id}/invite.ics")
+def get_panel_invite_ics(
+    panel_id: int,
+    day: int,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Generate an Outlook-ready .ics invite for a panel's judging day.
+
+    Day 1 = June 18, Day 2 = June 19, 2026 (9:00-17:00 IST, 13:00-14:00 lunch
+    excluded, 15-min slots). The signed-in user is set as ORGANIZER so when
+    they open the file Outlook shows Send rather than Accept/Decline.
+    """
+    if day not in (1, 2):
+        raise HTTPException(status_code=400, detail="day must be 1 or 2")
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+
+    organizer_email = (claims.get("preferred_username") or claims.get("upn") or "").strip()
+    organizer_name = (claims.get("name") or organizer_email).strip()
+
+    try:
+        ics_text = scheduling.build_panel_invite_ics(
+            panel,
+            day=day,
+            organizer_email=organizer_email,
+            organizer_name=organizer_name,
+            db=db,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    safe_panel_name = "".join(c if c.isalnum() or c in "-_" else "-" for c in panel.name.lower())
+    filename = f"realhack-{safe_panel_name}-day{day}.ics"
+    return Response(
+        content=ics_text,
+        media_type="text/calendar; method=REQUEST; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ===== Swag (t-shirt) pickup =====

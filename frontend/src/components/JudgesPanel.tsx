@@ -12,6 +12,7 @@ import {
   deletePanel,
   setPanelTeams,
   setPanelJudges,
+  downloadPanelInvite,
   type Panel,
 } from '../api';
 
@@ -427,6 +428,32 @@ export function JudgesPanel({ teams }: Props) {
                       >
                         🖨 Print sheet
                       </button>
+                    )}
+                    {p.team_ids.length > 0 && (
+                      <>
+                        <button
+                          onClick={() =>
+                            downloadPanelInvite(p.id, 1).catch((e) =>
+                              alert(`Day 1 invite failed: ${e?.message ?? e}`),
+                            )
+                          }
+                          className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
+                          title="Download an Outlook invite for Day 1 (June 18) — opens in Outlook, organizer reviews and sends"
+                        >
+                          📅 Day 1 invite
+                        </button>
+                        <button
+                          onClick={() =>
+                            downloadPanelInvite(p.id, 2).catch((e) =>
+                              alert(`Day 2 invite failed: ${e?.message ?? e}`),
+                            )
+                          }
+                          className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
+                          title="Download an Outlook invite for Day 2 (June 19) — opens in Outlook, organizer reviews and sends"
+                        >
+                          📅 Day 2 invite
+                        </button>
+                      </>
                     )}
                     <button
                       onClick={() => openEditor(p, 'judges')}

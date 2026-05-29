@@ -594,6 +594,32 @@ export async function setPanelJudges(panelId: number, judgeIds: number[]): Promi
   return r.json();
 }
 
+export async function downloadPanelInvite(panelId: number, day: 1 | 2): Promise<void> {
+  const r = await authFetch(`${BASE}/panels/${panelId}/invite.ics?day=${day}`);
+  if (!r.ok) {
+    let msg = `Invite download failed: ${r.status}`;
+    try {
+      const j = await r.json();
+      if (j?.detail) msg = j.detail;
+    } catch {
+      // not JSON; keep the status-only message
+    }
+    throw new Error(msg);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const cd = r.headers.get('Content-Disposition') || '';
+  const m = /filename="?([^";]+)"?/.exec(cd);
+  const filename = m?.[1] || `realhack-panel-${panelId}-day${day}.ics`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 export async function fetchLeaderboard(round: number): Promise<LeaderboardData> {
   const r = await authFetch(`${BASE}/judging/leaderboard?round=${round}`);
   if (!r.ok) throw new Error(`Leaderboard fetch failed: ${r.status}`);
