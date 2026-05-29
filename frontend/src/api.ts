@@ -653,13 +653,23 @@ export async function fetchPanelInviteMeta(panelId: number, day: 1 | 2): Promise
  * location — these reliably pre-fill. Attendees in the URL are unreliable
  * across Outlook builds, so we don't include them here; the frontend copies
  * the attendee list to the clipboard separately for the user to paste.
+ *
+ * Body is rendered as HTML by Outlook Web's compose dialog, so plain '\n'
+ * collapses to whitespace. We HTML-escape the backend's plain-text body
+ * and convert newlines to <br> so the schedule grid renders line-by-line.
  */
 export function buildOutlookComposeUrl(meta: PanelInviteMeta): string {
+  const bodyHtml = meta.body
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\r\n/g, '\n')
+    .replace(/\n/g, '<br>');
   const params = new URLSearchParams({
     subject: meta.subject,
     startdt: meta.start_iso,
     enddt: meta.end_iso,
-    body: meta.body,
+    body: bodyHtml,
     location: meta.location,
     online: 'true', // hint to Outlook to add a Teams link
   });
