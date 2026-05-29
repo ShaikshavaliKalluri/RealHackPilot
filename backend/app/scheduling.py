@@ -239,6 +239,49 @@ def _collect_attendees(
     )
 
 
+def build_panel_invite_meta(panel: models.Panel, day: int) -> dict:
+    """Return JSON-ready meeting metadata for the Outlook-Web compose deeplink.
+
+    Used by new Outlook (which doesn't reliably open downloaded .ics files):
+    the frontend opens https://outlook.office.com/calendar/deeplink/compose
+    with subject/start/end/body/location pre-filled, and pastes the attendees
+    from the clipboard.
+
+    Times are ISO 8601 with the +05:30 IST offset baked in so Outlook anchors
+    the meeting to IST regardless of the viewer's local timezone.
+    """
+    if day not in EVENT_DATES:
+        raise ValueError(f"day must be 1 or 2, got {day}")
+
+    schedule = schedule_for_day(panel, day)
+    year, month, dom = EVENT_DATES[day]
+    ist_tz = timezone(IST_OFFSET)
+    day_start = datetime(year, month, dom, WORK_START[0], WORK_START[1], tzinfo=ist_tz)
+    day_end = datetime(year, month, dom, WORK_END[0], WORK_END[1], tzinfo=ist_tz)
+
+    required, optional = _collect_attendees(panel, schedule)
+
+    summary = f"RealHack 2026 Judging — {panel.name} — Day {day} ({day_start.strftime('%b %d')})"
+    body = (
+        f"{summary}\n\n"
+        f"{_format_schedule_block(schedule)}\n\n"
+        f"Total teams this day: {len(schedule)}\n"
+        f"Slot length: {SLOT_MINUTES} minutes\n\n"
+        f"— RealHack 2026 Organizing Team"
+    )
+
+    return {
+        "subject": summary,
+        "body": body,
+        "start_iso": day_start.isoformat(),
+        "end_iso": day_end.isoformat(),
+        "location": "Microsoft Teams Meeting",
+        "required_emails": [email for email, _ in required],
+        "optional_emails": [email for email, _ in optional],
+        "team_count": len(schedule),
+    }
+
+
 def _vtimezone_block() -> str:
     """VTIMEZONE for India Standard Time. IST has no DST, so one STANDARD entry."""
     return (

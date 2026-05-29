@@ -13,7 +13,10 @@ import {
   setPanelTeams,
   setPanelJudges,
   downloadPanelInvite,
+  fetchPanelInviteMeta,
+  buildOutlookComposeUrl,
   type Panel,
+  type PanelInviteMeta,
 } from '../api';
 
 interface Props {
@@ -52,6 +55,12 @@ export function JudgesPanel({ teams }: Props) {
   const [movingJudgesFromPanelId, setMovingJudgesFromPanelId] = useState<number | null>(null);
   // Print-sheet modal state
   const [printingPanelId, setPrintingPanelId] = useState<number | null>(null);
+  // Outlook-invite prep modal state (new Outlook deeplink + clipboard flow)
+  const [inviteMeta, setInviteMeta] = useState<
+    | { meta: PanelInviteMeta; panelName: string; day: 1 | 2; outlookUrl: string }
+    | null
+  >(null);
+  const [inviteCopiedTarget, setInviteCopiedTarget] = useState<'required' | 'optional' | null>(null);
 
   const reloadJudges = async () => {
     setJudgesLoading(true);
@@ -148,6 +157,31 @@ export function JudgesPanel({ teams }: Props) {
       await reloadPanels();
     } catch (e: any) {
       setErr(e.message || String(e));
+    }
+  };
+
+  const handleOpenInviteInOutlook = async (panel: Panel, day: 1 | 2) => {
+    try {
+      const meta = await fetchPanelInviteMeta(panel.id, day);
+      const outlookUrl = buildOutlookComposeUrl(meta);
+      // Pre-copy required attendees so the user lands in Outlook with the
+      // most painful piece already on the clipboard — they just Ctrl+V into
+      // the Required field.
+      try {
+        await navigator.clipboard.writeText(meta.required_emails.join('; '));
+        setInviteCopiedTarget('required');
+      } catch {
+        // Some browsers block clipboard without user gesture chain — modal
+        // gives them a manual "Copy" button as fallback.
+        setInviteCopiedTarget(null);
+      }
+      // Open Outlook in a new tab. Some browsers will block this if the chain
+      // from the click was broken by the await; the modal also has a manual
+      // "Open Outlook" button as a fallback.
+      window.open(outlookUrl, '_blank', 'noopener');
+      setInviteMeta({ meta, panelName: panel.name, day, outlookUrl });
+    } catch (e: any) {
+      alert(`Day ${day} invite failed: ${e?.message ?? e}`);
     }
   };
 
@@ -432,24 +466,16 @@ export function JudgesPanel({ teams }: Props) {
                     {p.team_ids.length > 0 && (
                       <>
                         <button
-                          onClick={() =>
-                            downloadPanelInvite(p.id, 1).catch((e) =>
-                              alert(`Day 1 invite failed: ${e?.message ?? e}`),
-                            )
-                          }
+                          onClick={() => handleOpenInviteInOutlook(p, 1)}
                           className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Download an Outlook invite for Day 1 (June 18) — opens in Outlook, organizer reviews and sends"
+                          title="Open Day 1 (June 18) invite in Outlook Web; required attendees copied to clipboard for one-paste insertion"
                         >
                           📅 Day 1 invite
                         </button>
                         <button
-                          onClick={() =>
-                            downloadPanelInvite(p.id, 2).catch((e) =>
-                              alert(`Day 2 invite failed: ${e?.message ?? e}`),
-                            )
-                          }
+                          onClick={() => handleOpenInviteInOutlook(p, 2)}
                           className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Download an Outlook invite for Day 2 (June 19) — opens in Outlook, organizer reviews and sends"
+                          title="Open Day 2 (June 19) invite in Outlook Web; required attendees copied to clipboard for one-paste insertion"
                         >
                           📅 Day 2 invite
                         </button>
@@ -693,6 +719,140 @@ export function JudgesPanel({ teams }: Props) {
           onClose={() => setPrintingPanelId(null)}
         />
       )}
+
+      {inviteMeta !== null && (
+        <InvitePrepModal
+          panelName={inviteMeta.panelName}
+          day={inviteMeta.day}
+          meta={inviteMeta.meta}
+          outlookUrl={inviteMeta.outlookUrl}
+          autoCopiedTarget={inviteCopiedTarget}
+          onClose={() => { setInviteMeta(null); setInviteCopiedTarget(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+
+// ===== Outlook-invite prep modal =====
+//
+// Shows after the user clicks "Day N invite". The Outlook Web compose tab has
+// already been opened in a new window by the parent; this modal exists to
+// give the user the rest of what they need to assemble the meeting:
+//   - confirm Required attendees were copied to clipboard (re-copy button)
+//   - copy the Optional organizers list with one click
+//   - re-open Outlook if the popup got blocked
+
+interface InvitePrepModalProps {
+  panelName: string;
+  day: 1 | 2;
+  meta: PanelInviteMeta;
+  outlookUrl: string;
+  autoCopiedTarget: 'required' | 'optional' | null;
+  onClose: () => void;
+}
+
+function InvitePrepModal({ panelName, day, meta, outlookUrl, autoCopiedTarget, onClose }: InvitePrepModalProps) {
+  const [lastCopied, setLastCopied] = useState<'required' | 'optional' | null>(autoCopiedTarget);
+
+  const copy = async (which: 'required' | 'optional') => {
+    const list = which === 'required' ? meta.required_emails : meta.optional_emails;
+    try {
+      await navigator.clipboard.writeText(list.join('; '));
+      setLastCopied(which);
+    } catch (e: any) {
+      alert(`Copy failed: ${e?.message ?? e}. Select the list manually below and Ctrl+C.`);
+    }
+  };
+
+  const dayLabel = day === 1 ? 'June 18' : 'June 19';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-2xl bg-ink-800 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="bg-gradient-to-br from-amber-500/25 to-orange-500/15 p-4 border-b border-amber-500/40">
+          <h3 className="font-bold text-amber-200">📅 {panelName} — Day {day} invite ready</h3>
+          <p className="text-xs text-slate-300 mt-0.5">
+            {dayLabel}, 2026 · 9:00 AM – 5:00 PM IST · {meta.team_count} team{meta.team_count === 1 ? '' : 's'}
+          </p>
+        </div>
+        <div className="p-5 overflow-y-auto text-sm text-slate-200 space-y-4">
+          <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
+            <p className="text-slate-300 mb-2">
+              <strong className="text-amber-200">Outlook Web</strong> should have opened in a new tab with subject, time, body, and location pre-filled. Now finish it like this:
+            </p>
+            <ol className="list-decimal list-inside space-y-1.5 text-slate-300">
+              <li>
+                <strong className="text-slate-100">Required:</strong> click the field → <kbd className="px-1.5 py-0.5 text-xs rounded bg-slate-700 border border-slate-600">Ctrl + V</kbd>{' '}
+                {lastCopied === 'required' ? (
+                  <span className="text-emerald-300">(✓ {meta.required_emails.length} emails already on your clipboard)</span>
+                ) : (
+                  <span className="text-amber-200">(click the Copy button below first)</span>
+                )}
+              </li>
+              <li>
+                <strong className="text-slate-100">Optional:</strong> click <em>Show Optional</em> in Outlook → click the field → copy and paste the {meta.optional_emails.length} organizer emails using the button below
+              </li>
+              <li>Review subject, body, attendees — tweak anything that needs fixing</li>
+              <li>Click <strong className="text-slate-100">Send</strong></li>
+            </ol>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-semibold text-slate-100">Required ({meta.required_emails.length})</h4>
+                <button
+                  onClick={() => copy('required')}
+                  className={`text-xs px-2 py-1 rounded border transition ${lastCopied === 'required' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200' : 'border-amber-500/40 hover:border-amber-500/70 text-amber-200'}`}
+                >
+                  {lastCopied === 'required' ? '✓ Copied' : '📋 Copy'}
+                </button>
+              </div>
+              <p className="text-xs text-slate-400">Team members + mentors + panel judges</p>
+            </div>
+
+            <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-sm font-semibold text-slate-100">Optional ({meta.optional_emails.length})</h4>
+                <button
+                  onClick={() => copy('optional')}
+                  className={`text-xs px-2 py-1 rounded border transition ${lastCopied === 'optional' ? 'border-emerald-500/60 bg-emerald-500/15 text-emerald-200' : 'border-amber-500/40 hover:border-amber-500/70 text-amber-200'}`}
+                >
+                  {lastCopied === 'optional' ? '✓ Copied' : '📋 Copy'}
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 break-words">
+                {meta.optional_emails.join(', ')}
+              </p>
+            </div>
+          </div>
+
+          <details className="bg-ink-900/40 border border-slate-700/40 rounded-lg p-3">
+            <summary className="cursor-pointer text-xs text-slate-400 hover:text-slate-200">If Outlook Web didn't open in a new tab</summary>
+            <div className="mt-2 text-xs text-slate-300 space-y-2">
+              <p>Your browser may have blocked the popup. Open it manually:</p>
+              <a
+                href={outlookUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block text-xs px-3 py-1.5 rounded border border-amber-500/40 hover:border-amber-500/70 hover:bg-amber-500/10 text-amber-200 transition"
+              >
+                Open Outlook Web →
+              </a>
+            </div>
+          </details>
+        </div>
+        <div className="p-3 border-t border-slate-700/60 flex justify-end">
+          <button
+            onClick={onClose}
+            className="text-sm px-4 py-1.5 rounded border border-slate-600 hover:border-slate-400 text-slate-200 transition"
+          >
+            Done
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

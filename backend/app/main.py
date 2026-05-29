@@ -1105,6 +1105,33 @@ def get_panel_invite_ics(
     )
 
 
+@app.get("/api/panels/{panel_id}/invite-meta")
+def get_panel_invite_meta(
+    panel_id: int,
+    day: int,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return JSON meeting metadata for the Outlook-Web compose deeplink path.
+
+    New Outlook doesn't reliably treat downloaded .ics files as editable
+    drafts. This endpoint feeds the frontend's clipboard + deeplink flow:
+    the frontend copies the attendee emails to the clipboard and opens
+    outlook.office.com/calendar/deeplink/compose with subject/start/end/
+    body/location, where new Outlook intercepts and opens its native
+    Create-event dialog with the user as organizer.
+    """
+    if day not in (1, 2):
+        raise HTTPException(status_code=400, detail="day must be 1 or 2")
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+    try:
+        return scheduling.build_panel_invite_meta(panel, day=day)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ===== Swag (t-shirt) pickup =====
 #
 # Used by organizers at the event-day pickup desk. Replaces the shared

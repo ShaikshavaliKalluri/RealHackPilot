@@ -620,6 +620,52 @@ export async function downloadPanelInvite(panelId: number, day: 1 | 2): Promise<
   URL.revokeObjectURL(url);
 }
 
+export interface PanelInviteMeta {
+  subject: string;
+  body: string;
+  start_iso: string;
+  end_iso: string;
+  location: string;
+  required_emails: string[];
+  optional_emails: string[];
+  team_count: number;
+}
+
+export async function fetchPanelInviteMeta(panelId: number, day: 1 | 2): Promise<PanelInviteMeta> {
+  const r = await authFetch(`${BASE}/panels/${panelId}/invite-meta?day=${day}`);
+  if (!r.ok) {
+    let msg = `Invite meta failed: ${r.status}`;
+    try {
+      const j = await r.json();
+      if (j?.detail) msg = j.detail;
+    } catch {
+      // keep status-only msg
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+/**
+ * Build the Outlook Web "compose new event" deeplink.
+ *
+ * Outlook Web's compose endpoint accepts subject, startdt, enddt, body, and
+ * location — these reliably pre-fill. Attendees in the URL are unreliable
+ * across Outlook builds, so we don't include them here; the frontend copies
+ * the attendee list to the clipboard separately for the user to paste.
+ */
+export function buildOutlookComposeUrl(meta: PanelInviteMeta): string {
+  const params = new URLSearchParams({
+    subject: meta.subject,
+    startdt: meta.start_iso,
+    enddt: meta.end_iso,
+    body: meta.body,
+    location: meta.location,
+    online: 'true', // hint to Outlook to add a Teams link
+  });
+  return `https://outlook.office.com/calendar/deeplink/compose?${params.toString()}`;
+}
+
 export async function fetchLeaderboard(round: number): Promise<LeaderboardData> {
   const r = await authFetch(`${BASE}/judging/leaderboard?round=${round}`);
   if (!r.ok) throw new Error(`Leaderboard fetch failed: ${r.status}`);
