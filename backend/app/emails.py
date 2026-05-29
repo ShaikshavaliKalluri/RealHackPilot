@@ -197,7 +197,7 @@ TEMPLATES: list[EmailTemplate] = [
             "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#fff8eb;border-radius:8px;border-left:4px solid #f59e00;'>\n"
             "<tr><td class='info-pad' style='padding:16px 22px;'>\n"
             "  <div style='font-weight:700;color:#b8590a;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;'>&#127942; Prize</div>\n"
-            "  <div style='color:#1a1f26;font-size:15px;line-height:1.5;'>The prize: <strong>Bose QuietComfort Ultra Headphones</strong> for the top teams.</div>\n"
+            "  <div style='color:#1a1f26;font-size:15px;line-height:1.5;'><strong>Bose QuietComfort Ultra Headphones</strong> for the top teams.</div>\n"
             "</td></tr>\n"
             "</table>\n"
             "<h2>What happens next</h2>\n"
