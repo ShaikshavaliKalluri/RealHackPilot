@@ -29,15 +29,29 @@ from . import models
 
 # ---- Event constants ----
 
-# RealHack 2026: June 18 (Thu) and June 19 (Fri), 9:00-17:00 IST, lunch 13:00-14:00.
+# RealHack 2026: June 18 (Thu) and June 19 (Fri).
 EVENT_DATES = {
     1: (2026, 6, 18),
     2: (2026, 6, 19),
 }
-WORK_START = (9, 0)
-WORK_END = (17, 0)
-LUNCH_START = (13, 0)
-LUNCH_END = (14, 0)
+
+# Calendar event window — what shows on the Outlook meeting itself.
+DAY_START = (9, 0)
+DAY_END = (17, 0)
+
+# First slot kicks off at 9:15 (matching ShortHack 2025's template: the
+# 9:00-9:15 quarter-hour is opening/buffer time, no team is scheduled).
+FIRST_SLOT = (9, 15)
+
+# Breaks between slot blocks. (start_hm, end_hm). The middle one is lunch;
+# the outer two are short coffee breaks. Slot generation skips these.
+BREAKS: list[tuple[tuple[int, int], tuple[int, int]]] = [
+    ((11, 0), (11, 15)),
+    ((12, 30), (13, 30)),  # lunch
+    ((15, 0), (15, 15)),
+]
+LUNCH_BREAK_INDEX = 1  # which entry in BREAKS is the lunch break (for labelling)
+
 SLOT_MINUTES = 15
 
 # Asia/Kolkata is UTC+5:30 year-round (no DST). Windows Outlook recognizes
@@ -98,18 +112,30 @@ def _split_for_days(teams: list[models.Team]) -> tuple[list[models.Team], list[m
 
 
 def _generate_slot_starts(date: datetime) -> list[datetime]:
-    """Yield slot start times for one day, skipping the lunch hour."""
+    """Yield slot start times for one day, starting at FIRST_SLOT and
+    skipping every break in BREAKS. The slot stream extends past DAY_END
+    only if necessary; in practice the panel-fits-into-day check guards
+    this in schedule_for_day."""
     starts: list[datetime] = []
-    day_start = date.replace(hour=WORK_START[0], minute=WORK_START[1], second=0, microsecond=0)
-    day_end = date.replace(hour=WORK_END[0], minute=WORK_END[1], second=0, microsecond=0)
-    lunch_start = date.replace(hour=LUNCH_START[0], minute=LUNCH_START[1], second=0, microsecond=0)
-    lunch_end = date.replace(hour=LUNCH_END[0], minute=LUNCH_END[1], second=0, microsecond=0)
+    cur = date.replace(hour=FIRST_SLOT[0], minute=FIRST_SLOT[1], second=0, microsecond=0)
+    day_end = date.replace(hour=DAY_END[0], minute=DAY_END[1], second=0, microsecond=0)
+    break_windows = [
+        (
+            date.replace(hour=b_start[0], minute=b_start[1], second=0, microsecond=0),
+            date.replace(hour=b_end[0], minute=b_end[1], second=0, microsecond=0),
+        )
+        for b_start, b_end in BREAKS
+    ]
 
-    cur = day_start
     while cur + timedelta(minutes=SLOT_MINUTES) <= day_end:
-        # Slot fully overlaps lunch -> skip; jump to after lunch
-        if cur < lunch_end and cur + timedelta(minutes=SLOT_MINUTES) > lunch_start:
-            cur = lunch_end
+        # If this slot would overlap any break, skip to the end of that break.
+        skipped = False
+        for b_start, b_end in break_windows:
+            if cur < b_end and cur + timedelta(minutes=SLOT_MINUTES) > b_start:
+                cur = b_end
+                skipped = True
+                break
+        if skipped:
             continue
         starts.append(cur)
         cur += timedelta(minutes=SLOT_MINUTES)
@@ -134,13 +160,16 @@ def schedule_for_day(panel: models.Panel, day: int) -> list[tuple[models.Team, d
 
     slot_starts = _generate_slot_starts(date)
     if len(teams_for_day) > len(slot_starts):
+        breaks_human = ", ".join(
+            f"{bs[0]:02d}:{bs[1]:02d}-{be[0]:02d}:{be[1]:02d}"
+            for bs, be in BREAKS
+        )
         raise ValueError(
             f"Panel has {len(teams_for_day)} teams for Day {day} but only "
             f"{len(slot_starts)} {SLOT_MINUTES}-min slots fit between "
-            f"{WORK_START[0]:02d}:{WORK_START[1]:02d} and "
-            f"{WORK_END[0]:02d}:{WORK_END[1]:02d} IST (lunch "
-            f"{LUNCH_START[0]:02d}:{LUNCH_START[1]:02d}-{LUNCH_END[0]:02d}:{LUNCH_END[1]:02d} excluded). "
-            f"Split the panel into smaller groups or shorten slots before generating the invite."
+            f"{FIRST_SLOT[0]:02d}:{FIRST_SLOT[1]:02d} and "
+            f"{DAY_END[0]:02d}:{DAY_END[1]:02d} IST (breaks {breaks_human} excluded). "
+            f"Split the panel into smaller groups or extend the working window."
         )
 
     out: list[tuple[models.Team, datetime, datetime]] = []
@@ -173,24 +202,32 @@ def _ics_dt_utc(dt: datetime) -> str:
 
 
 def _format_schedule_block(schedule: list[tuple[models.Team, datetime, datetime]]) -> str:
-    """Multi-line plain-text schedule grid for the meeting body."""
+    """Multi-line plain-text schedule grid for the meeting body. Inserts a
+    BREAK marker before the first slot whose start falls at or after each
+    break's end time."""
     if not schedule:
         return "(no teams scheduled for this day)"
 
     lines: list[str] = []
     lines.append("Schedule (IST):")
     lines.append("")
-    last_was_morning = True
+
+    unprocessed_breaks = list(BREAKS)
     for team, start, end in schedule:
-        # Insert the Lunch marker once when we cross noon to 14:00
-        if last_was_morning and start.hour >= LUNCH_END[0]:
-            lines.append(
-                f"  {LUNCH_START[0]:02d}:{LUNCH_START[1]:02d} - "
-                f"{LUNCH_END[0]:02d}:{LUNCH_END[1]:02d}   -- Lunch --"
-            )
-            last_was_morning = False
+        slot_minutes = start.hour * 60 + start.minute
+        while unprocessed_breaks:
+            b_start, b_end = unprocessed_breaks[0]
+            b_end_minutes = b_end[0] * 60 + b_end[1]
+            if b_end_minutes <= slot_minutes:
+                lines.append(
+                    f"  {b_start[0]:02d}:{b_start[1]:02d} - "
+                    f"{b_end[0]:02d}:{b_end[1]:02d}   -- BREAK --"
+                )
+                unprocessed_breaks.pop(0)
+            else:
+                break
+
         mentor = (team.mentor_name or "—").strip().title() or "—"
-        # Team name padded for readability; mentor in parens.
         team_label = team.name.strip()
         lines.append(
             f"  {start.strftime('%H:%M')} - {end.strftime('%H:%M')}   "
@@ -235,16 +272,23 @@ def _format_schedule_html(
 
     date_label = _ordinal_date(day_date)
     rows_html: list[str] = []
-    last_was_morning = True
+    unprocessed_breaks = list(BREAKS)
+
     for team, start, _end in schedule:
-        if last_was_morning and start.hour >= LUNCH_END[0]:
-            rows_html.append(
-                "<tr style='background:#dbe9f7;'>"
-                "<td colspan='4' style='padding:10px 12px;border:1px solid #c9d6e8;text-align:center;"
-                "font-weight:700;color:#0a4f99;letter-spacing:.5px;'>BREAK</td>"
-                "</tr>"
-            )
-            last_was_morning = False
+        slot_minutes = start.hour * 60 + start.minute
+        while unprocessed_breaks:
+            b_start, b_end = unprocessed_breaks[0]
+            b_end_minutes = b_end[0] * 60 + b_end[1]
+            if b_end_minutes <= slot_minutes:
+                rows_html.append(
+                    "<tr style='background:#dbe9f7;'>"
+                    "<td colspan='4' style='padding:10px 12px;border:1px solid #c9d6e8;text-align:center;"
+                    "font-weight:700;color:#0a4f99;letter-spacing:.5px;'>BREAK</td>"
+                    "</tr>"
+                )
+                unprocessed_breaks.pop(0)
+            else:
+                break
 
         rows_html.append(
             "<tr>"
@@ -327,11 +371,7 @@ def _build_invite_body_html(
 
         # Sign-off
         "<p style='margin:22px 0 0;font-size:13px;'>"
-        "Questions? Reply to this invite or write to "
-        "<a href='mailto:RealHack@realpage.com' style='color:#0078d4;'>RealHack@realpage.com</a>."
-        "</p>"
-        "<p style='margin:14px 0 0;font-size:13px;'>"
-        "— <strong style='color:#0a4f99;'>RealHack 2026 Organizing Team</strong>"
+        "<strong style='color:#0a4f99;'>Team RealHack</strong>"
         "</p>"
         "</div>"
     )
@@ -393,8 +433,8 @@ def build_panel_invite_meta(panel: models.Panel, day: int) -> dict:
     schedule = schedule_for_day(panel, day)
     year, month, dom = EVENT_DATES[day]
     ist_tz = timezone(IST_OFFSET)
-    day_start = datetime(year, month, dom, WORK_START[0], WORK_START[1], tzinfo=ist_tz)
-    day_end = datetime(year, month, dom, WORK_END[0], WORK_END[1], tzinfo=ist_tz)
+    day_start = datetime(year, month, dom, DAY_START[0], DAY_START[1], tzinfo=ist_tz)
+    day_end = datetime(year, month, dom, DAY_END[0], DAY_END[1], tzinfo=ist_tz)
 
     required, optional = _collect_attendees(panel, schedule)
 
@@ -404,7 +444,7 @@ def build_panel_invite_meta(panel: models.Panel, day: int) -> dict:
         f"{_format_schedule_block(schedule)}\n\n"
         f"Total teams this day: {len(schedule)}\n"
         f"Slot length: {SLOT_MINUTES} minutes\n\n"
-        f"— RealHack 2026 Organizing Team"
+        f"Team RealHack"
     )
     body_html = _build_invite_body_html(panel, day, schedule, day_start)
 
@@ -471,8 +511,8 @@ def build_panel_invite_ics(
     schedule = schedule_for_day(panel, day)
 
     year, month, dom = EVENT_DATES[day]
-    day_start = datetime(year, month, dom, WORK_START[0], WORK_START[1])
-    day_end = datetime(year, month, dom, WORK_END[0], WORK_END[1])
+    day_start = datetime(year, month, dom, DAY_START[0], DAY_START[1])
+    day_end = datetime(year, month, dom, DAY_END[0], DAY_END[1])
 
     required, optional = _collect_attendees(panel, schedule)
 
@@ -483,7 +523,7 @@ def build_panel_invite_ics(
         f"Total teams this day: {len(schedule)}\n"
         f"Slot length: {SLOT_MINUTES} minutes\n"
         f"Organizers CC'd as optional attendees.\n\n"
-        f"— RealHack 2026 Organizing Team"
+        f"Team RealHack"
     )
 
     now_utc = datetime.utcnow()
