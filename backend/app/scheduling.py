@@ -97,6 +97,21 @@ def is_us_team(team: models.Team) -> bool:
     return False
 
 
+def _us_reason(team: models.Team) -> str:
+    """Short tooltip-friendly description of WHY a team is US-affiliated.
+    Returns an empty string for non-US teams."""
+    reasons: list[str] = []
+    if _is_us_location(team.mentor_location):
+        reasons.append(f"Mentor in US ({(team.mentor_name or '').strip().title() or 'unnamed'})")
+    us_members = [m for m in team.members if _is_us_location(m.location)]
+    if us_members:
+        names = ", ".join((m.name or m.email or "?").strip().title() for m in us_members[:3])
+        if len(us_members) > 3:
+            names += f", +{len(us_members) - 3} more"
+        reasons.append(f"{len(us_members)} member{'s' if len(us_members) != 1 else ''} in US ({names})")
+    return " · ".join(reasons)
+
+
 # ---- Schedule generation ----
 
 def _sort_teams(teams: list[models.Team]) -> list[models.Team]:
@@ -449,7 +464,8 @@ def build_panel_invite_meta(panel: models.Panel, day: int) -> dict:
     body_html = _build_invite_body_html(panel, day, schedule, day_start)
 
     # Flat schedule rows for the frontend modal's preview table — same 4 columns
-    # as the email body (Team / Panel / Slot date / Time start).
+    # as the email body (Team / Panel / Slot date / Time start), plus an
+    # is_us flag so the organizer can verify the US-first ordering visually.
     date_label = _ordinal_date(day_start)
     schedule_rows = [
         {
@@ -458,6 +474,8 @@ def build_panel_invite_meta(panel: models.Panel, day: int) -> dict:
             "slot": date_label,
             "time": start.strftime("%H:%M"),
             "mentor": (team.mentor_name or "").strip().title(),
+            "is_us": is_us_team(team),
+            "us_reason": _us_reason(team),
         }
         for team, start, _end in schedule
     ]

@@ -882,10 +882,15 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
           </div>
 
           {/* Tabular schedule preview */}
-          <details className="bg-ink-900/40 border border-slate-700/40 rounded-lg p-3">
+          <details className="bg-ink-900/40 border border-slate-700/40 rounded-lg p-3" open>
             <summary className="cursor-pointer text-xs font-bold text-slate-300 uppercase tracking-wide hover:text-slate-100">
-              Schedule preview ({meta.schedule.length} teams)
+              Schedule preview ({meta.schedule.length} teams · {meta.schedule.filter((r) => r.is_us).length} US-affiliated 🇺🇸)
             </summary>
+            <p className="text-xs text-slate-400 mt-2 mb-2 leading-relaxed">
+              <strong className="text-slate-300">Sort order:</strong> US-affiliated teams (US mentor or US member) go first to land in
+              morning slots — 9–12 IST overlaps late-evening US time, which is more humane than 14–17 IST.
+              Within each group, teams are alphabetical. Hover the 🇺🇸 badge to see why a team was flagged US.
+            </p>
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-xs border-collapse">
                 <thead>
@@ -902,7 +907,7 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
                     const isLunchTransition =
                       i > 0 &&
                       meta.schedule[i - 1].time < '13:00' &&
-                      row.time >= '14:00';
+                      row.time >= '13:30';
                     return (
                       <>
                         {isLunchTransition && (
@@ -912,8 +917,20 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
                             </td>
                           </tr>
                         )}
-                        <tr key={`row-${i}`} className="hover:bg-ink-900/60">
-                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-100 font-medium">{row.team}</td>
+                        <tr key={`row-${i}`} className={`hover:bg-ink-900/60 ${row.is_us ? 'bg-amber-500/5' : ''}`}>
+                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-100 font-medium">
+                            <span className="inline-flex items-center gap-1.5">
+                              {row.team}
+                              {row.is_us && (
+                                <span
+                                  title={row.us_reason || 'US-affiliated'}
+                                  className="cursor-help text-amber-300"
+                                >
+                                  🇺🇸
+                                </span>
+                              )}
+                            </span>
+                          </td>
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300">{row.panel}</td>
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300">{row.slot}</td>
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300 text-right font-mono">{row.time}</td>

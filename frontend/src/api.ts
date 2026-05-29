@@ -626,6 +626,8 @@ export interface ScheduleRow {
   slot: string;  // date label, e.g. '18th June'
   time: string; // start time HH:MM
   mentor: string;
+  is_us: boolean;
+  us_reason: string; // why this team is US-affiliated; empty for non-US teams
 }
 
 export interface PanelInviteMeta {
