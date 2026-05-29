@@ -114,16 +114,30 @@ def _us_reason(team: models.Team) -> str:
 
 # ---- Schedule generation ----
 
-def _sort_teams(teams: list[models.Team]) -> list[models.Team]:
-    """Sort: US-affiliated first, then alphabetical by team name within each group."""
-    return sorted(teams, key=lambda t: (0 if is_us_team(t) else 1, t.name.lower()))
+def _distribute_teams_across_days(
+    teams: list[models.Team],
+) -> tuple[list[models.Team], list[models.Team]]:
+    """Distribute a panel's teams across Day 1 and Day 2 such that:
 
+    1. US-affiliated teams (US mentor or US member) are split EVENLY between
+       both days — so both days get morning-IST slots for US folks, instead
+       of dumping every US team onto Day 1.
+    2. Within each day, US teams go FIRST (= earliest slots = morning IST,
+       which overlaps late evening US time — the most humane US window).
+    3. Non-US teams fill the rest in alphabetical order.
 
-def _split_for_days(teams: list[models.Team]) -> tuple[list[models.Team], list[models.Team]]:
-    """First half -> Day 1, second half -> Day 2. Already sorted with US-first,
-    so this naturally puts US-affiliated teams on Day 1 (earlier slots there too)."""
-    half = (len(teams) + 1) // 2  # Day 1 gets the extra if odd count
-    return teams[:half], teams[half:]
+    When the US count is odd, the extra US team lands on Day 1 (so Day 1
+    has at most one more US team than Day 2). Same tie-breaker for non-US.
+    """
+    us_teams = sorted([t for t in teams if is_us_team(t)], key=lambda t: t.name.lower())
+    non_us_teams = sorted([t for t in teams if not is_us_team(t)], key=lambda t: t.name.lower())
+
+    us_half = (len(us_teams) + 1) // 2
+    non_us_half = (len(non_us_teams) + 1) // 2
+
+    day1 = us_teams[:us_half] + non_us_teams[:non_us_half]
+    day2 = us_teams[us_half:] + non_us_teams[non_us_half:]
+    return day1, day2
 
 
 def _generate_slot_starts(date: datetime) -> list[datetime]:
@@ -166,8 +180,7 @@ def schedule_for_day(panel: models.Panel, day: int) -> list[tuple[models.Team, d
     date = datetime(year, month, dom)
 
     all_teams = [pt.team for pt in panel.teams if pt.team is not None]
-    sorted_teams = _sort_teams(all_teams)
-    day1_teams, day2_teams = _split_for_days(sorted_teams)
+    day1_teams, day2_teams = _distribute_teams_across_days(all_teams)
     teams_for_day = day1_teams if day == 1 else day2_teams
 
     if not teams_for_day:
