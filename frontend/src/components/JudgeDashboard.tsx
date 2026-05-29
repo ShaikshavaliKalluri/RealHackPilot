@@ -87,7 +87,8 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
         (t) =>
           t.name.toLowerCase().includes(q) ||
           (t.mentor_name && t.mentor_name.toLowerCase().includes(q)) ||
-          (t.idea && t.idea.toLowerCase().includes(q)),
+          (t.idea && t.idea.toLowerCase().includes(q)) ||
+          t.members.some((m) => m.name.toLowerCase().includes(q)),
       );
     }
     return list;
@@ -191,7 +192,7 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
             </div>
             <input
               type="text"
-              placeholder="Search team, mentor, or idea…"
+              placeholder="Search team, member, mentor, or idea…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="flex-1 min-w-[240px] bg-ink-800/60 border border-slate-700/40 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-lime-500/60"
