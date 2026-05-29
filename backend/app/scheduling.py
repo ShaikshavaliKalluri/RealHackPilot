@@ -205,20 +205,19 @@ def _collect_attendees(
 ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
     """Return (required, optional) lists of (email, common_name).
 
-    Required: panel judges + scheduled teams' members + their mentors
+    Required: scheduled teams' members + their mentors
     Optional: organizer CC list
+
+    Panel judges are intentionally excluded — the organizing team
+    notifies judges through a separate channel, so they should not
+    receive a calendar invite alongside teams.
 
     De-duplicated by lowercased email.
     """
     required: dict[str, str] = {}  # email_lower -> display name
 
-    # Panel judges
-    for pj in panel.judges:
-        j = pj.judge
-        if j and j.email:
-            required.setdefault(j.email.lower(), (j.name or j.email).strip())
-
-    # Scheduled teams' members + mentors
+    # Scheduled teams' members + mentors. Panel judges are intentionally
+    # NOT added here; see docstring.
     for team, _, _ in schedule:
         if team.mentor_email:
             required.setdefault(team.mentor_email.lower(), (team.mentor_name or team.mentor_email).strip().title())
