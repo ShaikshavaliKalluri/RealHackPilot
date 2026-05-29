@@ -190,13 +190,26 @@ export function JudgeDashboard({ judgeId, judgeName, user, preview }: Props) {
                 </button>
               ))}
             </div>
-            <input
-              type="text"
-              placeholder="Search team, member, mentor, or idea…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="flex-1 min-w-[240px] bg-ink-800/60 border border-slate-700/40 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-lime-500/60"
-            />
+            <div className="relative flex-1 min-w-[240px]">
+              <input
+                type="text"
+                placeholder="Search team, member, mentor, or idea…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full bg-ink-800/60 border border-slate-700/40 rounded-lg px-4 py-2 pr-9 text-sm focus:outline-none focus:border-lime-500/60"
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                  title="Clear search"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-slate-700/60 transition text-lg leading-none"
+                >
+                  ×
+                </button>
+              )}
+            </div>
             <span className="text-sm text-slate-400">
               {filteredTeams.length} of {teams.length}
             </span>
