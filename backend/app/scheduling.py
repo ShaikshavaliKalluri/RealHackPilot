@@ -317,15 +317,18 @@ def build_panel_invite_ics(
     lines.append(f"DESCRIPTION:{_ics_escape(description_plain)}")
     lines.append("LOCATION:Microsoft Teams Meeting")
     lines.append("SEQUENCE:0")
-    lines.append("STATUS:CONFIRMED")
+    lines.append("STATUS:TENTATIVE")
     lines.append("TRANSP:OPAQUE")
 
-    # ORGANIZER must be the user who clicked the button — otherwise Outlook
-    # shows Accept/Decline instead of Send when they open the .ics.
-    if organizer_email:
-        lines.append(
-            f"ORGANIZER;CN={_ics_escape(organizer_name or organizer_email)}:mailto:{organizer_email}"
-        )
+    # We intentionally omit the ORGANIZER property. When ORGANIZER is set
+    # (even to the signed-in user), Outlook 365 treats the .ics as a record
+    # of an already-sent meeting and shows only Accept/Decline (greyed out
+    # for the organizer) — no Send button. Without ORGANIZER, Outlook opens
+    # the meeting in compose mode with Send available, which is what the
+    # organizer needs in order to review and actually send invites.
+    # organizer_email/organizer_name are still passed in for future use
+    # (e.g. logging or a Graph-based send path).
+    _ = organizer_email, organizer_name
 
     for email, name in required:
         lines.append(
