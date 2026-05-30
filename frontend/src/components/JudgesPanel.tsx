@@ -995,19 +995,30 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
                 </thead>
                 <tbody>
                   {scheduleRows.map((row, i) => {
-                    const isLunchTransition =
-                      i > 0 &&
-                      scheduleRows[i - 1].time < '13:00' &&
-                      row.time >= '13:30';
+                    // Find every break that falls between the previous slot
+                    // and this slot. Slots are 15 min apart by default; any
+                    // gap larger than that means a break sits between them.
+                    const breaksBefore = i === 0 ? [] : BREAK_WINDOWS.filter((b) => {
+                      const [ph, pm] = scheduleRows[i - 1].time.split(':').map(Number);
+                      const prevEndMin = ph * 60 + pm + 15;
+                      const [ch, cm] = row.time.split(':').map(Number);
+                      const curStartMin = ch * 60 + cm;
+                      return prevEndMin <= b.startMin && b.endMin <= curStartMin;
+                    });
                     return (
                       <React.Fragment key={`r-${i}`}>
-                        {isLunchTransition && (
-                          <tr>
+                        {breaksBefore.map((b) => (
+                          <tr key={`break-${i}-${b.startMin}`}>
                             <td colSpan={6} className="px-3 py-2 text-center font-bold text-sky-300 bg-sky-500/10 border border-slate-700/60">
                               BREAK
+                              <span className="font-normal text-sky-400/80 ml-2 font-mono text-xs">
+                                {Math.floor(b.startMin / 60).toString().padStart(2, '0')}:{(b.startMin % 60).toString().padStart(2, '0')}
+                                {' – '}
+                                {Math.floor(b.endMin / 60).toString().padStart(2, '0')}:{(b.endMin % 60).toString().padStart(2, '0')}
+                              </span>
                             </td>
                           </tr>
-                        )}
+                        ))}
                         <tr className={`hover:bg-ink-900/60 ${row.is_us ? 'bg-amber-500/5' : ''}`}>
                           <td className="px-1 py-1 border border-slate-700/60 text-center">
                             <div className="flex gap-0.5 justify-center">
