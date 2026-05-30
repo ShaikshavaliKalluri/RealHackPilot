@@ -147,17 +147,28 @@ def _distribute_teams_across_days(
         else:
             unpinned.append(t)
 
-    # US-first within the unpinned pool so US-team allocation balances both
-    # days even when the organizer has pinned some teams.
-    sorted_unpinned = (
-        sorted([t for t in unpinned if is_us_team(t)], key=lambda t: t.name.lower())
-        + sorted([t for t in unpinned if not is_us_team(t)], key=lambda t: t.name.lower())
-    )
+    # Partition unpinned by US affiliation. Each group is split between the
+    # two days BEFORE the other group is allocated — otherwise concatenating
+    # 'US first, non-US after' would dump every US team into Day 1's slice
+    # whenever us_count <= day1_target (always true for our panel sizes).
+    us_unpinned = sorted([t for t in unpinned if is_us_team(t)], key=lambda t: t.name.lower())
+    non_us_unpinned = sorted([t for t in unpinned if not is_us_team(t)], key=lambda t: t.name.lower())
 
+    # Balance the US pool across both days, taking into account any US-team
+    # pins the organizer has already placed.
+    pinned_us_day1 = sum(1 for t in day1 if is_us_team(t))
+    pinned_us_day2 = sum(1 for t in day2 if is_us_team(t))
+    total_us = pinned_us_day1 + pinned_us_day2 + len(us_unpinned)
+    target_us_day1 = (total_us + 1) // 2  # Day 1 gets the extra US if odd
+    us_to_day1 = max(0, min(len(us_unpinned), target_us_day1 - pinned_us_day1))
+    day1.extend(us_unpinned[:us_to_day1])
+    day2.extend(us_unpinned[us_to_day1:])
+
+    # Then fill non-US to balance overall counts (Day 1 gets the extra non-US if odd).
     target_day1_total = (len(teams) + 1) // 2
-    day1_need = max(0, target_day1_total - len(day1))
-    day1.extend(sorted_unpinned[:day1_need])
-    day2.extend(sorted_unpinned[day1_need:])
+    non_us_to_day1 = max(0, min(len(non_us_unpinned), target_day1_total - len(day1)))
+    day1.extend(non_us_unpinned[:non_us_to_day1])
+    day2.extend(non_us_unpinned[non_us_to_day1:])
 
     # Inside each day, US-first then alphabetical (drives slot order).
     sort_key = lambda t: (0 if is_us_team(t) else 1, t.name.lower())
