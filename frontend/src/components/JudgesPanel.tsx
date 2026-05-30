@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { Team, Judge } from '../types';
 import {
   fetchJudges,
@@ -12,10 +12,10 @@ import {
   deletePanel,
   setPanelTeams,
   setPanelJudges,
-  downloadPanelInvite,
   fetchPanelInviteMeta,
   type Panel,
   type PanelInviteMeta,
+  type ScheduleRow,
 } from '../api';
 
 interface Props {
@@ -751,8 +751,80 @@ async function copyRichTextOrPlain(html: string, plainFallback: string): Promise
   return false;
 }
 
+// Render the schedule table rows as HTML, inserting BREAK rows where the
+// schedule time crosses each break window. Mirrors the backend's
+// _format_schedule_html so the regenerated body matches the original style
+// after the organizer reorders.
+const BREAK_WINDOWS = [
+  { startMin: 11 * 60, endMin: 11 * 60 + 15 },
+  { startMin: 12 * 60 + 30, endMin: 13 * 60 + 30 },
+  { startMin: 15 * 60, endMin: 15 * 60 + 15 },
+];
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderTableRowsHtml(rows: ScheduleRow[]): string {
+  let breakIdx = 0;
+  const out: string[] = [];
+  for (const row of rows) {
+    const [h, m] = row.time.split(':').map(Number);
+    const minutes = h * 60 + m;
+    while (breakIdx < BREAK_WINDOWS.length && BREAK_WINDOWS[breakIdx].endMin <= minutes) {
+      out.push(
+        `<tr style="background:#dbe9f7;"><td colspan="4" style="padding:10px 12px;border:1px solid #c9d6e8;text-align:center;font-weight:700;color:#0a4f99;letter-spacing:.5px;">BREAK</td></tr>`,
+      );
+      breakIdx++;
+    }
+    out.push(
+      `<tr>` +
+        `<td style="padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;"><strong style="color:#1a1f26;">${escapeHtml(row.team)}</strong></td>` +
+        `<td style="padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;">${escapeHtml(row.panel)}</td>` +
+        `<td style="padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;">${escapeHtml(row.slot)}</td>` +
+        `<td style="padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;font-family:Consolas,monospace;text-align:right;">${escapeHtml(row.time)}</td>` +
+        `</tr>`,
+    );
+  }
+  return out.join('');
+}
+
+function regenerateBodyHtml(originalBodyHtml: string, scheduleRows: ScheduleRow[]): string {
+  const tbodyRegex = /(<tbody>)([\s\S]*?)(<\/tbody>)/;
+  if (!tbodyRegex.test(originalBodyHtml)) return originalBodyHtml;
+  const newRows = renderTableRowsHtml(scheduleRows);
+  return originalBodyHtml.replace(tbodyRegex, `$1${newRows}$3`);
+}
+
 function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps) {
   const [lastCopied, setLastCopied] = useState<CopyTarget | null>(null);
+  // Editable copy of the schedule. The slot/time/panel for each position
+  // are fixed (those are the calendar slots); we only swap which team is
+  // assigned to each slot when the user reorders.
+  const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>(meta.schedule);
+  const isReordered = scheduleRows.some((r, i) => r.team !== meta.schedule[i].team);
+
+  // Regenerate the body HTML whenever the order changes — keeps the preview
+  // and the Copy-body button in lockstep with the user's edits.
+  const currentBodyHtml = isReordered ? regenerateBodyHtml(meta.body_html, scheduleRows) : meta.body_html;
+
+  const swapRows = (i: number, j: number) => {
+    if (i < 0 || j < 0 || i >= scheduleRows.length || j >= scheduleRows.length) return;
+    setScheduleRows((prev) => {
+      const next = [...prev];
+      const a = next[i];
+      const b = next[j];
+      // Swap team identity (team name, mentor, US flag); keep position
+      // identity (slot date, time, panel) at the original index.
+      next[i] = { ...a, team: b.team, mentor: b.mentor, is_us: b.is_us, us_reason: b.us_reason };
+      next[j] = { ...b, team: a.team, mentor: a.mentor, is_us: a.is_us, us_reason: a.us_reason };
+      return next;
+    });
+  };
+
+  const resetOrder = () => {
+    setScheduleRows(meta.schedule);
+  };
 
   const flashCopied = (target: CopyTarget) => {
     setLastCopied(target);
@@ -772,7 +844,7 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
 
   const copyBody = async () => {
     try {
-      await copyRichTextOrPlain(meta.body_html, meta.body);
+      await copyRichTextOrPlain(currentBodyHtml, meta.body);
       flashCopied('body');
     } catch (e: any) {
       alert(`Copy failed: ${e?.message ?? e}. Open the HTML preview below and copy manually.`);
@@ -848,8 +920,14 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
             </div>
             <div
               className="bg-white text-slate-900 rounded p-3 max-h-72 overflow-y-auto text-sm"
-              dangerouslySetInnerHTML={{ __html: meta.body_html }}
+              dangerouslySetInnerHTML={{ __html: currentBodyHtml }}
             />
+            {isReordered && (
+              <p className="text-xs text-amber-300 mt-2">
+                ⚠ Schedule has been reordered — body now reflects your edits. Use{' '}
+                <strong>Copy body</strong> above to push the updated version into Outlook.
+              </p>
+            )}
           </div>
 
           {/* Attendee groups */}
@@ -881,20 +959,33 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
             </div>
           </div>
 
-          {/* Tabular schedule preview */}
+          {/* Tabular schedule preview — reorderable */}
           <details className="bg-ink-900/40 border border-slate-700/40 rounded-lg p-3" open>
             <summary className="cursor-pointer text-xs font-bold text-slate-300 uppercase tracking-wide hover:text-slate-100">
-              Schedule preview ({meta.schedule.length} teams · {meta.schedule.filter((r) => r.is_us).length} US-affiliated 🇺🇸)
+              Schedule preview ({scheduleRows.length} teams · {scheduleRows.filter((r) => r.is_us).length} US-affiliated 🇺🇸)
+              {isReordered && <span className="ml-2 text-amber-300 font-normal normal-case tracking-normal">(modified)</span>}
             </summary>
             <p className="text-xs text-slate-400 mt-2 mb-2 leading-relaxed">
-              <strong className="text-slate-300">Sort order:</strong> US-affiliated teams (US mentor or US member) go first to land in
-              morning slots — 9–12 IST overlaps late-evening US time, which is more humane than 14–17 IST.
-              Within each group, teams are alphabetical. Hover the 🇺🇸 badge to see why a team was flagged US.
+              <strong className="text-slate-300">Default sort:</strong> US-affiliated teams (US mentor or US member) split
+              evenly across both days, taking morning IST slots — 9–12 IST overlaps late-evening US time, more humane than 14–17 IST.
+              Within each group, alphabetical. Use the ↑/↓ buttons to swap any team into a different slot before sending. The
+              body preview above updates live; click <strong>Copy body</strong> after reordering to push the updated invite.
             </p>
+            {isReordered && (
+              <div className="mb-2">
+                <button
+                  onClick={resetOrder}
+                  className="text-xs px-2 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                >
+                  ↺ Reset to default order
+                </button>
+              </div>
+            )}
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-xs border-collapse">
                 <thead>
                   <tr className="bg-ink-900/80 text-amber-200">
+                    <th className="px-2 py-2 text-center border border-slate-700/60 w-20">Move</th>
                     <th className="px-3 py-2 text-left border border-slate-700/60">Team Name</th>
                     <th className="px-3 py-2 text-left border border-slate-700/60">Panel</th>
                     <th className="px-3 py-2 text-left border border-slate-700/60">Slot</th>
@@ -903,21 +994,41 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
                   </tr>
                 </thead>
                 <tbody>
-                  {meta.schedule.map((row, i) => {
+                  {scheduleRows.map((row, i) => {
                     const isLunchTransition =
                       i > 0 &&
-                      meta.schedule[i - 1].time < '13:00' &&
+                      scheduleRows[i - 1].time < '13:00' &&
                       row.time >= '13:30';
                     return (
-                      <>
+                      <React.Fragment key={`r-${i}`}>
                         {isLunchTransition && (
-                          <tr key={`break-${i}`}>
-                            <td colSpan={5} className="px-3 py-2 text-center font-bold text-sky-300 bg-sky-500/10 border border-slate-700/60">
+                          <tr>
+                            <td colSpan={6} className="px-3 py-2 text-center font-bold text-sky-300 bg-sky-500/10 border border-slate-700/60">
                               BREAK
                             </td>
                           </tr>
                         )}
-                        <tr key={`row-${i}`} className={`hover:bg-ink-900/60 ${row.is_us ? 'bg-amber-500/5' : ''}`}>
+                        <tr className={`hover:bg-ink-900/60 ${row.is_us ? 'bg-amber-500/5' : ''}`}>
+                          <td className="px-1 py-1 border border-slate-700/60 text-center">
+                            <div className="flex gap-0.5 justify-center">
+                              <button
+                                onClick={() => swapRows(i, i - 1)}
+                                disabled={i === 0}
+                                className="w-6 h-6 flex items-center justify-center rounded text-slate-300 hover:bg-slate-700/60 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed transition"
+                                title="Move up (swap with the slot above)"
+                              >
+                                ↑
+                              </button>
+                              <button
+                                onClick={() => swapRows(i, i + 1)}
+                                disabled={i === scheduleRows.length - 1}
+                                className="w-6 h-6 flex items-center justify-center rounded text-slate-300 hover:bg-slate-700/60 hover:text-white disabled:opacity-25 disabled:cursor-not-allowed transition"
+                                title="Move down (swap with the slot below)"
+                              >
+                                ↓
+                              </button>
+                            </div>
+                          </td>
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-100 font-medium">
                             <span className="inline-flex items-center gap-1.5">
                               {row.team}
@@ -936,7 +1047,7 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300 text-right font-mono">{row.time}</td>
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-400">{row.mentor || '—'}</td>
                         </tr>
-                      </>
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
