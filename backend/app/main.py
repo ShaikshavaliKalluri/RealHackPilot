@@ -45,7 +45,7 @@ from .schemas import (
     JudgeAIRequest, JudgeHumanRequest,
     JudgeOut, JudgeCreate, JudgeUpdate, JudgeScoreSubmit, JudgeScoreOut,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
-    PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet,
+    PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet, PanelSwapTeamDays,
     SwagPersonOut, SwagMarkRequest, SwagStats,
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
     CommLogOut, TeamChannelCreateRequest, TeamMessageRequest, BroadcastRequest,
@@ -1127,9 +1127,70 @@ def get_panel_invite_meta(
     if not panel:
         raise HTTPException(status_code=404, detail="panel not found")
     try:
-        return scheduling.build_panel_invite_meta(panel, day=day)
+        return scheduling.build_panel_invite_meta(panel, day=day, db=db)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/panels/{panel_id}/swap-team-days")
+def swap_panel_team_days(
+    panel_id: int,
+    req: PanelSwapTeamDays,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Swap two teams' day assignments in a panel. Both teams must belong
+    to this panel. Stores the override in panel_team_day_overrides so the
+    decision survives subsequent invite-meta requests.
+    """
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+    if req.team_a_id == req.team_b_id:
+        raise HTTPException(status_code=400, detail="team_a_id and team_b_id must differ")
+
+    panel_team_ids = {pt.team_id for pt in panel.teams}
+    if req.team_a_id not in panel_team_ids or req.team_b_id not in panel_team_ids:
+        raise HTTPException(status_code=400, detail="both teams must belong to this panel")
+
+    # Compute the current day for each team using the existing distribution
+    # (which already honors any prior overrides).
+    all_teams = [pt.team for pt in panel.teams if pt.team is not None]
+    existing_overrides = scheduling._load_day_overrides(panel, db)
+    day1_teams, day2_teams = scheduling._distribute_teams_across_days(
+        all_teams, overrides=existing_overrides
+    )
+    day_for = {t.id: 1 for t in day1_teams}
+    day_for.update({t.id: 2 for t in day2_teams})
+
+    a_day = day_for.get(req.team_a_id)
+    b_day = day_for.get(req.team_b_id)
+    if a_day is None or b_day is None:
+        raise HTTPException(status_code=400, detail="could not resolve current day for one of the teams")
+    if a_day == b_day:
+        raise HTTPException(
+            status_code=400,
+            detail=f"both teams are already on Day {a_day} — nothing to swap",
+        )
+
+    def upsert(team_id: int, day: int) -> None:
+        existing = (
+            db.query(models.PanelTeamDayOverride)
+            .filter(
+                models.PanelTeamDayOverride.panel_id == panel_id,
+                models.PanelTeamDayOverride.team_id == team_id,
+            )
+            .first()
+        )
+        if existing:
+            existing.day = day
+        else:
+            db.add(models.PanelTeamDayOverride(panel_id=panel_id, team_id=team_id, day=day))
+
+    upsert(req.team_a_id, b_day)  # team A takes team B's day
+    upsert(req.team_b_id, a_day)
+    db.commit()
+    return {"swapped": True, "team_a_id": req.team_a_id, "team_a_new_day": b_day, "team_b_id": req.team_b_id, "team_b_new_day": a_day}
 
 
 # ===== Swag (t-shirt) pickup =====

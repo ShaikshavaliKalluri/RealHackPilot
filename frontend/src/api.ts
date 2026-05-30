@@ -621,6 +621,7 @@ export async function downloadPanelInvite(panelId: number, day: 1 | 2): Promise<
 }
 
 export interface ScheduleRow {
+  team_id: number;
   team: string;
   panel: string;
   slot: string;  // date label, e.g. '18th June'
@@ -642,6 +643,19 @@ export interface PanelInviteMeta {
   team_count: number;
   schedule: ScheduleRow[];
   day_label: string;
+}
+
+export async function swapPanelTeamDays(panelId: number, teamAId: number, teamBId: number): Promise<void> {
+  const r = await authFetch(`${BASE}/panels/${panelId}/swap-team-days`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ team_a_id: teamAId, team_b_id: teamBId }),
+  });
+  if (!r.ok) {
+    let msg = `Swap failed: ${r.status}`;
+    try { const j = await r.json(); if (j?.detail) msg = j.detail; } catch { /* keep status msg */ }
+    throw new Error(msg);
+  }
 }
 
 export async function fetchPanelInviteMeta(panelId: number, day: 1 | 2): Promise<PanelInviteMeta> {

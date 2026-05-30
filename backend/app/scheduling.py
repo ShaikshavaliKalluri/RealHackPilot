@@ -116,28 +116,64 @@ def _us_reason(team: models.Team) -> str:
 
 def _distribute_teams_across_days(
     teams: list[models.Team],
+    overrides: dict[int, int] | None = None,
 ) -> tuple[list[models.Team], list[models.Team]]:
     """Distribute a panel's teams across Day 1 and Day 2 such that:
 
-    1. US-affiliated teams (US mentor or US member) are split EVENLY between
-       both days — so both days get morning-IST slots for US folks, instead
-       of dumping every US team onto Day 1.
-    2. Within each day, US teams go FIRST (= earliest slots = morning IST,
+    1. Any team in `overrides` (team_id -> day) is PINNED to its assigned
+       day — this is how the 'Move to Day N' UI in the invite workspace
+       persists organizer overrides across requests.
+    2. Remaining (un-pinned) teams are auto-distributed: US-affiliated
+       teams (US mentor or US member) are split EVENLY between both days
+       so both days get morning-IST slots for US folks, then non-US fills
+       the gaps.
+    3. Within each day, US teams go FIRST (= earliest slots = morning IST,
        which overlaps late evening US time — the most humane US window).
-    3. Non-US teams fill the rest in alphabetical order.
 
-    When the US count is odd, the extra US team lands on Day 1 (so Day 1
-    has at most one more US team than Day 2). Same tie-breaker for non-US.
+    When the unpinned count is odd, Day 1 gets the extra so its team
+    count is at most one more than Day 2.
     """
-    us_teams = sorted([t for t in teams if is_us_team(t)], key=lambda t: t.name.lower())
-    non_us_teams = sorted([t for t in teams if not is_us_team(t)], key=lambda t: t.name.lower())
+    overrides = overrides or {}
 
-    us_half = (len(us_teams) + 1) // 2
-    non_us_half = (len(non_us_teams) + 1) // 2
+    day1: list[models.Team] = []
+    day2: list[models.Team] = []
+    unpinned: list[models.Team] = []
+    for t in teams:
+        d = overrides.get(t.id)
+        if d == 1:
+            day1.append(t)
+        elif d == 2:
+            day2.append(t)
+        else:
+            unpinned.append(t)
 
-    day1 = us_teams[:us_half] + non_us_teams[:non_us_half]
-    day2 = us_teams[us_half:] + non_us_teams[non_us_half:]
+    # US-first within the unpinned pool so US-team allocation balances both
+    # days even when the organizer has pinned some teams.
+    sorted_unpinned = (
+        sorted([t for t in unpinned if is_us_team(t)], key=lambda t: t.name.lower())
+        + sorted([t for t in unpinned if not is_us_team(t)], key=lambda t: t.name.lower())
+    )
+
+    target_day1_total = (len(teams) + 1) // 2
+    day1_need = max(0, target_day1_total - len(day1))
+    day1.extend(sorted_unpinned[:day1_need])
+    day2.extend(sorted_unpinned[day1_need:])
+
+    # Inside each day, US-first then alphabetical (drives slot order).
+    sort_key = lambda t: (0 if is_us_team(t) else 1, t.name.lower())
+    day1.sort(key=sort_key)
+    day2.sort(key=sort_key)
     return day1, day2
+
+
+def _load_day_overrides(panel: models.Panel, db: Session) -> dict[int, int]:
+    """Fetch team_id -> day overrides for this panel."""
+    rows = (
+        db.query(models.PanelTeamDayOverride)
+        .filter(models.PanelTeamDayOverride.panel_id == panel.id)
+        .all()
+    )
+    return {r.team_id: r.day for r in rows if r.day in (1, 2)}
 
 
 def _generate_slot_starts(date: datetime) -> list[datetime]:
@@ -171,16 +207,25 @@ def _generate_slot_starts(date: datetime) -> list[datetime]:
     return starts
 
 
-def schedule_for_day(panel: models.Panel, day: int) -> list[tuple[models.Team, datetime, datetime]]:
+def schedule_for_day(
+    panel: models.Panel,
+    day: int,
+    db: Session | None = None,
+) -> list[tuple[models.Team, datetime, datetime]]:
     """Return [(team, start_dt, end_dt)] for the requested day. Times are naive
-    local IST (no tzinfo) — the .ics layer attaches TZID:India Standard Time."""
+    local IST (no tzinfo) — the .ics layer attaches TZID:India Standard Time.
+
+    When `db` is provided, organizer-set day overrides from the
+    panel_team_day_overrides table are honored before auto-distribution
+    fills the remaining slots."""
     if day not in EVENT_DATES:
         raise ValueError(f"day must be 1 or 2, got {day}")
     year, month, dom = EVENT_DATES[day]
     date = datetime(year, month, dom)
 
     all_teams = [pt.team for pt in panel.teams if pt.team is not None]
-    day1_teams, day2_teams = _distribute_teams_across_days(all_teams)
+    overrides = _load_day_overrides(panel, db) if db is not None else {}
+    day1_teams, day2_teams = _distribute_teams_across_days(all_teams, overrides=overrides)
     teams_for_day = day1_teams if day == 1 else day2_teams
 
     if not teams_for_day:
@@ -444,7 +489,7 @@ def _collect_attendees(
     )
 
 
-def build_panel_invite_meta(panel: models.Panel, day: int) -> dict:
+def build_panel_invite_meta(panel: models.Panel, day: int, db: Session | None = None) -> dict:
     """Return JSON-ready meeting metadata for the Outlook-Web compose deeplink.
 
     Used by new Outlook (which doesn't reliably open downloaded .ics files):
@@ -458,7 +503,7 @@ def build_panel_invite_meta(panel: models.Panel, day: int) -> dict:
     if day not in EVENT_DATES:
         raise ValueError(f"day must be 1 or 2, got {day}")
 
-    schedule = schedule_for_day(panel, day)
+    schedule = schedule_for_day(panel, day, db=db)
     year, month, dom = EVENT_DATES[day]
     ist_tz = timezone(IST_OFFSET)
     day_start = datetime(year, month, dom, DAY_START[0], DAY_START[1], tzinfo=ist_tz)
@@ -482,6 +527,7 @@ def build_panel_invite_meta(panel: models.Panel, day: int) -> dict:
     date_label = _ordinal_date(day_start)
     schedule_rows = [
         {
+            "team_id": team.id,
             "team": team.name,
             "panel": panel.name,
             "slot": date_label,
@@ -539,7 +585,7 @@ def build_panel_invite_ics(
     if day not in EVENT_DATES:
         raise ValueError(f"day must be 1 or 2, got {day}")
 
-    schedule = schedule_for_day(panel, day)
+    schedule = schedule_for_day(panel, day, db=db)
 
     year, month, dom = EVENT_DATES[day]
     day_start = datetime(year, month, dom, DAY_START[0], DAY_START[1])

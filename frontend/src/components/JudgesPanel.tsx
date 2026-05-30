@@ -13,6 +13,7 @@ import {
   setPanelTeams,
   setPanelJudges,
   fetchPanelInviteMeta,
+  swapPanelTeamDays,
   type Panel,
   type PanelInviteMeta,
   type ScheduleRow,
@@ -56,9 +57,10 @@ export function JudgesPanel({ teams }: Props) {
   const [printingPanelId, setPrintingPanelId] = useState<number | null>(null);
   // Outlook-invite prep modal state — single workspace where the organizer
   // copies subject / body / attendee lists to paste into a manually-opened
-  // Outlook new-meeting compose dialog.
+  // Outlook new-meeting compose dialog. panelId enables in-modal actions
+  // like cross-day team swaps that need a server roundtrip.
   const [inviteMeta, setInviteMeta] = useState<
-    | { meta: PanelInviteMeta; panelName: string; day: 1 | 2 }
+    | { meta: PanelInviteMeta; panelName: string; panelId: number; day: 1 | 2 }
     | null
   >(null);
 
@@ -163,9 +165,19 @@ export function JudgesPanel({ teams }: Props) {
   const handleOpenInviteWorkspace = async (panel: Panel, day: 1 | 2) => {
     try {
       const meta = await fetchPanelInviteMeta(panel.id, day);
-      setInviteMeta({ meta, panelName: panel.name, day });
+      setInviteMeta({ meta, panelName: panel.name, panelId: panel.id, day });
     } catch (e: any) {
       alert(`Day ${day} invite failed: ${e?.message ?? e}`);
+    }
+  };
+
+  const refreshInviteMeta = async () => {
+    if (!inviteMeta) return;
+    try {
+      const meta = await fetchPanelInviteMeta(inviteMeta.panelId, inviteMeta.day);
+      setInviteMeta({ ...inviteMeta, meta });
+    } catch (e: any) {
+      alert(`Refresh failed: ${e?.message ?? e}`);
     }
   };
 
@@ -706,9 +718,11 @@ export function JudgesPanel({ teams }: Props) {
 
       {inviteMeta !== null && (
         <InvitePrepModal
+          panelId={inviteMeta.panelId}
           panelName={inviteMeta.panelName}
           day={inviteMeta.day}
           meta={inviteMeta.meta}
+          onRefresh={refreshInviteMeta}
           onClose={() => setInviteMeta(null)}
         />
       )}
@@ -726,9 +740,11 @@ export function JudgesPanel({ teams }: Props) {
 // modal just hands them what they need with one-click copy.
 
 interface InvitePrepModalProps {
+  panelId: number;
   panelName: string;
   day: 1 | 2;
   meta: PanelInviteMeta;
+  onRefresh: () => Promise<void>;
   onClose: () => void;
 }
 
@@ -796,13 +812,59 @@ function regenerateBodyHtml(originalBodyHtml: string, scheduleRows: ScheduleRow[
   return originalBodyHtml.replace(tbodyRegex, `$1${newRows}$3`);
 }
 
-function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps) {
+function InvitePrepModal({ panelId, panelName, day, meta, onRefresh, onClose }: InvitePrepModalProps) {
   const [lastCopied, setLastCopied] = useState<CopyTarget | null>(null);
   // Editable copy of the schedule. The slot/time/panel for each position
   // are fixed (those are the calendar slots); we only swap which team is
   // assigned to each slot when the user reorders.
   const [scheduleRows, setScheduleRows] = useState<ScheduleRow[]>(meta.schedule);
   const isReordered = scheduleRows.some((r, i) => r.team !== meta.schedule[i].team);
+
+  // Reset local state whenever the meta prop changes (e.g. after a
+  // cross-day swap forces a refetch).
+  React.useEffect(() => {
+    setScheduleRows(meta.schedule);
+  }, [meta]);
+
+  // Cross-day swap picker state — which row is initiating, and the lazy-
+  // loaded list of teams on the OTHER day to choose a swap partner from.
+  const otherDay: 1 | 2 = day === 1 ? 2 : 1;
+  const [swapPicker, setSwapPicker] = useState<{ row: ScheduleRow } | null>(null);
+  const [otherDayRows, setOtherDayRows] = useState<ScheduleRow[] | null>(null);
+  const [otherDayLoading, setOtherDayLoading] = useState(false);
+  const [swapping, setSwapping] = useState(false);
+
+  const openSwapPicker = async (row: ScheduleRow) => {
+    setSwapPicker({ row });
+    if (otherDayRows === null) {
+      setOtherDayLoading(true);
+      try {
+        const otherMeta = await fetchPanelInviteMeta(panelId, otherDay);
+        setOtherDayRows(otherMeta.schedule);
+      } catch (e: any) {
+        alert(`Could not load Day ${otherDay} teams: ${e?.message ?? e}`);
+        setSwapPicker(null);
+      } finally {
+        setOtherDayLoading(false);
+      }
+    }
+  };
+
+  const confirmSwap = async (partner: ScheduleRow) => {
+    if (!swapPicker) return;
+    setSwapping(true);
+    try {
+      await swapPanelTeamDays(panelId, swapPicker.row.team_id, partner.team_id);
+      setSwapPicker(null);
+      // Invalidate the other-day cache and refresh this modal's meta.
+      setOtherDayRows(null);
+      await onRefresh();
+    } catch (e: any) {
+      alert(`Swap failed: ${e?.message ?? e}`);
+    } finally {
+      setSwapping(false);
+    }
+  };
 
   // Regenerate the body HTML whenever the order changes — keeps the preview
   // and the Copy-body button in lockstep with the user's edits.
@@ -985,7 +1047,8 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
               <table className="w-full text-xs border-collapse">
                 <thead>
                   <tr className="bg-ink-900/80 text-amber-200">
-                    <th className="px-2 py-2 text-center border border-slate-700/60 w-20">Move</th>
+                    <th className="px-2 py-2 text-center border border-slate-700/60 w-16">Move</th>
+                    <th className="px-2 py-2 text-center border border-slate-700/60 w-24">To Day {otherDay}</th>
                     <th className="px-3 py-2 text-left border border-slate-700/60">Team Name</th>
                     <th className="px-3 py-2 text-left border border-slate-700/60">Panel</th>
                     <th className="px-3 py-2 text-left border border-slate-700/60">Slot</th>
@@ -1009,7 +1072,7 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
                       <React.Fragment key={`r-${i}`}>
                         {breaksBefore.map((b) => (
                           <tr key={`break-${i}-${b.startMin}`}>
-                            <td colSpan={6} className="px-3 py-2 text-center font-bold text-sky-300 bg-sky-500/10 border border-slate-700/60">
+                            <td colSpan={7} className="px-3 py-2 text-center font-bold text-sky-300 bg-sky-500/10 border border-slate-700/60">
                               BREAK
                               <span className="font-normal text-sky-400/80 ml-2 font-mono text-xs">
                                 {Math.floor(b.startMin / 60).toString().padStart(2, '0')}:{(b.startMin % 60).toString().padStart(2, '0')}
@@ -1039,6 +1102,16 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
                                 ↓
                               </button>
                             </div>
+                          </td>
+                          <td className="px-1 py-1 border border-slate-700/60 text-center">
+                            <button
+                              onClick={() => openSwapPicker(row)}
+                              disabled={swapping}
+                              className="text-xs px-2 py-1 rounded border border-sky-500/30 hover:border-sky-500/60 hover:bg-sky-500/10 text-sky-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                              title={`Swap ${row.team} with a team currently on Day ${otherDay}`}
+                            >
+                              → Day {otherDay}
+                            </button>
                           </td>
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-100 font-medium">
                             <span className="inline-flex items-center gap-1.5">
@@ -1076,6 +1149,59 @@ function InvitePrepModal({ panelName, day, meta, onClose }: InvitePrepModalProps
           </button>
         </div>
       </div>
+
+      {/* Cross-day swap picker */}
+      {swapPicker && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => !swapping && setSwapPicker(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-ink-800 border border-sky-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col max-h-[80vh]"
+          >
+            <div className="bg-gradient-to-br from-sky-500/25 to-cyan-500/15 p-4 border-b border-sky-500/40">
+              <h3 className="font-bold text-sky-200 text-sm">Swap with Day {otherDay} team</h3>
+              <p className="text-xs text-slate-300 mt-1">
+                <strong className="text-slate-100">{swapPicker.row.team}</strong> ({swapPicker.row.time}) will move to Day {otherDay}, and the team you pick will take its slot on Day {day}.
+              </p>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              {otherDayLoading ? (
+                <div className="text-sm text-slate-400 text-center py-6">Loading Day {otherDay} teams…</div>
+              ) : otherDayRows && otherDayRows.length > 0 ? (
+                <div className="space-y-1">
+                  {otherDayRows.map((row) => (
+                    <button
+                      key={row.team_id}
+                      onClick={() => confirmSwap(row)}
+                      disabled={swapping}
+                      className="w-full text-left px-3 py-2 rounded border border-slate-700/60 hover:border-sky-500/60 hover:bg-sky-500/10 text-slate-200 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between gap-2"
+                    >
+                      <span className="flex items-center gap-1.5 min-w-0">
+                        <span className="truncate">{row.team}</span>
+                        {row.is_us && <span title={row.us_reason} className="text-amber-300 shrink-0">🇺🇸</span>}
+                      </span>
+                      <span className="font-mono text-xs text-slate-400 shrink-0">{row.time}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-slate-400 text-center py-6">No teams on Day {otherDay} to swap with.</div>
+              )}
+            </div>
+            <div className="p-3 border-t border-slate-700/60 flex justify-end">
+              <button
+                onClick={() => setSwapPicker(null)}
+                disabled={swapping}
+                className="text-sm px-4 py-1.5 rounded border border-slate-600 hover:border-slate-400 text-slate-200 transition disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

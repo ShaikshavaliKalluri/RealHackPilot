@@ -137,6 +137,11 @@ class PanelJudgesSet(BaseModel):
     judge_ids: list[int]
 
 
+class PanelSwapTeamDays(BaseModel):
+    team_a_id: int
+    team_b_id: int
+
+
 # ===== Swag (t-shirt) pickup =====
 
 class SwagPersonOut(BaseModel):

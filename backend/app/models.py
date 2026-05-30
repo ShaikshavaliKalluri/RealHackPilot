@@ -155,6 +155,27 @@ class PanelJudge(Base):
     judge: Mapped["Judge"] = relationship()
 
 
+class PanelTeamDayOverride(Base):
+    """Pin a panel team to Day 1 or Day 2 of the judging schedule,
+    overriding the auto-distribution algorithm.
+
+    Used by the 'Move to Day N' UI in the invite workspace — once the
+    organizer manually moves a team across days, that decision survives
+    page refreshes and is honoured by subsequent invite-meta requests.
+
+    No row -> auto-distribute (US-first, balanced across both days).
+    """
+    __tablename__ = "panel_team_day_overrides"
+    __table_args__ = (
+        UniqueConstraint("panel_id", "team_id", name="uq_panel_team_day_override"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    panel_id: Mapped[int] = mapped_column(ForeignKey("panels.id", ondelete="CASCADE"), index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
+    day: Mapped[int] = mapped_column(Integer)  # 1 or 2
+
+
 class JudgeScore(Base):
     __tablename__ = "judge_score_records"
     __table_args__ = (
