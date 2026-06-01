@@ -64,9 +64,13 @@ export async function getGraphDraftToken(): Promise<string> {
 }
 
 // Scopes needed to create a private Teams channel + add members.
+// TeamMember.ReadWrite.All is required so we can also add the channel
+// members to the parent Team first — Teams refuses to put anyone in a
+// private channel who isn't already a member of the parent Team.
 const GRAPH_TEAMS_CHANNEL_SCOPES = [
   'Channel.Create',
   'ChannelMember.ReadWrite.All',
+  'TeamMember.ReadWrite.All',
   'User.ReadBasic.All',
   'Team.ReadBasic.All',
 ];
