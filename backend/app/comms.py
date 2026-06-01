@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from .models import Team, CommLog
 from . import github as gh
+from .scheduling import ORGANIZER_CC_EMAILS
 
 
 # Mode flag — flip to "graph" once the app registration is in place.
@@ -239,10 +240,16 @@ def create_team_channel_with_graph_token(
         headers={"Authorization": f"Bearer {graph_token}", "Content-Type": "application/json"},
         timeout=30,
     ) as gc:
-        # Resolve mentor + member emails to AAD object ids
+        # Resolve mentor + organizers + member emails to AAD object ids.
+        # Mentor and organizers go in as owners so they can manage the channel
+        # (add/remove members, post pinned messages, etc.). Team members go
+        # in as regular members. Judges are intentionally not included --
+        # they're notified through a separate channel by the organizing team.
         candidates: list[tuple[str, bool]] = []  # (email, is_owner)
         if team.mentor_email:
             candidates.append((team.mentor_email.strip(), True))
+        for org_email in ORGANIZER_CC_EMAILS:
+            candidates.append((org_email.strip(), True))
         for m in team.members:
             if m.email:
                 candidates.append((m.email.strip(), False))
