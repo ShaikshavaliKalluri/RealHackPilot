@@ -25,7 +25,7 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
     const inSandbox = isSandboxMode();
     const confirmText = inSandbox
       ? `Create a MOCK Teams channel for "${team.name}"? (Test Mode — no real channel will be created.)`
-      : `Create a real Microsoft Teams channel "2026 Team - ${team.name}" with all members + mentor? This action is logged and cannot be undone from the app.`;
+      : `Create a real Microsoft Teams channel "2026 ${team.name}" with all members + mentor? This action is logged and cannot be undone from the app.`;
     if (!confirm(confirmText)) return;
     setChannelBusy(true);
     setChannelMsg(null);
