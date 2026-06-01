@@ -264,9 +264,18 @@ def create_team_channel_with_graph_token(
         }
         r = gc.post(f"{GRAPH}/teams/{PARENT_TEAM_ID}/channels", json=body)
         if r.status_code not in (200, 201, 202):
+            # Pull the full Graph error body (truncated headers cut us off
+            # at 300 chars before). Also surface the request-id so IT can
+            # correlate with Graph telemetry if the error is opaque.
+            req_id = r.headers.get("request-id") or r.headers.get("client-request-id") or "?"
             raise _GraphChannelError(
                 502,
-                f"Graph channel create failed ({r.status_code}): {r.text[:300]}",
+                (
+                    f"Graph channel create failed ({r.status_code}) "
+                    f"[req {req_id}]: {r.text[:2000]} | "
+                    f"display_name={display_name!r}, members={len(member_ids)}, "
+                    f"owners={len(owner_ids)}, unresolved={unresolved}"
+                ),
             )
         channel_id = (r.json() or {}).get("id", "") if r.text else ""
 
