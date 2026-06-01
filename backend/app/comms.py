@@ -154,6 +154,27 @@ def _graph_get_user_id(client: httpx.Client, email: str) -> str | None:
     return None
 
 
+def _truncate_to_bytes(text: str, max_bytes: int) -> str:
+    """Truncate `text` to at most `max_bytes` UTF-8 bytes, never splitting a
+    multi-byte codepoint mid-sequence and appending an ellipsis if cut.
+
+    Microsoft Teams enforces byte-level limits on channel descriptions
+    (ThreadDescriptionLimitExceeded). UTF-8 chars like em-dash, smart
+    quotes, or emoji are 2-4 bytes each, so a naive char-based slice can
+    easily overshoot the limit on otherwise-short text.
+    """
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    # Reserve 3 bytes for the trailing ellipsis ('…' is 3 UTF-8 bytes).
+    truncated = encoded[: max(0, max_bytes - 3)]
+    # Back off any UTF-8 continuation bytes (0b10xxxxxx) to land on a
+    # codepoint boundary before decoding.
+    while truncated and (truncated[-1] & 0xC0) == 0x80:
+        truncated = truncated[:-1]
+    return truncated.decode("utf-8", errors="ignore") + "…"
+
+
 def create_team_channel_with_graph_token(
     db: Session,
     team: Team,
@@ -188,7 +209,12 @@ def create_team_channel_with_graph_token(
         return {"channel_id": team.teams_channel_id, "status": "already_exists"}
 
     display_name = f"2026 {team.name}"[:50]
-    description = (team.idea or f"RealHack 2026 — {team.name}")[:1024]
+    description = _truncate_to_bytes(
+        (team.idea or f"RealHack 2026 — {team.name}").strip(),
+        max_bytes=900,  # Teams Templates backend rejects >~1000 bytes
+                        # (ThreadDescriptionLimitExceeded). 900 leaves headroom
+                        # for any future quote/escape inflation.
+    )
 
     # ----- Sandbox short-circuit: skip Graph, just write mock entries -----
     if sandbox:
