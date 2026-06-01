@@ -155,6 +155,40 @@ def _graph_get_user_id(client: httpx.Client, email: str) -> str | None:
     return None
 
 
+def _ensure_in_parent_team(client: httpx.Client, user_id: str) -> tuple[bool, str | None]:
+    """Add a user to the parent Team if they aren't already a member.
+
+    Microsoft Teams enforces that private-channel members must also be members
+    of the parent Team — without this, channel creation fails with a 403
+    'users are not part of the parent roster'. We POST adds proactively and
+    treat 'already a member' style 4xx responses as no-op success.
+
+    Returns: (was_added, error_message_or_None). was_added is False when the
+    user was already in the team (still success). error_message is non-None
+    only on genuine failures (e.g. the user can't be invited at all because
+    of tenant guest restrictions).
+    """
+    payload = {
+        "@odata.type": "#microsoft.graph.aadUserConversationMember",
+        "roles": [],
+        "user@odata.bind": f"{GRAPH}/users('{user_id}')",
+    }
+    r = client.post(f"{GRAPH}/teams/{PARENT_TEAM_ID}/members", json=payload)
+    if r.is_success:
+        return True, None
+    # "Already a member" comes back as 400/409 with various wordings depending
+    # on tenant. Treat any of them as a no-op success so we don't fail on
+    # subsequent retries.
+    text_lower = (r.text or "").lower()
+    already_member_signals = (
+        "already a member", "already a part", "already exists",
+        "duplicate user", "already in the team",
+    )
+    if any(sig in text_lower for sig in already_member_signals):
+        return False, None
+    return False, f"add to parent team failed ({r.status_code}): {r.text[:200]}"
+
+
 def _truncate_to_bytes(text: str, max_bytes: int) -> str:
     """Truncate `text` to at most `max_bytes` UTF-8 bytes, never splitting a
     multi-byte codepoint mid-sequence and appending an ellipsis if cut.
@@ -280,6 +314,30 @@ def create_team_channel_with_graph_token(
                 f"None of the team's emails could be resolved in Azure AD: {', '.join(unresolved)}",
             )
 
+        # Private channels in Teams require every channel member to ALSO be
+        # a member of the parent Team. Add missing ones first; drop anyone
+        # who can't be added (e.g. external guest blocked by tenant policy).
+        added_count = 0
+        roster_failures: list[str] = []
+        kept_member_ids: list[str] = []
+        for uid in member_ids:
+            was_added, err = _ensure_in_parent_team(gc, uid)
+            if err:
+                roster_failures.append(f"{uid}: {err}")
+                owner_ids.discard(uid)  # can't be an owner if we can't add them
+                continue
+            if was_added:
+                added_count += 1
+            kept_member_ids.append(uid)
+        member_ids = kept_member_ids
+
+        # Give Teams a few seconds to propagate the new memberships before
+        # the channel POST -- otherwise we can race and still hit
+        # 'not part of the parent roster'.
+        if added_count > 0:
+            import time
+            time.sleep(5)
+
         members_payload: list[dict] = []
         for uid in member_ids:
             members_payload.append({
@@ -307,7 +365,8 @@ def create_team_channel_with_graph_token(
                     f"Graph channel create failed ({r.status_code}) "
                     f"[req {req_id}]: {r.text[:2000]} | "
                     f"display_name={display_name!r}, members={len(member_ids)}, "
-                    f"owners={len(owner_ids)}, unresolved={unresolved}"
+                    f"owners={len(owner_ids)}, unresolved={unresolved}, "
+                    f"parent_team_added={added_count}, roster_failures={roster_failures}"
                 ),
             )
         channel_id = (r.json() or {}).get("id", "") if r.text else ""
@@ -316,11 +375,19 @@ def create_team_channel_with_graph_token(
     team.has_teams_channel = True
     team.teams_channel_id = channel_id
     team.teams_channel_created_at = datetime.utcnow()
+    log_parts = [
+        f"Channel ID: {channel_id}",
+        f"{len(member_ids)} member(s), {len(owner_ids)} owner(s)",
+        f"parent-team added: {added_count}",
+    ]
+    if unresolved:
+        log_parts.append(f"unresolved emails: {', '.join(unresolved)}")
+    if roster_failures:
+        log_parts.append(f"roster failures: {'; '.join(roster_failures)}")
     log(
         db, team.id, kind="teams_channel_create",
         subject=f"Channel created: {team.name}",
-        body=f"Channel ID: {channel_id} · {len(member_ids)} member(s), {len(owner_ids)} owner(s)" +
-             (f" · unresolved: {', '.join(unresolved)}" if unresolved else ""),
+        body=" · ".join(log_parts),
         status="sent",
         sent_by_email=sent_by_email,
     )
