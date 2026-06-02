@@ -397,6 +397,40 @@ export interface PostChannelWelcomeResult {
   status: string;
 }
 
+export interface PostChannelWelcomeBulkResult {
+  total_teams_with_channels: number;
+  posted_count: number;
+  skipped_already_posted_count: number;
+  skipped_no_real_channel_count: number;
+  failed_count: number;
+  posted: { team_id: number; team_name: string; mentions: number }[];
+  skipped_already_posted: { team_id: number; team_name: string }[];
+  skipped_no_real_channel: { team_id: number; team_name: string }[];
+  failed: { team_id: number; team_name: string; error: string }[];
+}
+
+export async function postChannelWelcomeAll(): Promise<PostChannelWelcomeBulkResult> {
+  const graphToken = await getGraphTeamsToken();
+  // Backend loops through every team with a channel; ~2-3 min for 95 teams.
+  // Bump the fetch's implicit timeout via no explicit AbortController; this
+  // resolves only when the loop finishes.
+  const r = await authFetch(`${BASE}/comms/teams/post-channel-welcome-all`, {
+    method: 'POST',
+    headers: { 'X-Graph-Token': graphToken },
+  });
+  if (!r.ok) {
+    let msg = `Bulk post welcome failed: ${r.status}`;
+    try {
+      const j = await r.json();
+      if (j?.detail) msg = j.detail;
+    } catch {
+      msg = await r.text() || msg;
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
 export async function postChannelWelcome(teamId: number): Promise<PostChannelWelcomeResult> {
   const graphToken = await getGraphTeamsToken();
   const r = await authFetch(`${BASE}/comms/teams/${teamId}/post-channel-welcome`, {

@@ -1575,6 +1575,103 @@ def post_team_message(team_id: int, req: TeamMessageRequest, db: Session = Depen
     return result
 
 
+@app.post("/api/comms/teams/post-channel-welcome-all", response_model=dict)
+def post_channel_welcome_to_all(
+    request: Request,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Post the RealHack 2026 welcome message to every team that has a real
+    Teams channel. Idempotent: skips any team that already has a 'Welcome
+    message posted' entry in the comm log. Continues on per-team failures
+    so one bad team doesn't sink the whole batch.
+
+    Synchronous — takes ~2-3 min for 95 teams. The frontend keeps the
+    busy state until this returns the summary.
+    """
+    graph_token = request.headers.get("x-graph-token", "")
+    if not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or None
+
+    # All teams that claim to have a channel (filter mock/sandbox later)
+    all_teams = (
+        db.query(models.Team)
+        .filter(models.Team.has_teams_channel.is_(True))
+        .filter(models.Team.teams_channel_id.isnot(None))
+        .order_by(models.Team.name.asc())
+        .all()
+    )
+
+    posted: list[dict] = []
+    skipped_already: list[dict] = []
+    skipped_no_real_channel: list[dict] = []
+    failed: list[dict] = []
+
+    import time
+
+    for team in all_teams:
+        # Skip mock / sandbox channel ids
+        if str(team.teams_channel_id).startswith(("sandbox-", "mock-", "dryrun-")):
+            skipped_no_real_channel.append({"team_id": team.id, "team_name": team.name})
+            continue
+
+        # Skip if a welcome was already posted (idempotency check via comm log)
+        already = (
+            db.query(models.CommLog)
+            .filter(models.CommLog.team_id == team.id)
+            .filter(models.CommLog.kind == "teams_message")
+            .filter(models.CommLog.subject.like("Welcome message posted%"))
+            .first()
+        )
+        if already:
+            skipped_already.append({"team_id": team.id, "team_name": team.name})
+            continue
+
+        try:
+            r = comms.post_channel_welcome_with_graph_token(
+                db=db, team=team, graph_token=graph_token, sent_by_email=organizer_email,
+            )
+            db.commit()
+            posted.append({
+                "team_id": team.id,
+                "team_name": team.name,
+                "mentions": r["mentions_count"],
+            })
+        except comms._GraphChannelError as e:
+            db.rollback()
+            failed.append({
+                "team_id": team.id,
+                "team_name": team.name,
+                "error": (e.message or "")[:200],
+            })
+        except Exception as e:
+            db.rollback()
+            failed.append({
+                "team_id": team.id,
+                "team_name": team.name,
+                "error": f"unexpected: {str(e)[:200]}",
+            })
+
+        # Light pacing to stay under Graph throttle limits.
+        time.sleep(0.5)
+
+    return {
+        "total_teams_with_channels": len(all_teams),
+        "posted_count": len(posted),
+        "skipped_already_posted_count": len(skipped_already),
+        "skipped_no_real_channel_count": len(skipped_no_real_channel),
+        "failed_count": len(failed),
+        "posted": posted,
+        "skipped_already_posted": skipped_already,
+        "skipped_no_real_channel": skipped_no_real_channel,
+        "failed": failed,
+    }
+
+
 @app.post("/api/comms/teams/{team_id}/post-channel-welcome", response_model=dict)
 def post_channel_welcome(
     team_id: int,
