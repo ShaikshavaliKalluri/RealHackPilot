@@ -499,16 +499,24 @@ def post_channel_welcome_with_graph_token(
         mentions_block = ", ".join(mention_tags) if mention_tags else ""
 
         content = (
+            # Header line — sets a clear visual top to the message
+            f'<p><strong style="color:#0a4f99;font-size:16px;">'
+            f'🎉 Welcome to RealHack 2026</strong></p>'
+            # Greeting + body
             f"<p>Dear <strong>{team_name_safe}</strong> Team,</p>"
             f"<p>We are happy to announce confirmation of your nomination for "
             f"<strong>RealHack 2026</strong>.</p>"
             f"<p>You can use your individual team channel for any communication "
             f"among your team members.</p>"
             f"<p>Look forward to your participation in RealHack 2026.</p>"
-            f"<p>Regards,<br><strong>RealHack 2026</strong></p>"
+            # Sign-off in brand blue
+            f'<p>Regards,<br>'
+            f'<strong style="color:#0a4f99;">Team RealHack</strong></p>'
         )
         if mentions_block:
-            content += f"<p>cc: {mentions_block}</p>"
+            # Drop the 'cc:' prefix per organizer feedback. Plain inline
+            # mentions so Teams still fires notifications + renders pills.
+            content += f"<p>{mentions_block}</p>"
 
         payload = {
             "body": {
