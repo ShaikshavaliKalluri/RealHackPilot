@@ -391,6 +391,31 @@ export async function createTeamsChannelForTeam(teamId: number): Promise<CreateC
   return r.json();
 }
 
+export interface PostChannelWelcomeResult {
+  message_id: string;
+  mentions_count: number;
+  status: string;
+}
+
+export async function postChannelWelcome(teamId: number): Promise<PostChannelWelcomeResult> {
+  const graphToken = await getGraphTeamsToken();
+  const r = await authFetch(`${BASE}/comms/teams/${teamId}/post-channel-welcome`, {
+    method: 'POST',
+    headers: { 'X-Graph-Token': graphToken },
+  });
+  if (!r.ok) {
+    let msg = `Post welcome failed: ${r.status}`;
+    try {
+      const j = await r.json();
+      if (j?.detail) msg = j.detail;
+    } catch {
+      msg = await r.text() || msg;
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
 
 // ---- Sandbox admin (super-admin only) ----
 

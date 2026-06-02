@@ -1575,6 +1575,47 @@ def post_team_message(team_id: int, req: TeamMessageRequest, db: Session = Depen
     return result
 
 
+@app.post("/api/comms/teams/{team_id}/post-channel-welcome", response_model=dict)
+def post_channel_welcome(
+    team_id: int,
+    request: Request,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Post the RealHack 2026 welcome message to a team's Teams channel,
+    with @mentions for the mentor and all members.
+
+    Uses the same X-Graph-Token header pattern as the per-team channel
+    create. Requires ChannelMessage.Send delegated scope (already
+    consented at the tenant level).
+    """
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+    if not team.has_teams_channel or not team.teams_channel_id:
+        raise HTTPException(status_code=409, detail="Team has no Teams channel yet")
+    if str(team.teams_channel_id).startswith(("sandbox-", "mock-", "dryrun-")):
+        raise HTTPException(status_code=400, detail="Cannot post real messages to a mock channel")
+
+    graph_token = request.headers.get("x-graph-token", "")
+    if not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or None
+
+    try:
+        result = comms.post_channel_welcome_with_graph_token(
+            db=db, team=team, graph_token=graph_token, sent_by_email=organizer_email,
+        )
+    except comms._GraphChannelError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status, detail=e.message)
+    db.commit()
+    return result
+
+
 @app.post("/api/comms/broadcast", response_model=dict)
 def broadcast_message(req: BroadcastRequest, db: Session = Depends(get_db)) -> dict:
     result = comms.broadcast(db, req.message, team_ids=req.team_ids, sent_by_email=req.sent_by_email)

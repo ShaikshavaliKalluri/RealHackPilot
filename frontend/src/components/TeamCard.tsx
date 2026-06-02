@@ -4,7 +4,7 @@ import { FlagBadge } from './FlagBadge';
 import { AIScoreBlock } from './AIScoreBlock';
 import { TeamReadiness } from './TeamReadiness';
 import { TeamEditModal } from './TeamEditModal';
-import { createTeamsChannelForTeam, isSandboxMode } from '../api';
+import { createTeamsChannelForTeam, postChannelWelcome, isSandboxMode } from '../api';
 
 interface Props {
   team: Team;
@@ -18,6 +18,8 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
   const [editOpen, setEditOpen] = useState(false);
   const [channelBusy, setChannelBusy] = useState(false);
   const [channelMsg, setChannelMsg] = useState<string | null>(null);
+  const [welcomeBusy, setWelcomeBusy] = useState(false);
+  const [welcomeMsg, setWelcomeMsg] = useState<string | null>(null);
   const pct = Math.round(team.completeness_score * 100);
 
   const handleCreateChannel = async (e: React.MouseEvent) => {
@@ -44,6 +46,23 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
       setChannelBusy(false);
     }
   };
+
+  const handlePostWelcome = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const confirmText = `Post the RealHack 2026 welcome message to the "2026 ${team.name}" channel? All members + mentor will be @mentioned.`;
+    if (!confirm(confirmText)) return;
+    setWelcomeBusy(true);
+    setWelcomeMsg(null);
+    try {
+      const r = await postChannelWelcome(team.id);
+      setWelcomeMsg(`✓ Welcome posted · ${r.mentions_count} @mention${r.mentions_count === 1 ? '' : 's'}`);
+    } catch (err: any) {
+      setWelcomeMsg(`✗ ${err.message ?? String(err)}`);
+    } finally {
+      setWelcomeBusy(false);
+    }
+  };
+
   const completenessTone =
     pct >= 80 ? 'text-lime-300' : pct >= 50 ? 'text-amber-400' : 'text-rose-400';
 
@@ -157,6 +176,19 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
                 {channelBusy ? 'Creating…' : 'Create Teams channel'}
               </button>
             )}
+            {team.has_teams_channel && team.teams_channel_id && !team.teams_channel_id.startsWith('sandbox-') && !team.teams_channel_id.startsWith('mock-') && (
+              <button
+                onClick={handlePostWelcome}
+                disabled={welcomeBusy}
+                className="text-xs px-3 py-1 rounded-md border border-sky-500/40 hover:bg-sky-500/10 text-sky-200 disabled:opacity-40 transition flex items-center gap-1.5"
+                title="Post the RealHack 2026 welcome message in the team's channel, @mentioning the mentor and all members"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+                {welcomeBusy ? 'Posting…' : 'Post welcome to channel'}
+              </button>
+            )}
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -200,6 +232,11 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
           {channelMsg && (
             <div className={`text-xs ${channelMsg.startsWith('✓') ? 'text-emerald-300' : 'text-rose-300'}`}>
               {channelMsg}
+            </div>
+          )}
+          {welcomeMsg && (
+            <div className={`text-xs ${welcomeMsg.startsWith('✓') ? 'text-emerald-300' : 'text-rose-300'}`}>
+              {welcomeMsg}
             </div>
           )}
 

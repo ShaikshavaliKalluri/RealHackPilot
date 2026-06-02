@@ -415,6 +415,117 @@ def create_team_channel_with_graph_token(
     }
 
 
+# ===== Channel-message posting (with @mentions) =====
+
+def post_channel_welcome_with_graph_token(
+    db: Session,
+    team: Team,
+    graph_token: str,
+    sent_by_email: str | None = None,
+) -> dict:
+    """Post the RealHack 2026 welcome message to a team's Teams channel with
+    @mentions for the mentor and all team members.
+
+    Each person who can be resolved in Azure AD gets an @mention with a
+    sequential id. Anyone who can't be resolved is silently skipped — the
+    message still posts, just without that person's mention.
+
+    Requires ChannelMessage.Send delegated scope.
+    """
+    import html
+
+    if not team.has_teams_channel or not team.teams_channel_id:
+        raise _GraphChannelError(400, "Team has no Teams channel — create one first")
+    if not PARENT_TEAM_ID:
+        raise _GraphChannelError(500, "GRAPH_PARENT_TEAM_ID is not set on the server")
+
+    with httpx.Client(
+        headers={"Authorization": f"Bearer {graph_token}", "Content-Type": "application/json"},
+        timeout=30,
+    ) as gc:
+        # Resolve mentor + members to AAD user ids.
+        people: list[dict] = []  # [{name, aad_id}]
+        if team.mentor_email and team.mentor_name:
+            uid = _graph_get_user_id(gc, team.mentor_email.strip())
+            if uid:
+                people.append({
+                    "name": team.mentor_name.strip().title(),
+                    "aad_id": uid,
+                })
+        for m in team.members:
+            if m.email and m.name:
+                uid = _graph_get_user_id(gc, m.email.strip())
+                if uid:
+                    people.append({
+                        "name": m.name.strip().title(),
+                        "aad_id": uid,
+                    })
+
+        # Build the mentions array + the inline <at> tags
+        mentions: list[dict] = []
+        mention_tags: list[str] = []
+        for i, p in enumerate(people):
+            mentions.append({
+                "id": i,
+                "mentionText": p["name"],
+                "mentioned": {
+                    "user": {
+                        "displayName": p["name"],
+                        "id": p["aad_id"],
+                        "userIdentityType": "aadUser",
+                    },
+                },
+            })
+            mention_tags.append(f'<at id="{i}">{html.escape(p["name"])}</at>')
+
+        team_name_safe = html.escape(team.name)
+        mentions_block = ", ".join(mention_tags) if mention_tags else ""
+
+        content = (
+            f"<p>Dear <strong>{team_name_safe}</strong> Team,</p>"
+            f"<p>We are happy to announce confirmation of your nomination for "
+            f"<strong>RealHack 2026</strong>.</p>"
+            f"<p>You can use your individual team channel for any communication "
+            f"among your team members.</p>"
+            f"<p>Look forward to your participation in RealHack 2026.</p>"
+            f"<p>Regards,<br><strong>RealHack 2026</strong></p>"
+        )
+        if mentions_block:
+            content += f"<p>cc: {mentions_block}</p>"
+
+        payload = {
+            "body": {
+                "contentType": "html",
+                "content": content,
+            },
+            "mentions": mentions,
+        }
+
+        url = f"{GRAPH}/teams/{PARENT_TEAM_ID}/channels/{team.teams_channel_id}/messages"
+        r = gc.post(url, json=payload)
+        if r.status_code not in (200, 201):
+            req_id = r.headers.get("request-id") or r.headers.get("client-request-id") or "?"
+            raise _GraphChannelError(
+                502,
+                f"Channel message post failed ({r.status_code}) [req {req_id}]: {r.text[:1500]}",
+            )
+
+        msg_id = (r.json() or {}).get("id", "")
+
+    log(
+        db, team.id, kind="teams_message",
+        subject=f"Welcome message posted: {team.name}",
+        body=f"Message ID: {msg_id} · {len(mentions)} @mention(s)",
+        status="sent",
+        sent_by_email=sent_by_email,
+    )
+    return {
+        "message_id": msg_id,
+        "mentions_count": len(mentions),
+        "status": "sent",
+    }
+
+
 # ===== Readiness check =====
 
 def check_repo_readiness(team: Team) -> dict:

@@ -74,6 +74,7 @@ export async function getGraphDraftToken(): Promise<string> {
 const GRAPH_TEAMS_CHANNEL_SCOPES = [
   'Channel.Create',
   'ChannelMember.ReadWrite.All',
+  'ChannelMessage.Send',
   'User.ReadBasic.All',
   'Team.ReadBasic.All',
 ];
