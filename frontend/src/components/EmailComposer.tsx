@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchEmailTemplates, renderEmails, appendCommLog, checkDuplicate, type EmailTemplate, type RenderedEmail } from '../api';
-import { sendEmailViaGraph, openDraftInOutlook } from '../graphSend';
+import { sendEmailViaGraph } from '../graphSend';
 import type { Team } from '../types';
 
 interface Props {
@@ -117,6 +117,45 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
 
   const ccList = useMemo(() => parseAddressList(ccRaw), [ccRaw]);
   const bccList = useMemo(() => parseAddressList(bccRaw), [bccRaw]);
+
+  // Auto-CC list applied to every production send. Order matters: mentor
+  // (per-team, resolved at send time) goes first, then the four fixed
+  // organizer addresses so they're aware of every team-facing email.
+  // Suppressed in Test Mode so we don't spam real organizers during testing.
+  const FIXED_AUTO_CC = [
+    'RealHack@realpage.com',
+    'Suneel.Nallu@RealPage.com',
+    'bhaskar.jaddu@RealPage.com',
+    'Parshan.Uday@RealPage.com',
+  ];
+
+  const buildAutoCcFor = (email: RenderedEmail, to: string[]): string[] => {
+    // Test mode / org-override active -> skip auto-CC; only manual cc applies.
+    const isTestSend = !!(testMode || (toOverrideRaw && toOverrideRaw.trim()));
+    if (isTestSend) return ccList;
+
+    const team = teams.find((t) => t.id === email.team_id);
+    const mentor = (team?.mentor_email || '').trim();
+
+    const dedup = new Set<string>();
+    const toLower = new Set(to.map((a) => a.toLowerCase()));
+    const result: string[] = [];
+
+    const push = (addr: string) => {
+      const trimmed = addr.trim();
+      if (!trimmed) return;
+      const lower = trimmed.toLowerCase();
+      if (toLower.has(lower) || dedup.has(lower)) return;
+      dedup.add(lower);
+      result.push(trimmed);
+    };
+
+    if (mentor) push(mentor);
+    FIXED_AUTO_CC.forEach(push);
+    ccList.forEach(push);
+
+    return result;
+  };
   const overrides: MailtoOverrides = {
     toOverride: effectiveToOverride,
     cc: ccList,
@@ -217,13 +256,14 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
 
     for (let i = 0; i < eligible.length; i++) {
       const { email, to } = eligible[i];
+      const autoCc = buildAutoCcFor(email, to);
       try {
         await sendEmailViaGraph({
           subject: email.subject,
           bodyHtml: email.body_html,
           bodyText: email.body,
           to,
-          cc: ccList.length ? ccList : undefined,
+          cc: autoCc.length ? autoCc : undefined,
           bcc: bccList.length ? bccList : undefined,
           // Send AS the shared mailbox so recipients see the email from
           // 'RealHack' rather than from whichever organizer is composing.
