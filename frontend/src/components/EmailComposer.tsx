@@ -80,7 +80,7 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
   // ---- CC / BCC / To-override controls (applied to every email in the batch) ----
   // Default CC — every outgoing RealHack 2026 email keeps the org alias plus
   // the two organizing leads in the loop. Organizers can still edit/remove.
-  const DEFAULT_CC = 'RealHack@realpage.com, bhaskar.jaddu@RealPage.com, Suneel.Nallu@RealPage.com';
+  const DEFAULT_CC = 'RealHack@realpage.com, bhaskar.jaddu@RealPage.com, Suneel.Nallu@RealPage.com, Parshan.Uday@RealPage.com';
   const [ccRaw, setCcRaw] = useState(DEFAULT_CC);
   const [bccRaw, setBccRaw] = useState('');
   const [toOverrideRaw, setToOverrideRaw] = useState('');
