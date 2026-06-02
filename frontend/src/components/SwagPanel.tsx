@@ -9,6 +9,65 @@ import {
 type StatusFilter = 'all' | 'pending' | 'collected';
 type CountryFilter = string; // 'all' | 'India' | 'US' | …
 
+// CSV escape: wrap in double quotes when the value contains a comma, quote,
+// or newline; double-up any internal quotes per RFC 4180.
+function csvCell(v: unknown): string {
+  const s = v == null ? '' : String(v);
+  if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+function exportFilteredToCsv(rows: SwagPerson[], country: string, status: string): void {
+  const headers = [
+    'Name', 'Email', 'Country', 'T-shirt Size',
+    'Role(s)', 'Team(s)',
+    'Status', 'Collected At (UTC)',
+    'Picked Up By (Name)', 'Picked Up By (Email)',
+    'Marked By (Organizer)',
+    'Notes',
+  ];
+
+  const lines: string[] = [headers.join(',')];
+  for (const p of rows) {
+    lines.push([
+      csvCell(p.name),
+      csvCell(p.email),
+      csvCell(p.country),
+      csvCell(p.tshirt_size),
+      csvCell(p.roles.join('; ')),
+      csvCell(p.teams.join('; ')),
+      csvCell(p.collected ? 'Collected' : 'Pending'),
+      csvCell(p.collected_at),
+      csvCell(p.picked_up_by_name),
+      csvCell(p.picked_up_by_email),
+      csvCell(p.collected_by_email),
+      csvCell(p.notes),
+    ].join(','));
+  }
+
+  // UTF-8 BOM so Excel opens em-dashes, accents, etc. without garbling them.
+  const csvContent = '﻿' + lines.join('\r\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
+  const filterTag = [
+    country !== 'all' ? country.toLowerCase() : '',
+    status !== 'all' ? status : '',
+  ].filter(Boolean).join('_') || 'all';
+  const filename = `realhack-swag_${filterTag}_${ts}.csv`;
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /**
  * T-shirt / swag pickup tab.
  *
@@ -236,9 +295,19 @@ export function SwagPanel() {
               </button>
             ))}
           </div>
-          <div className="text-xs text-slate-500 mt-2">
-            Showing {filtered.length} of {people.length}
-            {country !== 'all' && <span className="text-slate-600"> · filtered by {country}</span>}
+          <div className="text-xs text-slate-500 mt-2 flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              Showing {filtered.length} of {people.length}
+              {country !== 'all' && <span className="text-slate-600"> · filtered by {country}</span>}
+            </div>
+            <button
+              onClick={() => exportFilteredToCsv(filtered, country, status)}
+              disabled={filtered.length === 0}
+              className="text-xs px-3 py-1.5 rounded-lg border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 transition disabled:opacity-40 flex items-center gap-1.5 font-semibold"
+              title="Download the current filtered list as a CSV (opens directly in Excel)"
+            >
+              📥 Export to Excel ({filtered.length})
+            </button>
           </div>
           {country !== 'all' && country.toLowerCase() !== 'india' && (
             <div className="text-xs text-amber-300/90 mt-1.5 italic">
