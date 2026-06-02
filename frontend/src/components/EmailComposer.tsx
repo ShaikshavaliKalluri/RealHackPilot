@@ -165,11 +165,13 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
 
     return result;
   };
-  const overrides: MailtoOverrides = {
+  // Per-email overrides — re-computed for each rendered email because the
+  // auto-CC depends on the team's mentor + members (varies per team).
+  const buildPerEmailOverrides = (email: RenderedEmail, to: string[]): MailtoOverrides => ({
     toOverride: effectiveToOverride,
-    cc: ccList,
+    cc: buildAutoCcFor(email, to),
     bcc: bccList,
-  };
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -595,9 +597,10 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                 <button
                   onClick={() => {
                     rendered.forEach((e) => {
-                      const hasRecipients = (effectiveToOverride && effectiveToOverride.length > 0) || e.to.length > 0;
+                      const effectiveTo = effectiveToOverride && effectiveToOverride.length > 0 ? effectiveToOverride : e.to;
+                      const hasRecipients = effectiveTo.length > 0;
                       if (hasRecipients) {
-                        window.open(mailtoLink(e, overrides), '_blank');
+                        window.open(mailtoLink(e, buildPerEmailOverrides(e, effectiveTo)), '_blank');
                         logSend(e);
                       }
                     });
@@ -746,7 +749,7 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                           </div>
                           <div className="flex gap-2">
                             <a
-                              href={mailtoLink(e, overrides)}
+                              href={mailtoLink(e, buildPerEmailOverrides(e, effectiveTo))}
                               target="_blank"
                               rel="noreferrer"
                               onClick={() => { if (hasRecipients) logSend(e); }}
