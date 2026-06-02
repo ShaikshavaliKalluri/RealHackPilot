@@ -186,6 +186,20 @@ def _ensure_in_parent_team(client: httpx.Client, user_id: str) -> tuple[bool, st
     )
     if any(sig in text_lower for sig in already_member_signals):
         return False, None
+    # Missing tenant-admin consent for TeamMember.ReadWrite.All means the app
+    # can't add users to the parent Team itself. The organizer-side workaround
+    # is to pre-add everyone manually via the Teams UI; in that case the user
+    # is already in the parent Team and the channel POST will succeed even
+    # though our auto-add attempt was denied. Don't surface this as a roster
+    # failure -- let the channel POST proceed and Teams will reject if the
+    # assumption is wrong with its own (clearer) error.
+    if r.status_code == 403 and (
+        "missing scope" in text_lower
+        or "authorization_request" in text_lower
+        or "accessdenied" in text_lower
+        or "insufficient" in text_lower
+    ):
+        return False, None
     return False, f"add to parent team failed ({r.status_code}): {r.text[:200]}"
 
 

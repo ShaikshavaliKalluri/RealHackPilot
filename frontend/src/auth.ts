@@ -64,13 +64,16 @@ export async function getGraphDraftToken(): Promise<string> {
 }
 
 // Scopes needed to create a private Teams channel + add members.
-// TeamMember.ReadWrite.All is required so we can also add the channel
-// members to the parent Team first — Teams refuses to put anyone in a
-// private channel who isn't already a member of the parent Team.
+//
+// TeamMember.ReadWrite.All would let the app auto-add channel members to
+// the parent Team first (Teams requires private-channel members to also
+// be in the parent Team). But that scope needs tenant-admin consent which
+// isn't granted in our tenant. Workaround: organizers pre-add everyone
+// to the parent Team manually via the Teams UI, and the backend silently
+// tolerates the missing permission when it tries to auto-add.
 const GRAPH_TEAMS_CHANNEL_SCOPES = [
   'Channel.Create',
   'ChannelMember.ReadWrite.All',
-  'TeamMember.ReadWrite.All',
   'User.ReadBasic.All',
   'Team.ReadBasic.All',
 ];
