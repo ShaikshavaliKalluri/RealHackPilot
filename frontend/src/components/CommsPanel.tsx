@@ -22,7 +22,15 @@ export function CommsPanel({ teams, onReload }: Props) {
 
   const teamsWithoutChannel = teams.filter((t) => !t.has_teams_channel);
   const teamsWithChannel = teams.filter((t) => t.has_teams_channel);
-  const isMock = mode === 'mock';
+  // The 'Simulation mode' badge was added when the only channel-create path
+  // was the mock-only bulk endpoint. The per-team 'Create Teams channel'
+  // button (delegated Graph) always hits real Graph, so once any real
+  // channel exists the simulation badge is misleading. Suppress it whenever
+  // we can see real (non-mock prefix) channels in the DB.
+  const hasRealChannel = teamsWithChannel.some(
+    (t) => t.teams_channel_id != null && !String(t.teams_channel_id).match(/^(sandbox|mock|dryrun)-/i),
+  );
+  const isMock = mode === 'mock' && !hasRealChannel;
 
   const handleCreateChannels = async () => {
     if (teamsWithoutChannel.length === 0) return;
