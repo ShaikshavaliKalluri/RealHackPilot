@@ -136,6 +136,9 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
 
     const team = teams.find((t) => t.id === email.team_id);
     const mentor = (team?.mentor_email || '').trim();
+    const memberEmails = (team?.members || [])
+      .map((m) => (m.email || '').trim())
+      .filter((e) => !!e);
 
     const dedup = new Set<string>();
     const toLower = new Set(to.map((a) => a.toLowerCase()));
@@ -150,7 +153,13 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
       result.push(trimmed);
     };
 
+    // Order: mentor, team members, fixed organizers, any user-typed CC.
+    // Dedup against `to` so addresses already in the primary recipient
+    // list don't duplicate into CC (e.g. team-audience template: members
+    // are in To and skip CC; mentor-audience template: mentor is in To
+    // and skips CC while members get CC'd).
     if (mentor) push(mentor);
+    memberEmails.forEach(push);
     FIXED_AUTO_CC.forEach(push);
     ccList.forEach(push);
 
