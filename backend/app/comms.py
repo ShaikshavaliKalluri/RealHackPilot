@@ -293,11 +293,28 @@ def create_team_channel_with_graph_token(
         # (add/remove members, post pinned messages, etc.). Team members go
         # in as regular members. Judges are intentionally not included --
         # they're notified through a separate channel by the organizing team.
+        #
+        # Microsoft Teams attributes channel-management activity (member adds,
+        # role changes) to the FIRST owner in the create payload. Putting the
+        # mentor first meant the Teams UI showed e.g. "Jessamine Go added 7
+        # others to the channel" -- confusing for mentors who didn't actually
+        # do anything. Designate an organizer (Parshan) as the primary owner
+        # so the activity log reads correctly.
+        PRIMARY_ATTRIBUTION_EMAIL = "Parshan.Uday@RealPage.com"
+
         candidates: list[tuple[str, bool]] = []  # (email, is_owner)
-        if team.mentor_email:
+        # 1) Primary attribution owner first -- Teams logs activity under this
+        #    user's name regardless of who called the API.
+        candidates.append((PRIMARY_ATTRIBUTION_EMAIL, True))
+        # 2) Mentor next (still an owner)
+        if team.mentor_email and team.mentor_email.strip().lower() != PRIMARY_ATTRIBUTION_EMAIL.lower():
             candidates.append((team.mentor_email.strip(), True))
+        # 3) Remaining organizers (already excludes Parshan via the next loop's check)
         for org_email in ORGANIZER_CC_EMAILS:
+            if org_email.strip().lower() == PRIMARY_ATTRIBUTION_EMAIL.lower():
+                continue
             candidates.append((org_email.strip(), True))
+        # 4) Team members as regular members
         for m in team.members:
             if m.email:
                 candidates.append((m.email.strip(), False))
