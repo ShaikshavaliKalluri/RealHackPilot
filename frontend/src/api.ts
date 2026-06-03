@@ -778,13 +778,63 @@ export async function commsMode(): Promise<{ mode: string }> {
   return r.json();
 }
 
-export async function createTeamsChannels(teamIds: number[] | null, sentByEmail: string | null): Promise<{ created: number[]; already_existing: number[]; mode: string }> {
+export interface BulkCreateChannelsResult {
+  created_count: number;
+  already_existing_count: number;
+  failed_count: number;
+  created: { team_id: number; team_name: string; channel_id: string }[];
+  already_existing: { team_id: number; team_name: string }[];
+  failed: { team_id: number; team_name: string; error: string }[];
+  mode: string;
+}
+
+export async function createTeamsChannels(
+  teamIds: number[] | null,
+  sentByEmail: string | null,
+): Promise<BulkCreateChannelsResult> {
+  // Real-Graph bulk create — needs the delegated Graph token same as the
+  // per-team button. Skip the token acquire in sandbox.
+  let graphToken = '';
+  try {
+    graphToken = await getGraphTeamsToken();
+  } catch (e) {
+    if (!isSandboxMode()) throw e;
+  }
   const r = await authFetch(`${BASE}/comms/channels`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(graphToken ? { 'X-Graph-Token': graphToken } : {}),
+    },
     body: JSON.stringify({ team_ids: teamIds, sent_by_email: sentByEmail }),
   });
-  if (!r.ok) throw new Error(`Channel create failed: ${r.status}`);
+  if (!r.ok) {
+    let msg = `Channel bulk-create failed: ${r.status}`;
+    try {
+      const j = await r.json();
+      if (j?.detail) msg = j.detail;
+    } catch {
+      msg = await r.text() || msg;
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+export async function resetTeamChannelState(teamId: number): Promise<{ team_id: number; team_name: string; status: string }> {
+  const r = await authFetch(`${BASE}/comms/teams/${teamId}/reset-channel`, {
+    method: 'POST',
+  });
+  if (!r.ok) {
+    let msg = `Reset failed: ${r.status}`;
+    try {
+      const j = await r.json();
+      if (j?.detail) msg = j.detail;
+    } catch {
+      msg = await r.text() || msg;
+    }
+    throw new Error(msg);
+  }
   return r.json();
 }
 

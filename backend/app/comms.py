@@ -288,116 +288,27 @@ def create_team_channel_with_graph_token(
         headers={"Authorization": f"Bearer {graph_token}", "Content-Type": "application/json"},
         timeout=30,
     ) as gc:
-        # Resolve mentor + organizers + member emails to AAD object ids.
-        # Mentor and organizers go in as owners so they can manage the channel
-        # (add/remove members, post pinned messages, etc.). Team members go
-        # in as regular members. Judges are intentionally not included --
-        # they're notified through a separate channel by the organizing team.
-        #
-        # Microsoft Teams attributes channel-management activity (member adds,
-        # role changes) to the FIRST owner in the create payload. Putting the
-        # mentor first meant the Teams UI showed e.g. "Jessamine Go added 7
-        # others to the channel" -- confusing for mentors who didn't actually
-        # do anything. Designate an organizer (Parshan) as the primary owner
-        # so the activity log reads correctly.
-        PRIMARY_ATTRIBUTION_EMAIL = "Parshan.Uday@RealPage.com"
-
-        candidates: list[tuple[str, bool]] = []  # (email, is_owner)
-        # 1) Primary attribution owner first -- Teams logs activity under this
-        #    user's name regardless of who called the API.
-        candidates.append((PRIMARY_ATTRIBUTION_EMAIL, True))
-        # 2) Mentor next (still an owner)
-        if team.mentor_email and team.mentor_email.strip().lower() != PRIMARY_ATTRIBUTION_EMAIL.lower():
-            candidates.append((team.mentor_email.strip(), True))
-        # 3) Remaining organizers (already excludes Parshan via the next loop's check)
-        for org_email in ORGANIZER_CC_EMAILS:
-            if org_email.strip().lower() == PRIMARY_ATTRIBUTION_EMAIL.lower():
-                continue
-            candidates.append((org_email.strip(), True))
-        # 4) Team members as regular members
-        for m in team.members:
-            if m.email:
-                candidates.append((m.email.strip(), False))
-
-        if not candidates:
-            raise _GraphChannelError(400, "No mentor or member emails on file for this team")
-
-        member_ids: list[str] = []
-        owner_ids: set[str] = set()
-        unresolved: list[str] = []
-        for email, is_owner in candidates:
-            uid = _graph_get_user_id(gc, email)
-            if not uid:
-                unresolved.append(email)
-                continue
-            if uid not in member_ids:
-                member_ids.append(uid)
-            if is_owner:
-                owner_ids.add(uid)
-
-        # Teams channels need at least one owner — promote first member if mentor unresolved.
-        if not owner_ids and member_ids:
-            owner_ids.add(member_ids[0])
-
-        if not member_ids:
-            raise _GraphChannelError(
-                400,
-                f"None of the team's emails could be resolved in Azure AD: {', '.join(unresolved)}",
-            )
-
-        # Private channels in Teams require every channel member to ALSO be
-        # a member of the parent Team. Add missing ones first; drop anyone
-        # who can't be added (e.g. external guest blocked by tenant policy).
-        added_count = 0
-        roster_failures: list[str] = []
-        kept_member_ids: list[str] = []
-        for uid in member_ids:
-            was_added, err = _ensure_in_parent_team(gc, uid)
-            if err:
-                roster_failures.append(f"{uid}: {err}")
-                owner_ids.discard(uid)  # can't be an owner if we can't add them
-                continue
-            if was_added:
-                added_count += 1
-            kept_member_ids.append(uid)
-        member_ids = kept_member_ids
-
-        # Give Teams a few seconds to propagate the new memberships before
-        # the channel POST -- otherwise we can race and still hit
-        # 'not part of the parent roster'.
-        if added_count > 0:
-            import time
-            time.sleep(5)
-
-        members_payload: list[dict] = []
-        for uid in member_ids:
-            members_payload.append({
-                "@odata.type": "#microsoft.graph.aadUserConversationMember",
-                "user@odata.bind": f"{GRAPH}/users('{uid}')",
-                "roles": ["owner"] if uid in owner_ids else [],
-            })
-
+        # Standard channels: skip the email-to-AAD-id resolution + parent-team
+        # auto-add work entirely. Every parent-Team member automatically sees
+        # standard channels, so we don't need a members array, owner ids, or
+        # any of the per-team-member plumbing. The organizer pre-added all
+        # participants to the parent Team via Teams UI (since the
+        # TeamMember.ReadWrite.All scope isn't admin-consented).
         body = {
             "@odata.type": "#Microsoft.Graph.channel",
-            "membershipType": "private",
+            "membershipType": "standard",
             "displayName": display_name,
             "description": description,
-            "members": members_payload,
         }
         r = gc.post(f"{GRAPH}/teams/{PARENT_TEAM_ID}/channels", json=body)
         if r.status_code not in (200, 201, 202):
-            # Pull the full Graph error body (truncated headers cut us off
-            # at 300 chars before). Also surface the request-id so IT can
-            # correlate with Graph telemetry if the error is opaque.
             req_id = r.headers.get("request-id") or r.headers.get("client-request-id") or "?"
             raise _GraphChannelError(
                 502,
                 (
                     f"Graph channel create failed ({r.status_code}) "
                     f"[req {req_id}]: {r.text[:2000]} | "
-                    f"display_name={display_name!r}, members={len(member_ids)}, "
-                    f"owners={len(owner_ids)}, unresolved={unresolved}, "
-                    f"parent_team_added={added_count}, roster_failures={roster_failures}"
+                    f"display_name={display_name!r}"
                 ),
             )
         channel_id = (r.json() or {}).get("id", "") if r.text else ""
@@ -408,13 +319,8 @@ def create_team_channel_with_graph_token(
     team.teams_channel_created_at = datetime.utcnow()
     log_parts = [
         f"Channel ID: {channel_id}",
-        f"{len(member_ids)} member(s), {len(owner_ids)} owner(s)",
-        f"parent-team added: {added_count}",
+        "standard channel (inherits parent-Team membership)",
     ]
-    if unresolved:
-        log_parts.append(f"unresolved emails: {', '.join(unresolved)}")
-    if roster_failures:
-        log_parts.append(f"roster failures: {'; '.join(roster_failures)}")
     log(
         db, team.id, kind="teams_channel_create",
         subject=f"Channel created: {team.name}",
@@ -426,9 +332,7 @@ def create_team_channel_with_graph_token(
         "channel_id": channel_id,
         "status": "sent",
         "display_name": display_name,
-        "members_added": len(member_ids),
-        "owners": len(owner_ids),
-        "unresolved_emails": unresolved,
+        "channel_type": "standard",
     }
 
 

@@ -1501,21 +1501,125 @@ def comms_mode() -> dict:
 
 
 @app.post("/api/comms/channels", response_model=dict)
-def create_channels(req: TeamChannelCreateRequest, db: Session = Depends(get_db)) -> dict:
+def create_channels(
+    req: TeamChannelCreateRequest,
+    request: Request,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Bulk-create Teams channels for the supplied team_ids (or every team
+    without one if team_ids is None).
+
+    Uses the real-Graph delegated path same as the per-team button. Each
+    iteration calls comms.create_team_channel_with_graph_token; per-team
+    errors are collected so one bad team doesn't kill the batch.
+    """
+    from .db import is_sandbox_request
+    sandbox = is_sandbox_request(request)
+
+    graph_token = request.headers.get("x-graph-token", "")
+    if not sandbox and not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or req.sent_by_email
+
     q = db.query(models.Team)
     if req.team_ids is not None:
         q = q.filter(models.Team.id.in_(req.team_ids))
-    teams = q.all()
-    created: list[int] = []
-    already: list[int] = []
+    teams = q.order_by(models.Team.name.asc()).all()
+
+    created: list[dict] = []
+    already: list[dict] = []
+    failed: list[dict] = []
+
+    import time
+
     for t in teams:
         if t.has_teams_channel:
-            already.append(t.id)
+            already.append({"team_id": t.id, "team_name": t.name})
             continue
-        comms.create_team_channel(db, t, sent_by_email=req.sent_by_email)
-        created.append(t.id)
+        try:
+            result = comms.create_team_channel_with_graph_token(
+                db=db, team=t, graph_token=graph_token,
+                sent_by_email=organizer_email, sandbox=sandbox,
+            )
+            db.commit()
+            created.append({
+                "team_id": t.id,
+                "team_name": t.name,
+                "channel_id": result.get("channel_id"),
+            })
+        except comms._GraphChannelError as e:
+            db.rollback()
+            failed.append({
+                "team_id": t.id,
+                "team_name": t.name,
+                "error": (e.message or "")[:200],
+            })
+        except Exception as e:
+            db.rollback()
+            failed.append({
+                "team_id": t.id,
+                "team_name": t.name,
+                "error": f"unexpected: {str(e)[:200]}",
+            })
+
+        time.sleep(0.4)  # gentle pacing for Graph throttle
+
+    return {
+        "created_count": len(created),
+        "already_existing_count": len(already),
+        "failed_count": len(failed),
+        "created": created,
+        "already_existing": already,
+        "failed": failed,
+        "mode": "graph" if not sandbox else "sandbox",
+    }
+
+
+@app.post("/api/comms/teams/{team_id}/reset-channel", response_model=dict)
+def reset_team_channel_state(
+    team_id: int,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Reset a team's channel state in our DB (clear has_teams_channel,
+    teams_channel_id, and the welcome-posted audit log entry). Use after
+    manually deleting a team's Teams channel in the Teams UI so a fresh
+    channel can be created and welcome reposted.
+
+    Does NOT call Graph — this only cleans up DB state to match a manual
+    Teams-UI deletion the organizer already performed.
+    """
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+
+    prev_channel_id = team.teams_channel_id
+    team.has_teams_channel = False
+    team.teams_channel_id = None
+    team.teams_channel_created_at = None
+
+    # Remove the 'Welcome message posted' audit entries so the bulk
+    # welcome button picks this team up again on the next click.
+    deleted = (
+        db.query(models.CommLog)
+        .filter(models.CommLog.team_id == team.id)
+        .filter(models.CommLog.kind == "teams_message")
+        .filter(models.CommLog.subject.like("Welcome message posted%"))
+        .delete(synchronize_session=False)
+    )
+
     db.commit()
-    return {"created": created, "already_existing": already, "mode": comms.GRAPH_MODE}
+    return {
+        "team_id": team.id,
+        "team_name": team.name,
+        "previous_channel_id": prev_channel_id,
+        "welcome_log_entries_removed": deleted,
+        "status": "reset",
+    }
 
 
 @app.post("/api/comms/teams/{team_id}/create-channel", response_model=dict)

@@ -34,12 +34,26 @@ export function CommsPanel({ teams, onReload }: Props) {
 
   const handleCreateChannels = async () => {
     if (teamsWithoutChannel.length === 0) return;
+    const confirmText =
+      `Create standard Microsoft Teams channels for ${teamsWithoutChannel.length} team${teamsWithoutChannel.length === 1 ? '' : 's'}?\n\n` +
+      `Standard channels are visible to everyone in the parent RealHack Team (including judges + IT).\n` +
+      `Takes ~${Math.ceil(teamsWithoutChannel.length * 1.5 / 60)} min — keep this tab open.`;
+    if (!confirm(confirmText)) return;
     setBusy(true);
     setError(null);
     setResult(null);
     try {
-      const r = await createTeamsChannels(teamsWithoutChannel.map((t) => t.id), 'organizer@realpage.com');
-      setResult(`Created ${r.created.length} channel${r.created.length === 1 ? '' : 's'} · mode=${r.mode}`);
+      const r = await createTeamsChannels(teamsWithoutChannel.map((t) => t.id), null);
+      const parts: string[] = [];
+      parts.push(`Created ${r.created_count} channel${r.created_count === 1 ? '' : 's'}`);
+      if (r.already_existing_count > 0) parts.push(`${r.already_existing_count} already existed`);
+      if (r.failed_count > 0) parts.push(`${r.failed_count} failed`);
+      setResult(parts.join(' · '));
+      if (r.failed.length > 0) {
+        const head = r.failed.slice(0, 3).map((f) => `${f.team_name}: ${f.error}`).join(' | ');
+        const more = r.failed.length > 3 ? ` (+${r.failed.length - 3} more)` : '';
+        setError(`Failures: ${head}${more}`);
+      }
       onReload();
     } catch (e: any) {
       setError(e.message ?? String(e));
