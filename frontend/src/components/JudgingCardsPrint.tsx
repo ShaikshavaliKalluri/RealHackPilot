@@ -105,22 +105,14 @@ export function JudgingCardsPrint() {
                 <div className="text-[10px] uppercase tracking-widest font-semibold text-[#0a4f99]">
                   RealHack 2026
                 </div>
-                <div className="text-base font-extrabold text-slate-900 leading-tight mt-0.5 break-words">
+                <div className="text-base font-extrabold text-slate-900 leading-tight mt-1 break-words">
                   {t.name}
                 </div>
                 {t.mentor_name && (
-                  <div className="text-[11px] text-slate-600 mt-1 truncate">
+                  <div className="text-[11px] text-slate-600 mt-2">
                     Mentor: <span className="font-semibold text-slate-800">{t.mentor_name}</span>
                   </div>
                 )}
-                {t.idea_short && (
-                  <div className="text-[10px] text-slate-500 mt-1 leading-snug line-clamp-3">
-                    {t.idea_short}
-                  </div>
-                )}
-                <div className="text-[9px] text-slate-400 mt-2">
-                  Scan QR for details · Team #{t.id}
-                </div>
               </div>
             </div>
           ))}
