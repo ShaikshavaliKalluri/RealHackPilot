@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Team } from '../types';
-import { commsMode, createTeamsChannels, postChannelWelcomeAll } from '../api';
+import { commsMode, createTeamsChannels, postChannelWelcomeAll, fetchWelcomedTeamIds } from '../api';
 
 interface Props {
   teams: Team[];
@@ -15,13 +15,31 @@ export function CommsPanel({ teams, onReload }: Props) {
   const [welcomeBusy, setWelcomeBusy] = useState(false);
   const [welcomeResult, setWelcomeResult] = useState<string | null>(null);
   const [welcomeError, setWelcomeError] = useState<string | null>(null);
+  // Team IDs that already received the welcome message (from comm log).
+  // Used to compute the "remaining" count + visually flag what bulk-welcome
+  // will skip.
+  const [welcomedIds, setWelcomedIds] = useState<Set<number>>(new Set());
+  const [showMissingList, setShowMissingList] = useState(false);
+  const [showWelcomePending, setShowWelcomePending] = useState(false);
 
   useEffect(() => {
     commsMode().then((r) => setMode(r.mode)).catch(() => {});
+    fetchWelcomedTeamIds()
+      .then((ids) => setWelcomedIds(new Set(ids)))
+      .catch(() => setWelcomedIds(new Set()));
   }, []);
 
-  const teamsWithoutChannel = teams.filter((t) => !t.has_teams_channel);
+  const teamsWithoutChannel = teams
+    .filter((t) => !t.has_teams_channel)
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
   const teamsWithChannel = teams.filter((t) => t.has_teams_channel);
+  // Teams that have a channel but haven't received the welcome message yet.
+  // Used both for the bulk-welcome button count + the inline pending list.
+  const teamsPendingWelcome = teamsWithChannel
+    .filter((t) => !welcomedIds.has(t.id))
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
   // The 'Simulation mode' badge was added when the only channel-create path
   // was the mock-only bulk endpoint. The per-team 'Create Teams channel'
   // button (delegated Graph) always hits real Graph, so once any real
@@ -87,6 +105,13 @@ export function CommsPanel({ teams, onReload }: Props) {
         const more = r.failed.length > 3 ? ` (+${r.failed.length - 3} more)` : '';
         setWelcomeError(`Failures: ${head}${more}`);
       }
+      // Refresh the welcomed-ids cache so the pending count updates.
+      try {
+        const ids = await fetchWelcomedTeamIds();
+        setWelcomedIds(new Set(ids));
+      } catch {
+        // non-fatal; refresh on next mount
+      }
     } catch (e: any) {
       setWelcomeError(e.message ?? String(e));
     } finally {
@@ -110,14 +135,29 @@ export function CommsPanel({ teams, onReload }: Props) {
         )}
       </div>
 
-      <div className="bg-ink-900/50 rounded-lg p-4 flex items-center justify-between gap-4 flex-wrap">
-        <div>
+      <div className="bg-ink-900/50 rounded-lg p-4 flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex-1 min-w-0">
           <p className="text-sm text-slate-300">
             <span className="text-lime-300 font-bold">{teams.length - teamsWithoutChannel.length}</span>
             <span className="text-slate-500"> / {teams.length}</span> teams already have channels.
           </p>
           {teamsWithoutChannel.length > 0 && (
-            <p className="text-xs text-slate-400 mt-1">{teamsWithoutChannel.length} team{teamsWithoutChannel.length === 1 ? '' : 's'} still missing a channel.</p>
+            <>
+              <button
+                onClick={() => setShowMissingList((v) => !v)}
+                className="text-xs text-slate-400 hover:text-amber-300 mt-1 transition underline-offset-2 hover:underline"
+              >
+                {teamsWithoutChannel.length} team{teamsWithoutChannel.length === 1 ? '' : 's'} still missing a channel{' '}
+                <span className="text-slate-500">{showMissingList ? '▾ hide' : '▸ show names'}</span>
+              </button>
+              {showMissingList && (
+                <ul className="text-xs text-slate-300 mt-2 ml-2 space-y-0.5 list-disc list-inside max-h-40 overflow-y-auto">
+                  {teamsWithoutChannel.map((t) => (
+                    <li key={t.id}>{t.name}</li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
         </div>
         <button
@@ -134,21 +174,50 @@ export function CommsPanel({ teams, onReload }: Props) {
 
       {/* Bulk: post welcome message to every channel */}
       {teamsWithChannel.length > 0 && (
-        <div className="bg-ink-900/50 rounded-lg p-4 mt-3 flex items-center justify-between gap-4 flex-wrap">
-          <div>
+        <div className="bg-ink-900/50 rounded-lg p-4 mt-3 flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex-1 min-w-0">
             <p className="text-sm text-slate-300">
               Post the <strong className="text-slate-100">RealHack 2026 welcome</strong> message in every team's channel.
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              Mentor + members get @mentioned. Teams already messaged are skipped. ~2-3 min for {teamsWithChannel.length} teams.
+              Mentor + members get @mentioned.{' '}
+              <span className="text-lime-300">{welcomedIds.size}</span> of {teamsWithChannel.length} channels already messaged.{' '}
+              {teamsPendingWelcome.length > 0 ? (
+                <>
+                  <span className="text-amber-300 font-semibold">{teamsPendingWelcome.length}</span> pending.
+                </>
+              ) : (
+                <span className="text-emerald-300">All caught up.</span>
+              )}
             </p>
+            {teamsPendingWelcome.length > 0 && (
+              <>
+                <button
+                  onClick={() => setShowWelcomePending((v) => !v)}
+                  className="text-xs text-slate-400 hover:text-amber-300 mt-1 transition underline-offset-2 hover:underline"
+                >
+                  {showWelcomePending ? '▾ hide pending list' : '▸ show pending team names'}
+                </button>
+                {showWelcomePending && (
+                  <ul className="text-xs text-slate-300 mt-2 ml-2 space-y-0.5 list-disc list-inside max-h-40 overflow-y-auto">
+                    {teamsPendingWelcome.map((t) => (
+                      <li key={t.id}>{t.name}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
           </div>
           <button
-            disabled={welcomeBusy}
+            disabled={welcomeBusy || teamsPendingWelcome.length === 0}
             onClick={handlePostWelcomeAll}
             className="bg-violet-400 hover:bg-violet-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded text-sm transition"
           >
-            {welcomeBusy ? 'Posting…' : `💬 Post welcome to ${teamsWithChannel.length} channel${teamsWithChannel.length === 1 ? '' : 's'}`}
+            {welcomeBusy
+              ? 'Posting…'
+              : teamsPendingWelcome.length === 0
+                ? '✓ All channels messaged'
+                : `💬 Post welcome to ${teamsPendingWelcome.length} pending channel${teamsPendingWelcome.length === 1 ? '' : 's'}`}
           </button>
         </div>
       )}

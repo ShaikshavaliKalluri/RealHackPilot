@@ -824,6 +824,13 @@ export async function createTeamsChannels(
   return r.json();
 }
 
+export async function fetchWelcomedTeamIds(): Promise<number[]> {
+  const r = await authFetch(`${BASE}/comms/welcomed-team-ids`);
+  if (!r.ok) throw new Error(`Welcomed-team-ids fetch failed: ${r.status}`);
+  const j = await r.json();
+  return j.team_ids ?? [];
+}
+
 export async function resetTeamChannelState(teamId: number): Promise<{ team_id: number; team_name: string; status: string }> {
   const r = await authFetch(`${BASE}/comms/teams/${teamId}/reset-channel`, {
     method: 'POST',

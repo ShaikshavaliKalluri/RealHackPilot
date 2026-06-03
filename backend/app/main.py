@@ -1579,6 +1579,26 @@ def create_channels(
     }
 
 
+@app.get("/api/comms/welcomed-team-ids", response_model=dict)
+def list_welcomed_team_ids(
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Returns the set of team_ids whose channels have already received the
+    RealHack welcome message (detected via comm_log entries with subject
+    starting 'Welcome message posted'). The frontend uses this to compute
+    'remaining' counts and skip already-done teams in bulk operations.
+    """
+    rows = (
+        db.query(models.CommLog.team_id)
+        .filter(models.CommLog.kind == "teams_message")
+        .filter(models.CommLog.subject.like("Welcome message posted%"))
+        .distinct()
+        .all()
+    )
+    return {"team_ids": sorted({r[0] for r in rows})}
+
+
 @app.post("/api/comms/teams/{team_id}/reset-channel", response_model=dict)
 def reset_team_channel_state(
     team_id: int,
