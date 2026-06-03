@@ -11,6 +11,7 @@ Audit log captures everything — both mocked and real calls.
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Iterable
@@ -203,6 +204,56 @@ def _ensure_in_parent_team(client: httpx.Client, user_id: str) -> tuple[bool, st
     return False, f"add to parent team failed ({r.status_code}): {r.text[:200]}"
 
 
+# Microsoft Teams forbids these characters in channel display names:
+#   # % & * { } \ : < > ? + / | "
+# (& and + are the easy-to-miss ones — both fail with a generic 400
+# BadRequest from Graph without hinting at the actual offender.)
+_CHANNEL_NAME_FORBIDDEN = re.compile(r'[#%*{}\\/:<>?|"]')
+
+# Map of "fancy" Unicode chars to plain ASCII substitutes so we don't
+# accidentally truncate mid-codepoint or trip up Teams' display layer.
+_CHANNEL_NAME_TRANSLATE = str.maketrans({
+    "&": None,         # handled below with 'and' substitute
+    "+": None,         # handled below with 'plus' substitute
+    "–": "-",     # en-dash -> hyphen
+    "—": "-",     # em-dash -> hyphen
+    "‘": "'",     # left curly quote
+    "’": "'",     # right curly quote
+    "“": '"',     # left curly double quote
+    "”": '"',     # right curly double quote
+})
+
+
+def _sanitize_channel_name(name: str, max_len: int = 50) -> str:
+    """Return a Microsoft Teams-safe channel display name.
+
+    Substitutions:
+      &   -> 'and'    (forbidden; lossless replacement)
+      +   -> 'plus'   (forbidden; lossless replacement)
+      –   -> -        (en-dash to ASCII hyphen)
+      —   -> -        (em-dash to ASCII hyphen)
+      ''""-> straight (curly quotes to straight)
+
+    Strips other forbidden chars: # % * { } \\ : < > ? / | "
+    Collapses whitespace runs, trims, truncates to `max_len` (Teams'
+    hard limit is 50).
+    """
+    # Lossless substitutions before stripping
+    cleaned = name.replace("&", " and ").replace("+", " plus ")
+    cleaned = cleaned.translate(_CHANNEL_NAME_TRANSLATE)
+    cleaned = _CHANNEL_NAME_FORBIDDEN.sub("", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    if len(cleaned) <= max_len:
+        return cleaned
+    # Truncate at a word boundary if there's a sensible break in the last
+    # ~10 chars; otherwise hard-cut. Avoids "...Pla" style awkward stubs.
+    hard_cut = cleaned[:max_len]
+    last_space = hard_cut.rfind(" ")
+    if last_space >= max_len - 10:
+        return hard_cut[:last_space].rstrip()
+    return hard_cut.rstrip()
+
+
 def _truncate_to_bytes(text: str, max_bytes: int) -> str:
     """Truncate `text` to at most `max_bytes` UTF-8 bytes, never splitting a
     multi-byte codepoint mid-sequence and appending an ellipsis if cut.
@@ -257,7 +308,7 @@ def create_team_channel_with_graph_token(
     if team.has_teams_channel:
         return {"channel_id": team.teams_channel_id, "status": "already_exists"}
 
-    display_name = f"2026 {team.name}"[:50]
+    display_name = _sanitize_channel_name(f"2026 {team.name}", max_len=50)
     description = _truncate_to_bytes(
         (team.idea or f"RealHack 2026 — {team.name}").strip(),
         max_bytes=900,  # Teams Templates backend rejects >~1000 bytes
