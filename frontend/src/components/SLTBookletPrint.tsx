@@ -16,8 +16,8 @@ interface PublicTeamFull {
   id: number;
   name: string;
   mentor_name: string | null;
-  idea: string | null;
-  business_value: string | null;
+  ai_summary: string | null;
+  idea: string | null;  // fallback if ai_summary missing
 }
 
 interface PublicTeamSummary {
@@ -98,12 +98,14 @@ export function SLTBookletPrint() {
           .no-print { display: none !important; }
         }
         .team-block {
-          padding: 6mm 2mm 6mm 2mm;
+          padding: 5mm 2mm;
           border-bottom: 1px solid #e2e8f0;
           break-inside: avoid;
           page-break-inside: avoid;
         }
-        .team-block:nth-child(3n) {
+        /* 5 teams per page -- AI summaries are short and consistent so we
+           pack more in than the old idea+business-value layout (which had 3). */
+        .team-block:nth-of-type(5n) {
           page-break-after: always;
           break-after: page;
         }
@@ -120,47 +122,36 @@ export function SLTBookletPrint() {
         <h1 className="text-4xl font-extrabold text-slate-900 mb-3">All Teams &amp; Ideas</h1>
         <p className="text-sm text-slate-500 mb-6">SLT handout · {teams.length} teams · alphabetical</p>
         <p className="text-xs text-slate-400 max-w-md mx-auto">
-          One brief per team — name, mentor, what they're solving, and why it matters.
-          Scan the QR on any team's desk for the full detail page.
+          Two-or-three-sentence summary per team. Scan the QR on any team's
+          desk to read the full problem statement, approach, tech stack,
+          and members.
         </p>
       </div>
 
       {/* Team blocks */}
       <div className="max-w-3xl mx-auto px-6">
-        {teams.map((t, i) => (
-          <div className="team-block" key={t.id}>
-            <div className="flex items-baseline justify-between gap-3 mb-2">
-              <h2 className="text-xl font-extrabold text-slate-900 leading-tight">
-                {String(i + 1).padStart(2, '0')}. {t.name}
-              </h2>
-              {t.mentor_name && (
-                <span className="text-xs text-slate-500 shrink-0">
-                  Mentor: <span className="font-semibold text-slate-700">{t.mentor_name}</span>
-                </span>
+        {teams.map((t, i) => {
+          const summary = t.ai_summary || t.idea;  // ai_summary preferred; fall back to raw idea
+          return (
+            <div className="team-block" key={t.id}>
+              <div className="flex items-baseline justify-between gap-3 mb-1.5">
+                <h2 className="text-lg font-extrabold text-slate-900 leading-tight">
+                  {String(i + 1).padStart(2, '0')}. {t.name}
+                </h2>
+                {t.mentor_name && (
+                  <span className="text-xs text-slate-500 shrink-0">
+                    Mentor: <span className="font-semibold text-slate-700">{t.mentor_name}</span>
+                  </span>
+                )}
+              </div>
+              {summary ? (
+                <p className="text-sm text-slate-800 leading-snug italic">{summary}</p>
+              ) : (
+                <p className="text-xs text-slate-400 italic">Summary not available</p>
               )}
             </div>
-
-            {t.idea ? (
-              <div className="mb-2">
-                <div className="text-[10px] uppercase tracking-wider font-bold text-[#0a4f99] mb-1">
-                  Idea / problem statement
-                </div>
-                <p className="text-sm text-slate-800 leading-snug whitespace-pre-wrap">{t.idea}</p>
-              </div>
-            ) : (
-              <p className="text-xs text-slate-400 italic">Idea not provided</p>
-            )}
-
-            {t.business_value && (
-              <div>
-                <div className="text-[10px] uppercase tracking-wider font-bold text-[#0a4f99] mb-1 mt-2">
-                  Business value
-                </div>
-                <p className="text-sm text-slate-700 leading-snug whitespace-pre-wrap">{t.business_value}</p>
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
