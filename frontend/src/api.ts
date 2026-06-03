@@ -824,6 +824,35 @@ export async function createTeamsChannels(
   return r.json();
 }
 
+export interface AdoptOrphanChannelsResult {
+  parent_team_channel_count: number;
+  teams_without_channel_in_db: number;
+  adopted_count: number;
+  not_found_count: number;
+  adopted: { team_id: number; team_name: string; channel_id: string; display_name: string }[];
+  not_found: { team_id: number; team_name: string; expected_name: string }[];
+}
+
+export async function adoptOrphanChannels(): Promise<AdoptOrphanChannelsResult> {
+  const graphToken = await getGraphTeamsToken();
+  const r = await authFetch(`${BASE}/comms/adopt-orphan-channels`, {
+    method: 'POST',
+    headers: { 'X-Graph-Token': graphToken },
+  });
+  if (!r.ok) {
+    let msg = `Adopt orphans failed: ${r.status}`;
+    const bodyText = await r.text();
+    try {
+      const j = JSON.parse(bodyText);
+      if (j?.detail) msg = j.detail;
+    } catch {
+      if (bodyText) msg = bodyText;
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
 export async function fetchWelcomedTeamIds(): Promise<number[]> {
   const r = await authFetch(`${BASE}/comms/welcomed-team-ids`);
   if (!r.ok) throw new Error(`Welcomed-team-ids fetch failed: ${r.status}`);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Team } from '../types';
-import { commsMode, createTeamsChannels, postChannelWelcomeAll, fetchWelcomedTeamIds } from '../api';
+import { commsMode, createTeamsChannels, postChannelWelcomeAll, fetchWelcomedTeamIds, adoptOrphanChannels } from '../api';
 
 interface Props {
   teams: Team[];
@@ -21,6 +21,8 @@ export function CommsPanel({ teams, onReload }: Props) {
   const [welcomedIds, setWelcomedIds] = useState<Set<number>>(new Set());
   const [showMissingList, setShowMissingList] = useState(false);
   const [showWelcomePending, setShowWelcomePending] = useState(false);
+  const [adoptBusy, setAdoptBusy] = useState(false);
+  const [adoptResult, setAdoptResult] = useState<string | null>(null);
 
   useEffect(() => {
     commsMode().then((r) => setMode(r.mode)).catch(() => {});
@@ -77,6 +79,30 @@ export function CommsPanel({ teams, onReload }: Props) {
       setError(e.message ?? String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleAdoptOrphans = async () => {
+    const confirmText =
+      `Scan the parent RealHack Team for orphan channels?\n\n` +
+      `This finds Teams channels that already exist in Microsoft Teams but aren't tracked in our DB, ` +
+      `and adopts them (links the existing channel id to the matching team). No channels are created or deleted.`;
+    if (!confirm(confirmText)) return;
+    setAdoptBusy(true);
+    setAdoptResult(null);
+    setError(null);
+    try {
+      const r = await adoptOrphanChannels();
+      const parts: string[] = [];
+      parts.push(`Adopted ${r.adopted_count} channel${r.adopted_count === 1 ? '' : 's'}`);
+      if (r.not_found_count > 0) parts.push(`${r.not_found_count} not found in Teams`);
+      parts.push(`(parent team has ${r.parent_team_channel_count} channels total)`);
+      setAdoptResult(parts.join(' · '));
+      onReload();
+    } catch (e: any) {
+      setError(e.message ?? String(e));
+    } finally {
+      setAdoptBusy(false);
     }
   };
 
@@ -160,16 +186,27 @@ export function CommsPanel({ teams, onReload }: Props) {
             </>
           )}
         </div>
-        <button
-          disabled={busy || teamsWithoutChannel.length === 0}
-          onClick={handleCreateChannels}
-          className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded text-sm transition"
-        >
-          {busy ? 'Creating…' : teamsWithoutChannel.length === 0 ? 'All channels created' : `Create ${teamsWithoutChannel.length} missing channel${teamsWithoutChannel.length === 1 ? '' : 's'}`}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            disabled={adoptBusy || teamsWithoutChannel.length === 0}
+            onClick={handleAdoptOrphans}
+            className="text-xs px-3 py-2 rounded border border-slate-600 hover:border-amber-400 hover:bg-amber-500/10 text-slate-200 disabled:opacity-40 transition font-semibold"
+            title="Scan the parent Team for channels that already exist in Microsoft Teams but aren't tracked in our DB, and link them up. Run this first if 'Create' is failing with 'Channel name already existed'."
+          >
+            {adoptBusy ? 'Scanning…' : '🔍 Discover & adopt orphans'}
+          </button>
+          <button
+            disabled={busy || teamsWithoutChannel.length === 0}
+            onClick={handleCreateChannels}
+            className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded text-sm transition"
+          >
+            {busy ? 'Creating…' : teamsWithoutChannel.length === 0 ? 'All channels created' : `Create ${teamsWithoutChannel.length} missing channel${teamsWithoutChannel.length === 1 ? '' : 's'}`}
+          </button>
+        </div>
       </div>
 
       {result && <div className="text-sm text-lime-300 mt-3">✓ {result}</div>}
+      {adoptResult && <div className="text-sm text-amber-300 mt-3">🔍 {adoptResult}</div>}
       {error && <div className="text-sm text-rose-300 mt-3">⚠ {error}</div>}
 
       {/* Bulk: post welcome message to every channel */}

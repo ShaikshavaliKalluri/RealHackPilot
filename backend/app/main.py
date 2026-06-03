@@ -1579,6 +1579,104 @@ def create_channels(
     }
 
 
+@app.post("/api/comms/adopt-orphan-channels", response_model=dict)
+def adopt_orphan_channels(
+    request: Request,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Scan the parent Team's channels via Graph and adopt any that match a
+    team in our DB which doesn't have a channel recorded.
+
+    Useful when channels were created in an earlier run (e.g. as private
+    channels that are no longer tracked) but the Teams channel still
+    exists. We don't recreate -- we just point our DB at the existing
+    channel id so subsequent posts and the audit trail line up.
+    """
+    import httpx
+
+    graph_token = request.headers.get("x-graph-token", "")
+    if not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+    if not comms.PARENT_TEAM_ID:
+        raise HTTPException(status_code=500, detail="GRAPH_PARENT_TEAM_ID not set on the server")
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or None
+
+    # 1) List every channel in the parent Team. Paginate via @odata.nextLink.
+    existing: dict[str, str] = {}  # display_name_lower -> channel_id
+    with httpx.Client(
+        headers={"Authorization": f"Bearer {graph_token}"},
+        timeout=30,
+    ) as gc:
+        url: str | None = f"{comms.GRAPH}/teams/{comms.PARENT_TEAM_ID}/channels"
+        while url:
+            r = gc.get(url)
+            if r.status_code != 200:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Graph error listing parent Team channels ({r.status_code}): {r.text[:800]}",
+                )
+            data = r.json()
+            for ch in data.get("value", []):
+                name = (ch.get("displayName") or "").strip()
+                cid = ch.get("id")
+                if name and cid:
+                    existing[name.lower()] = cid
+            url = data.get("@odata.nextLink")
+
+    # 2) For each team without a tracked channel, see if a matching channel
+    #    already exists in Teams. Match by the same sanitized display name
+    #    we would have used at create time.
+    teams_without = (
+        db.query(models.Team)
+        .filter(models.Team.has_teams_channel.is_(False))
+        .order_by(models.Team.name.asc())
+        .all()
+    )
+
+    adopted: list[dict] = []
+    not_found: list[dict] = []
+    for team in teams_without:
+        expected = comms._sanitize_channel_name(f"2026 {team.name}", max_len=50)
+        match_id = existing.get(expected.lower())
+        if not match_id:
+            not_found.append({
+                "team_id": team.id,
+                "team_name": team.name,
+                "expected_name": expected,
+            })
+            continue
+        team.has_teams_channel = True
+        team.teams_channel_id = match_id
+        team.teams_channel_created_at = datetime.utcnow()
+        comms.log(
+            db, team.id, kind="teams_channel_create",
+            subject=f"Channel adopted: {team.name}",
+            body=f"Channel ID: {match_id} · adopted existing channel '{expected}'",
+            status="sent",
+            sent_by_email=organizer_email,
+        )
+        adopted.append({
+            "team_id": team.id,
+            "team_name": team.name,
+            "channel_id": match_id,
+            "display_name": expected,
+        })
+
+    db.commit()
+    return {
+        "parent_team_channel_count": len(existing),
+        "teams_without_channel_in_db": len(teams_without),
+        "adopted_count": len(adopted),
+        "not_found_count": len(not_found),
+        "adopted": adopted,
+        "not_found": not_found,
+    }
+
+
 @app.get("/api/comms/welcomed-team-ids", response_model=dict)
 def list_welcomed_team_ids(
     claims: dict = Depends(require_auth),
