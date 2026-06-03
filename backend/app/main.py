@@ -77,8 +77,15 @@ _AUTH_EXEMPT_PATHS = {"/api/health", "/docs", "/redoc", "/openapi.json"}
 @app.middleware("http")
 async def _require_auth_middleware(request, call_next):
     path = request.url.path
-    # Allow CORS preflight and exempt paths through without auth
-    if request.method == "OPTIONS" or path in _AUTH_EXEMPT_PATHS or not path.startswith("/api/"):
+    # Allow CORS preflight and exempt paths through without auth.
+    # /api/public/* is open by design — it powers the QR-code judging-walk
+    # page where a judge scans a printed code with no login required.
+    if (
+        request.method == "OPTIONS"
+        or path in _AUTH_EXEMPT_PATHS
+        or path.startswith("/api/public/")
+        or not path.startswith("/api/")
+    ):
         return await call_next(request)
     auth_header = request.headers.get("Authorization") or ""
     if not auth_header.lower().startswith("bearer "):
@@ -242,6 +249,64 @@ def llm_health() -> dict:
 @app.get("/api/teams", response_model=list[TeamOut])
 def list_teams(db: Session = Depends(get_db)) -> list[models.Team]:
     return db.query(models.Team).order_by(models.Team.name.asc()).all()
+
+
+# ===== Public, no-auth endpoints for the QR-code judging walk =====
+#
+# These power the printed-card workflow: each team has a QR pointing to
+# /team/<id> in the SPA; the page reads from /api/public/teams/<id>
+# without requiring login. We surface only the judge-relevant subset and
+# strip emails / internal flags / completeness scores. The middleware
+# whitelists /api/public/* (see _require_auth_middleware).
+
+def _public_team_dict(team: models.Team, include_idea_full: bool = True) -> dict:
+    """Slim, judge-facing view of a team. Excludes emails, screening
+    flags, completeness scores, mailing addresses, and other internal data."""
+    ai = team.ai_scores or {}
+    members = [
+        {"name": m.name, "location": m.location}
+        for m in team.members
+        if m.name
+    ]
+    return {
+        "id": team.id,
+        "name": team.name,
+        "mentor_name": team.mentor_name,
+        "idea": team.idea if include_idea_full else (team.idea or "")[:200],
+        "tools": team.tools,
+        "approach": team.approach,
+        "viability": team.viability,
+        "business_value": team.business_value,
+        "members": members,
+        "ai_summary": ai.get("summary"),
+        "ai_overall": ai.get("overall"),
+    }
+
+
+@app.get("/api/public/teams")
+def public_list_teams(db: Session = Depends(get_db)) -> list[dict]:
+    """Lightweight list of every team (id + name + mentor + short idea).
+    Powers the bulk 'Print judging cards' page."""
+    teams = db.query(models.Team).order_by(models.Team.name.asc()).all()
+    return [
+        {
+            "id": t.id,
+            "name": t.name,
+            "mentor_name": t.mentor_name,
+            "idea_short": (t.idea or "")[:140],
+        }
+        for t in teams
+    ]
+
+
+@app.get("/api/public/teams/{team_id}")
+def public_team_detail(team_id: int, db: Session = Depends(get_db)) -> dict:
+    """Judge-facing team detail — read by the QR-code landing page.
+    No auth, no emails, no internal flags."""
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+    return _public_team_dict(team)
 
 
 @app.get("/api/stats", response_model=DashboardStats)
