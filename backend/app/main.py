@@ -46,6 +46,7 @@ from .schemas import (
     JudgeOut, JudgeCreate, JudgeUpdate, JudgeScoreSubmit, JudgeScoreOut,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet, PanelSwapTeamDays,
+    AdoptChannelByLinkRequest,
     SwagPersonOut, SwagMarkRequest, SwagStats,
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
     CommLogOut, TeamChannelCreateRequest, TeamMessageRequest, BroadcastRequest,
@@ -1695,6 +1696,77 @@ def list_welcomed_team_ids(
         .all()
     )
     return {"team_ids": sorted({r[0] for r in rows})}
+
+
+@app.post("/api/comms/teams/{team_id}/adopt-channel-by-link", response_model=dict)
+def adopt_channel_by_link(
+    team_id: int,
+    req: AdoptChannelByLinkRequest,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Adopt an existing Microsoft Teams channel by pasting its share link.
+
+    Used when a channel exists in Teams but isn't tracked in our DB AND
+    the auto-discovery via Graph isn't an option (would need a Channel
+    or Group read scope that isn't admin-consented in our tenant).
+
+    Accepts either:
+      - A 'Get link to channel' URL from Teams, e.g.
+          https://teams.microsoft.com/l/channel/19%3Axxx%40thread.tacv2/...
+      - A raw channel id like '19:xxx@thread.tacv2'
+
+    Updates the team's DB row to point at that channel; no Graph call.
+    """
+    import re
+    import urllib.parse as _urlparse
+
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+
+    raw = (req.teams_channel_link or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="teams_channel_link is required")
+
+    # Extract channel id from the URL pattern .../l/channel/<ENCODED_ID>/...
+    m = re.search(r"/l/channel/([^/?#]+)", raw)
+    if m:
+        channel_id = _urlparse.unquote(m.group(1))
+    elif raw.startswith("19:") and "@thread" in raw:
+        # Raw channel id pasted directly
+        channel_id = raw
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Could not parse channel id. Paste either a 'Get link to channel' URL "
+                "from Teams (right-click channel -> Get link), or the raw channel id "
+                "starting with '19:' and ending with '@thread.tacv2'."
+            ),
+        )
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or None
+
+    team.has_teams_channel = True
+    team.teams_channel_id = channel_id
+    team.teams_channel_created_at = datetime.utcnow()
+    comms.log(
+        db, team.id, kind="teams_channel_create",
+        subject=f"Channel adopted (manual link): {team.name}",
+        body=f"Channel ID: {channel_id} · adopted via paste-link",
+        status="sent",
+        sent_by_email=organizer_email,
+    )
+    db.commit()
+    return {
+        "team_id": team.id,
+        "team_name": team.name,
+        "channel_id": channel_id,
+        "status": "adopted",
+    }
 
 
 @app.post("/api/comms/teams/{team_id}/reset-channel", response_model=dict)

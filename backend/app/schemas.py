@@ -142,6 +142,11 @@ class PanelSwapTeamDays(BaseModel):
     team_b_id: int
 
 
+class AdoptChannelByLinkRequest(BaseModel):
+    """Paste a Teams 'Get link to channel' URL or a raw channel id."""
+    teams_channel_link: str
+
+
 # ===== Swag (t-shirt) pickup =====
 
 class SwagPersonOut(BaseModel):

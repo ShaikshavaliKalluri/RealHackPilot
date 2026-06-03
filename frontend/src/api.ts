@@ -860,6 +860,29 @@ export async function fetchWelcomedTeamIds(): Promise<number[]> {
   return j.team_ids ?? [];
 }
 
+export async function adoptChannelByLink(
+  teamId: number,
+  linkOrId: string,
+): Promise<{ team_id: number; team_name: string; channel_id: string; status: string }> {
+  const r = await authFetch(`${BASE}/comms/teams/${teamId}/adopt-channel-by-link`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ teams_channel_link: linkOrId }),
+  });
+  if (!r.ok) {
+    let msg = `Adopt by link failed: ${r.status}`;
+    const bodyText = await r.text();
+    try {
+      const j = JSON.parse(bodyText);
+      if (j?.detail) msg = j.detail;
+    } catch {
+      if (bodyText) msg = bodyText;
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
 export async function resetTeamChannelState(teamId: number): Promise<{ team_id: number; team_name: string; status: string }> {
   const r = await authFetch(`${BASE}/comms/teams/${teamId}/reset-channel`, {
     method: 'POST',
