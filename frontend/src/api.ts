@@ -420,11 +420,12 @@ export async function postChannelWelcomeAll(): Promise<PostChannelWelcomeBulkRes
   });
   if (!r.ok) {
     let msg = `Bulk post welcome failed: ${r.status}`;
+    const bodyText = await r.text();
     try {
-      const j = await r.json();
+      const j = JSON.parse(bodyText);
       if (j?.detail) msg = j.detail;
     } catch {
-      msg = await r.text() || msg;
+      if (bodyText) msg = bodyText;
     }
     throw new Error(msg);
   }
@@ -439,11 +440,12 @@ export async function postChannelWelcome(teamId: number): Promise<PostChannelWel
   });
   if (!r.ok) {
     let msg = `Post welcome failed: ${r.status}`;
+    const bodyText = await r.text();
     try {
-      const j = await r.json();
+      const j = JSON.parse(bodyText);
       if (j?.detail) msg = j.detail;
     } catch {
-      msg = await r.text() || msg;
+      if (bodyText) msg = bodyText;
     }
     throw new Error(msg);
   }
@@ -810,11 +812,12 @@ export async function createTeamsChannels(
   });
   if (!r.ok) {
     let msg = `Channel bulk-create failed: ${r.status}`;
+    const bodyText = await r.text();
     try {
-      const j = await r.json();
+      const j = JSON.parse(bodyText);
       if (j?.detail) msg = j.detail;
     } catch {
-      msg = await r.text() || msg;
+      if (bodyText) msg = bodyText;
     }
     throw new Error(msg);
   }
@@ -827,11 +830,12 @@ export async function resetTeamChannelState(teamId: number): Promise<{ team_id: 
   });
   if (!r.ok) {
     let msg = `Reset failed: ${r.status}`;
+    const bodyText = await r.text();
     try {
-      const j = await r.json();
+      const j = JSON.parse(bodyText);
       if (j?.detail) msg = j.detail;
     } catch {
-      msg = await r.text() || msg;
+      if (bodyText) msg = bodyText;
     }
     throw new Error(msg);
   }
