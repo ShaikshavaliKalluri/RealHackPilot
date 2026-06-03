@@ -263,6 +263,18 @@ def _public_team_dict(team: models.Team, include_idea_full: bool = True) -> dict
     """Slim, judge-facing view of a team. Excludes emails, screening
     flags, completeness scores, mailing addresses, and other internal data."""
     ai = team.ai_scores or {}
+    overall = ai.get("overall") or {}
+    # ai_scores["overall"] is {"score": <1-5>, "headline": "..."} -- not a
+    # raw number. Extract the score / headline rather than passing the whole
+    # object through to the frontend (which would interpolate as
+    # '[object Object]/5 OVERALL' in the section heading).
+    if isinstance(overall, dict):
+        ai_overall_score = overall.get("score")
+        ai_overall_headline = overall.get("headline")
+    else:
+        ai_overall_score = overall  # legacy shape: plain number
+        ai_overall_headline = None
+
     members = [
         {"name": m.name, "location": m.location}
         for m in team.members
@@ -279,7 +291,8 @@ def _public_team_dict(team: models.Team, include_idea_full: bool = True) -> dict
         "business_value": team.business_value,
         "members": members,
         "ai_summary": ai.get("summary"),
-        "ai_overall": ai.get("overall"),
+        "ai_overall_score": ai_overall_score,
+        "ai_overall_headline": ai_overall_headline,
     }
 
 

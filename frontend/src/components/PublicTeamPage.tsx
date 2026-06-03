@@ -22,7 +22,8 @@ interface PublicTeam {
   business_value: string | null;
   members: { name: string; location: string | null }[];
   ai_summary: string | null;
-  ai_overall: number | null;
+  ai_overall_score: number | null;
+  ai_overall_headline: string | null;
 }
 
 function teamIdFromPath(): number | null {
@@ -97,7 +98,7 @@ export function PublicTeamPage() {
         {/* AI summary, if present */}
         {team.ai_summary && (
           <Section
-            label={team.ai_overall != null ? `AI summary · ${team.ai_overall}/5 overall` : 'AI summary'}
+            label={team.ai_overall_score != null ? `AI summary · ${team.ai_overall_score}/5 overall` : 'AI summary'}
             tone="blue"
           >
             <p className="italic">{team.ai_summary}</p>
