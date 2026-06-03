@@ -95,12 +95,10 @@ export function PublicTeamPage() {
           )}
         </div>
 
-        {/* AI summary, if present */}
+        {/* AI summary, if present. Score intentionally NOT shown -- judges
+            should form their own opinion before seeing any AI rating. */}
         {team.ai_summary && (
-          <Section
-            label={team.ai_overall_score != null ? `AI summary · ${team.ai_overall_score}/5 overall` : 'AI summary'}
-            tone="blue"
-          >
+          <Section label="Summary" tone="blue">
             <p className="italic">{team.ai_summary}</p>
           </Section>
         )}
