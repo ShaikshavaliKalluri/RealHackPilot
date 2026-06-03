@@ -4,7 +4,7 @@ import { FlagBadge } from './FlagBadge';
 import { AIScoreBlock } from './AIScoreBlock';
 import { TeamReadiness } from './TeamReadiness';
 import { TeamEditModal } from './TeamEditModal';
-import { createTeamsChannelForTeam, postChannelWelcome, resetTeamChannelState, adoptChannelByLink, isSandboxMode } from '../api';
+import { createTeamsChannelForTeam, postChannelWelcome, adoptChannelByLink, isSandboxMode } from '../api';
 
 interface Props {
   team: Team;
@@ -60,22 +60,6 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
     try {
       const r = await adoptChannelByLink(team.id, link);
       setChannelMsg(`✓ Adopted channel · id ${r.channel_id.slice(0, 24)}…`);
-      if (onReload) onReload();
-    } catch (err: any) {
-      setChannelMsg(`✗ ${err.message ?? String(err)}`);
-    } finally {
-      setChannelBusy(false);
-    }
-  };
-
-  const handleResetChannel = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm(`Reset "${team.name}" channel state?\n\nThis clears our DB record of the channel (channel_id + welcome-posted audit log) so a fresh channel can be created. Only use AFTER you've manually deleted the channel in Microsoft Teams.\n\nDoes NOT delete the Teams channel itself.`)) return;
-    setChannelBusy(true);
-    setChannelMsg(null);
-    try {
-      await resetTeamChannelState(team.id);
-      setChannelMsg(`✓ DB state reset — ready for re-create`);
       if (onReload) onReload();
     } catch (err: any) {
       setChannelMsg(`✗ ${err.message ?? String(err)}`);
@@ -191,25 +175,15 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
 
           <div className="flex justify-end items-center gap-2 flex-wrap">
             {team.has_teams_channel ? (
-              <>
-                <span
-                  className="text-xs px-3 py-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 flex items-center gap-1.5"
-                  title={team.teams_channel_id || ''}
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                  Teams channel created
-                </span>
-                <button
-                  onClick={handleResetChannel}
-                  disabled={channelBusy}
-                  className="text-xs px-2 py-1 rounded-md border border-slate-600 hover:border-rose-500/60 hover:text-rose-300 text-slate-400 disabled:opacity-40 transition"
-                  title="Clear our DB state for this channel (use after manually deleting the channel in Teams UI to allow re-creation)"
-                >
-                  ↺ Reset
-                </button>
-              </>
+              <span
+                className="text-xs px-3 py-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 flex items-center gap-1.5"
+                title={team.teams_channel_id || ''}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Teams channel created
+              </span>
             ) : (
               <>
                 <button
