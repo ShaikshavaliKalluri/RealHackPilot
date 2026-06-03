@@ -5,6 +5,7 @@ import App from './App';
 import { msalInstance } from './auth';
 import { PublicTeamPage } from './components/PublicTeamPage';
 import { JudgingCardsPrint } from './components/JudgingCardsPrint';
+import { SLTBookletPrint } from './components/SLTBookletPrint';
 import './index.css';
 
 /**
@@ -17,12 +18,21 @@ import './index.css';
  */
 async function bootstrap() {
   const pathname = window.location.pathname;
-  // Public, no-auth route used by the QR-code judging-walk: render directly,
-  // skip MSAL entirely so judges can scan a printed code without signing in.
+  // Public, no-auth routes -- rendered directly, skipping MSAL entirely so
+  // judges (scanning a QR on their phone) and SLT (opening a shared print
+  // link on a kiosk) don't need to sign in.
   if (/^\/team\/\d+\/?$/.test(pathname)) {
     createRoot(document.getElementById('root')!).render(
       <StrictMode>
         <PublicTeamPage />
+      </StrictMode>,
+    );
+    return;
+  }
+  if (pathname === '/slt-booklet' || pathname === '/slt-booklet/') {
+    createRoot(document.getElementById('root')!).render(
+      <StrictMode>
+        <SLTBookletPrint />
       </StrictMode>,
     );
     return;
