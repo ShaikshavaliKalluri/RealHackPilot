@@ -218,6 +218,62 @@ TEMPLATES: list[EmailTemplate] = [
         ),
     ),
     EmailTemplate(
+        id="kickoff",
+        label="Kickoff — event invite",
+        description="Event-day kickoff invitation. Generic 'Dear Team' greeting (not per-team), goes to all team members; mentor + organizers auto-CC'd by the composer.",
+        audience="team",
+        subject="You're Invited: RealHack 2026 Kickoff",
+        body=(
+            "Dear Team,\n\n"
+            "We're thrilled to announce the kickoff of RealHack 2026 — our annual hackathon "
+            "that brings together creativity, collaboration, and cutting-edge ideas!\n\n"
+            "Location: RealPage India Office (Hyderabad)\n"
+            "Time: 9:00 AM IST\n"
+            "Date: Thursday – Friday, 18-19 June 2026\n\n"
+            "For our colleagues outside India, we've got you covered. You can join us virtually "
+            "from wherever you are. We understand time zones vary, so we'll also be sharing a "
+            "recording of the session for those who can't attend live.\n\n"
+            "Whether you're joining in person or online, this is your chance to get inspired, "
+            "connect with fellow innovators, and gear up for an exciting hackathon ahead.\n\n"
+            "Let's kick off RealHack 2026 with energy and enthusiasm. We can't wait to see you there!\n\n"
+            "Best regards,\n"
+            "Team RealHack"
+        ),
+        body_html=_html_wrap(
+            "<p>Dear Team,</p>\n"
+            "<p>We're thrilled to announce the kickoff of <strong>RealHack 2026</strong> "
+            "&mdash; our annual hackathon that brings together creativity, collaboration, "
+            "and cutting-edge ideas!</p>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%' style='margin:18px 0;background:#f4f8fd;border-radius:8px;border-left:4px solid #0078d4;'>\n"
+            "<tr><td class='info-pad' style='padding:18px 22px;'>\n"
+            "<table role='presentation' cellpadding='0' cellspacing='0' border='0' width='100%'>\n"
+            "  <tr><td style='padding-bottom:14px;'>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>&#128205; Location</div>\n"
+            "    <div style='color:#1a1f26;font-size:15px;font-weight:700;'>RealPage India Office (Hyderabad)</div>\n"
+            "  </td></tr>\n"
+            "  <tr><td style='padding-bottom:14px;'>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>&#128344; Time</div>\n"
+            "    <div style='color:#1a1f26;font-size:15px;font-weight:700;'>9:00 AM IST</div>\n"
+            "  </td></tr>\n"
+            "  <tr><td>\n"
+            "    <div style='font-weight:700;color:#0a4f99;font-size:11px;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;'>&#128197; Date</div>\n"
+            "    <div style='color:#1a1f26;font-size:15px;font-weight:700;'>Thursday &ndash; Friday, 18-19 June 2026</div>\n"
+            "  </td></tr>\n"
+            "</table>\n"
+            "</td></tr>\n"
+            "</table>\n"
+            "<p>For our colleagues outside India, we've got you covered. You can join us virtually "
+            "from wherever you are. We understand time zones vary, so we'll also be sharing a "
+            "recording of the session for those who can't attend live.</p>\n"
+            "<p>Whether you're joining in person or online, this is your chance to get inspired, "
+            "connect with fellow innovators, and gear up for an exciting hackathon ahead.</p>\n"
+            "<p>Let's kick off <strong>RealHack 2026</strong> with energy and enthusiasm. "
+            "We can't wait to see you there!</p>\n"
+            "<p style='margin-top:22px;'>Best regards,<br>\n"
+            "<span style='color:#0a4f99;font-weight:700;'>Team RealHack</span></p>"
+        ),
+    ),
+    EmailTemplate(
         id="fix_it",
         label="Fix-it — incomplete submission",
         description="Sent to teams whose submission is missing or vague in critical fields.",

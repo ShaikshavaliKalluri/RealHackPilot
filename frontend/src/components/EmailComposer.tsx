@@ -84,6 +84,12 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
   const [ccRaw, setCcRaw] = useState(DEFAULT_CC);
   const [bccRaw, setBccRaw] = useState('');
   const [toOverrideRaw, setToOverrideRaw] = useState('');
+  // Extra one-shot recipients — for sending a single copy of the template
+  // body to people not in any team (SLT, observers, etc.). Goes out AFTER
+  // the per-team batch; one email, no team_name substitution surfaces.
+  // Best paired with templates that don't have per-team placeholders
+  // (e.g. the kickoff invite, which uses a generic 'Dear Team' greeting).
+  const [extraRecipientsRaw, setExtraRecipientsRaw] = useState('');
   const [testMode, setTestMode] = useState(false);
 
   // Step 2 team-list controls
@@ -117,6 +123,7 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
 
   const ccList = useMemo(() => parseAddressList(ccRaw), [ccRaw]);
   const bccList = useMemo(() => parseAddressList(bccRaw), [bccRaw]);
+  const extraRecipients = useMemo(() => parseAddressList(extraRecipientsRaw), [extraRecipientsRaw]);
 
   // Auto-CC list applied to every production send. Order matters: mentor
   // (per-team, resolved at send time) goes first, then the four fixed
@@ -261,8 +268,15 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
       return;
     }
 
+    // In test mode the extras send would spam real organizer/SLT mailboxes
+    // with test traffic. Only honor extras on a real (non-test, non-override)
+    // send.
+    const isTestSend = !!(testMode || (toOverrideRaw && toOverrideRaw.trim()));
+    const extrasToSend = isTestSend ? [] : extraRecipients;
+    const totalToSend = eligible.length + (extrasToSend.length > 0 ? 1 : 0);
+
     setError(null);
-    setSending({ done: 0, total: eligible.length, errors: [] });
+    setSending({ done: 0, total: totalToSend, errors: [] });
     const errs: string[] = [];
 
     for (let i = 0; i < eligible.length; i++) {
@@ -287,10 +301,34 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
         const msg = e instanceof Error ? e.message : String(e);
         errs.push(`${email.team_name}: ${msg}`);
       }
-      setSending({ done: i + 1, total: eligible.length, errors: [...errs] });
+      setSending({ done: i + 1, total: totalToSend, errors: [...errs] });
       // Light pacing so we stay under any per-minute Graph throttles
       // (sendMail caps at ~30/min/mailbox; we send well under that).
-      if (i < eligible.length - 1) await new Promise((r) => setTimeout(r, 600));
+      if (i < eligible.length - 1 || extrasToSend.length > 0) await new Promise((r) => setTimeout(r, 600));
+    }
+
+    // Trailing one-shot send to extras (SLT / observers not in any team).
+    // Uses the first rendered template's body verbatim -- intended for
+    // templates without per-team {team_name} substitution (e.g. kickoff).
+    if (extrasToSend.length > 0 && rendered.length > 0) {
+      const tmpl = rendered[0];
+      try {
+        await sendEmailViaGraph({
+          subject: tmpl.subject,
+          bodyHtml: tmpl.body_html,
+          bodyText: tmpl.body,
+          to: extrasToSend,
+          // Skip auto-CC for the extras send (no team context to derive
+          // mentor / members from). Manual CC still applies.
+          cc: ccList.length ? ccList : undefined,
+          bcc: bccList.length ? bccList : undefined,
+          fromAddress: 'RealHack@realpage.com',
+        });
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        errs.push(`extras (${extrasToSend.length} recipients): ${msg}`);
+      }
+      setSending({ done: totalToSend, total: totalToSend, errors: [...errs] });
     }
 
     if (errs.length === 0) {
@@ -455,6 +493,28 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                     {bccList.length > 0 && <span>BCC: <span className="text-slate-200">{bccList.length} address{bccList.length === 1 ? '' : 'es'}</span></span>}
                   </div>
                 )}
+
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-slate-500">
+                    Also send to (extras — one-shot, after team batch)
+                  </label>
+                  <input
+                    type="text"
+                    value={extraRecipientsRaw}
+                    onChange={(e) => setExtraRecipientsRaw(e.target.value)}
+                    placeholder="slt@realpage.com, observer@realpage.com — sent once, not per team"
+                    className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-1.5 text-sm mt-1 focus:outline-none focus:border-lime-500/60"
+                  />
+                  {extraRecipients.length > 0 && (
+                    <p className="text-[10px] text-amber-300 mt-1">
+                      {extraRecipients.length} extra recipient{extraRecipients.length === 1 ? '' : 's'} will get ONE
+                      copy of the template body after the per-team batch finishes
+                      {testMode && ' (suppressed in test mode)'}.
+                      {' '}
+                      Best for templates without team-specific placeholders (e.g. Kickoff).
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div>
