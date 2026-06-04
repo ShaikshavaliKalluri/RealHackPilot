@@ -853,6 +853,39 @@ export async function adoptOrphanChannels(): Promise<AdoptOrphanChannelsResult> 
   return r.json();
 }
 
+export interface MentionsCheckResult {
+  total_teams: number;
+  total_unique_emails: number;
+  resolved_count: number;
+  unresolved_email_count: number;
+  teams_with_issues_count: number;
+  teams_with_issues: {
+    team_id: number;
+    team_name: string;
+    unresolved: { role: 'mentor' | 'member'; name: string; email: string }[];
+  }[];
+}
+
+export async function checkWelcomeMentions(): Promise<MentionsCheckResult> {
+  const graphToken = await getGraphTeamsToken();
+  const r = await authFetch(`${BASE}/comms/check-welcome-mentions`, {
+    method: 'POST',
+    headers: { 'X-Graph-Token': graphToken },
+  });
+  if (!r.ok) {
+    let msg = `Check mentions failed: ${r.status}`;
+    const bodyText = await r.text();
+    try {
+      const j = JSON.parse(bodyText);
+      if (j?.detail) msg = j.detail;
+    } catch {
+      if (bodyText) msg = bodyText;
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
 export async function fetchWelcomedTeamIds(): Promise<number[]> {
   const r = await authFetch(`${BASE}/comms/welcomed-team-ids`);
   if (!r.ok) throw new Error(`Welcomed-team-ids fetch failed: ${r.status}`);

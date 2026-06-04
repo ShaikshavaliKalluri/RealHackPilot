@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Team } from '../types';
-import { commsMode, createTeamsChannels, postChannelWelcomeAll, fetchWelcomedTeamIds, adoptOrphanChannels } from '../api';
+import { commsMode, createTeamsChannels, postChannelWelcomeAll, fetchWelcomedTeamIds, adoptOrphanChannels, checkWelcomeMentions, type MentionsCheckResult } from '../api';
 
 interface Props {
   teams: Team[];
@@ -23,6 +23,9 @@ export function CommsPanel({ teams, onReload }: Props) {
   const [showWelcomePending, setShowWelcomePending] = useState(false);
   const [adoptBusy, setAdoptBusy] = useState(false);
   const [adoptResult, setAdoptResult] = useState<string | null>(null);
+  const [mentionsBusy, setMentionsBusy] = useState(false);
+  const [mentionsResult, setMentionsResult] = useState<MentionsCheckResult | null>(null);
+  const [mentionsError, setMentionsError] = useState<string | null>(null);
 
   useEffect(() => {
     commsMode().then((r) => setMode(r.mode)).catch(() => {});
@@ -103,6 +106,20 @@ export function CommsPanel({ teams, onReload }: Props) {
       setError(e.message ?? String(e));
     } finally {
       setAdoptBusy(false);
+    }
+  };
+
+  const handleCheckMentions = async () => {
+    setMentionsBusy(true);
+    setMentionsError(null);
+    setMentionsResult(null);
+    try {
+      const r = await checkWelcomeMentions();
+      setMentionsResult(r);
+    } catch (e: any) {
+      setMentionsError(e.message ?? String(e));
+    } finally {
+      setMentionsBusy(false);
     }
   };
 
@@ -260,6 +277,82 @@ export function CommsPanel({ teams, onReload }: Props) {
       )}
       {welcomeResult && <div className="text-sm text-lime-300 mt-3">✓ {welcomeResult}</div>}
       {welcomeError && <div className="text-sm text-rose-300 mt-3">⚠ {welcomeError}</div>}
+
+      {/* Diagnostic: who isn't resolvable in AAD (=> didn't get @mentioned + can't see channel) */}
+      <div className="bg-ink-900/50 rounded-lg p-4 mt-3 flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-slate-300">
+            <strong className="text-slate-100">Check @mention coverage</strong> — scan every team and find members
+            whose email doesn't resolve in Azure AD.
+          </p>
+          <p className="text-xs text-slate-400 mt-1">
+            These are the same people that were silently skipped from the welcome @mention list AND can't see
+            their team's channel (since channels inherit parent-Team membership and they can't be added). Takes
+            ~10-15 seconds.
+          </p>
+        </div>
+        <button
+          disabled={mentionsBusy}
+          onClick={handleCheckMentions}
+          className="bg-amber-400 hover:bg-amber-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded text-sm transition"
+        >
+          {mentionsBusy ? 'Scanning…' : '🔎 Check @mention coverage'}
+        </button>
+      </div>
+
+      {mentionsError && <div className="text-sm text-rose-300 mt-3">⚠ {mentionsError}</div>}
+
+      {mentionsResult && (
+        <div className="mt-3 bg-ink-900/50 rounded-lg p-4">
+          <p className="text-sm text-slate-200 mb-3">
+            Scanned <span className="text-lime-300 font-bold">{mentionsResult.total_unique_emails}</span> unique emails
+            across <span className="text-lime-300 font-bold">{mentionsResult.total_teams}</span> teams.{' '}
+            <span className="text-emerald-300">{mentionsResult.resolved_count} resolved</span>.{' '}
+            {mentionsResult.unresolved_email_count > 0 ? (
+              <span className="text-amber-300">{mentionsResult.unresolved_email_count} could not be resolved</span>
+            ) : (
+              <span className="text-emerald-300">All resolved — everyone got @mentioned.</span>
+            )}
+          </p>
+          {mentionsResult.teams_with_issues.length > 0 ? (
+            <details open className="text-xs">
+              <summary className="cursor-pointer text-slate-300 font-semibold mb-2">
+                Affected teams ({mentionsResult.teams_with_issues_count}) — these people would not have received the welcome ping or auto-channel access
+              </summary>
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-ink-900/80 text-amber-200">
+                      <th className="px-3 py-2 text-left border border-slate-700/60">Team</th>
+                      <th className="px-3 py-2 text-left border border-slate-700/60">Role</th>
+                      <th className="px-3 py-2 text-left border border-slate-700/60">Name</th>
+                      <th className="px-3 py-2 text-left border border-slate-700/60">Email</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mentionsResult.teams_with_issues.flatMap((t) =>
+                      t.unresolved.map((p, i) => (
+                        <tr key={`${t.team_id}-${i}`} className="hover:bg-ink-900/60">
+                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-200">
+                            {i === 0 ? t.team_name : <span className="text-slate-500 italic">↳</span>}
+                          </td>
+                          <td className="px-3 py-1.5 border border-slate-700/60">
+                            <span className={p.role === 'mentor' ? 'text-amber-300' : 'text-slate-400'}>
+                              {p.role}
+                            </span>
+                          </td>
+                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-200">{p.name}</td>
+                          <td className="px-3 py-1.5 border border-slate-700/60 text-rose-300 font-mono">{p.email}</td>
+                        </tr>
+                      )),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

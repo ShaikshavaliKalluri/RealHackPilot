@@ -1756,6 +1756,106 @@ def adopt_orphan_channels(
     }
 
 
+@app.post("/api/comms/check-welcome-mentions", response_model=dict)
+def check_welcome_mentions(
+    request: Request,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """For every team in the DB, attempt to resolve mentor + each member's
+    email to an Azure AD user id. The ones that DON'T resolve are the
+    same people that would have been silently skipped from the welcome
+    channel message's @mention list.
+
+    Same root cause covers two organizer questions:
+      - Who isn't in the parent Team / can't see the channel? -> usually
+        these unresolved emails.
+      - Who didn't get an @mention notification when welcome posted? ->
+        exactly these unresolved emails.
+
+    Uses User.ReadBasic.All (already granted). Parallelized so 500 lookups
+    finish in ~10-15 seconds instead of 90.
+    """
+    import httpx
+    from concurrent.futures import ThreadPoolExecutor
+
+    graph_token = request.headers.get("x-graph-token", "")
+    if not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+
+    teams = db.query(models.Team).order_by(models.Team.name.asc()).all()
+
+    # 1) Collect unique emails with the list of (team, role, name) they
+    #    appear under. Dedup by lowercased email so a mentor who covers
+    #    multiple teams only gets looked up once.
+    email_contexts: dict[str, list[dict]] = {}
+    for team in teams:
+        if team.mentor_email and team.mentor_name:
+            key = team.mentor_email.strip().lower()
+            email_contexts.setdefault(key, []).append({
+                "team_id": team.id, "team_name": team.name,
+                "role": "mentor", "name": team.mentor_name.strip(),
+                "email": team.mentor_email.strip(),
+            })
+        for m in team.members:
+            if m.email and m.name:
+                key = m.email.strip().lower()
+                email_contexts.setdefault(key, []).append({
+                    "team_id": team.id, "team_name": team.name,
+                    "role": "member", "name": m.name.strip(),
+                    "email": m.email.strip(),
+                })
+
+    unique_emails = list(email_contexts.keys())
+    unresolved: dict[str, int] = {}  # email_lower -> http status
+
+    headers = {"Authorization": f"Bearer {graph_token}"}
+    with httpx.Client(headers=headers, timeout=15) as gc:
+        def check_one(email: str) -> tuple[str, int]:
+            try:
+                r = gc.get(f"{comms.GRAPH}/users/{email}")
+                return email, r.status_code
+            except Exception:
+                return email, -1  # network error etc.
+
+        with ThreadPoolExecutor(max_workers=10) as exe:
+            for email, status in exe.map(check_one, unique_emails):
+                if status != 200:
+                    unresolved[email] = status
+
+    # 2) Build per-team report (only teams with at least one unresolved person)
+    per_team: dict[int, dict] = {}
+    for email, _status in unresolved.items():
+        for ctx in email_contexts[email]:
+            tid = ctx["team_id"]
+            if tid not in per_team:
+                per_team[tid] = {
+                    "team_id": tid,
+                    "team_name": ctx["team_name"],
+                    "unresolved": [],
+                }
+            per_team[tid]["unresolved"].append({
+                "role": ctx["role"],
+                "name": ctx["name"],
+                "email": ctx["email"],
+            })
+
+    # Sort each team's unresolved list (mentor first, then alphabetical)
+    for v in per_team.values():
+        v["unresolved"].sort(key=lambda x: (0 if x["role"] == "mentor" else 1, x["name"].lower()))
+
+    issues_sorted = sorted(per_team.values(), key=lambda t: t["team_name"].lower())
+
+    return {
+        "total_teams": len(teams),
+        "total_unique_emails": len(unique_emails),
+        "resolved_count": len(unique_emails) - len(unresolved),
+        "unresolved_email_count": len(unresolved),
+        "teams_with_issues_count": len(issues_sorted),
+        "teams_with_issues": issues_sorted,
+    }
+
+
 @app.get("/api/comms/welcomed-team-ids", response_model=dict)
 def list_welcomed_team_ids(
     claims: dict = Depends(require_auth),
