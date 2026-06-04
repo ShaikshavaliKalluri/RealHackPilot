@@ -190,6 +190,19 @@ export async function fetchEmailTemplates(): Promise<EmailTemplate[]> {
   return r.json();
 }
 
+export interface BlankTemplate {
+  template_id: string;
+  subject: string;
+  body: string;
+  body_html: string | null;
+}
+
+export async function fetchBlankTemplate(templateId: string): Promise<BlankTemplate> {
+  const r = await authFetch(`${BASE}/email/templates/${templateId}/blank`);
+  if (!r.ok) throw new Error(`Blank template fetch failed: ${r.status}`);
+  return r.json();
+}
+
 export async function renderEmails(templateId: string, teamIds: number[] | null): Promise<RenderedEmail[]> {
   const r = await authFetch(`${BASE}/email/render`, {
     method: 'POST',

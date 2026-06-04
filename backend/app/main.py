@@ -756,6 +756,33 @@ def render_email_endpoint(req: EmailRenderRequest, db: Session = Depends(get_db)
     return [RenderedEmail(**r) for r in rendered]
 
 
+@app.get("/api/email/templates/{template_id}/blank", response_model=dict)
+def render_template_blank(template_id: str) -> dict:
+    """Return a template's subject + body + body_html with any
+    {placeholder} tokens stripped out, so it can be sent to arbitrary
+    recipients (judges, observers, SLT) without picking a team first.
+
+    Designed for the Kickoff-style email which uses a generic 'Dear Team'
+    greeting and has no per-team substitution. For templates that DO
+    have placeholders (welcome, fix_it, channel_ready), this returns
+    the body with the placeholders removed -- still ok if the surrounding
+    text reads naturally without them; otherwise the organizer should
+    use the team-based flow.
+    """
+    import re
+    template = next((t for t in EMAIL_TEMPLATES if t.id == template_id), None)
+    if template is None:
+        raise HTTPException(status_code=404, detail="unknown template id")
+
+    placeholder = re.compile(r"\{[a-zA-Z_][a-zA-Z0-9_]*\}")
+    return {
+        "template_id": template_id,
+        "subject": placeholder.sub("", template.subject).strip(),
+        "body": placeholder.sub("", template.body),
+        "body_html": placeholder.sub("", template.body_html) if template.body_html else None,
+    }
+
+
 @app.post("/api/judge/{team_id}/ai", response_model=dict)
 def judge_ai_endpoint(team_id: int, req: JudgeAIRequest, db: Session = Depends(get_db)) -> dict:
     team = db.query(models.Team).get(team_id)

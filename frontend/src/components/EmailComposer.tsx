@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchEmailTemplates, renderEmails, appendCommLog, checkDuplicate, type EmailTemplate, type RenderedEmail } from '../api';
+import { fetchEmailTemplates, renderEmails, fetchBlankTemplate, appendCommLog, checkDuplicate, type EmailTemplate, type RenderedEmail } from '../api';
 import { sendEmailViaGraph } from '../graphSend';
 import type { Team } from '../types';
 
@@ -203,7 +203,28 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
       // Render only the explicitly-selected teams.
       const ids = Array.from(selection);
       if (ids.length === 0) {
-        setError('No teams selected. Pick at least one team to render.');
+        // No teams picked -- but if the organizer has filled in 'extras',
+        // proceed in extras-only mode: fetch the template with placeholders
+        // stripped and show it as a single 'no team' preview entry. Used
+        // for the kickoff invite ('Dear Team' / no per-team substitution)
+        // to send to judges or SLT without selecting any team.
+        if (extraRecipients.length === 0) {
+          setError('No teams selected. Pick at least one team, OR add emails to the "Also send to (extras)" field below to send to non-team recipients.');
+          setLoading(false);
+          return;
+        }
+        const blank = await fetchBlankTemplate(templateId);
+        const stub: RenderedEmail = {
+          team_id: -1,
+          team_name: '(extras only — no team)',
+          audience: 'extras',
+          to: [],  // sendAllViaGraph will use the extras list instead
+          subject: blank.subject,
+          body: blank.body,
+          body_html: blank.body_html,
+          missing_fields: [],
+        };
+        setRendered([stub]);
         setLoading(false);
         return;
       }
@@ -263,16 +284,17 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
       })
       .filter((row) => row.to.length > 0);
 
-    if (eligible.length === 0) {
-      setError('No recipients to send to — every team is missing an email and no override is set.');
-      return;
-    }
-
     // In test mode the extras send would spam real organizer/SLT mailboxes
     // with test traffic. Only honor extras on a real (non-test, non-override)
     // send.
     const isTestSend = !!(testMode || (toOverrideRaw && toOverrideRaw.trim()));
     const extrasToSend = isTestSend ? [] : extraRecipients;
+
+    if (eligible.length === 0 && extrasToSend.length === 0) {
+      setError('No recipients to send to — every team is missing an email and there are no extras / no override is set.');
+      return;
+    }
+
     const totalToSend = eligible.length + (extrasToSend.length > 0 ? 1 : 0);
 
     setError(null);
@@ -602,10 +624,16 @@ export function EmailComposer({ open, teams, userEmail, onClose }: Props) {
                 </button>
                 <button
                   onClick={doRender}
-                  disabled={loading || selection.size === 0}
+                  disabled={loading || (selection.size === 0 && extraRecipients.length === 0)}
                   className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-5 py-2 rounded-lg text-sm transition"
                 >
-                  {loading ? 'Rendering…' : selection.size === 0 ? 'Pick at least one team' : `Render ${selection.size} email${selection.size === 1 ? '' : 's'}`}
+                  {loading
+                    ? 'Rendering…'
+                    : selection.size === 0
+                      ? (extraRecipients.length > 0
+                          ? `Continue to preview → send to ${extraRecipients.length} extra${extraRecipients.length === 1 ? '' : 's'}`
+                          : 'Pick at least one team (or add extras below)')
+                      : `Render ${selection.size} email${selection.size === 1 ? '' : 's'}`}
                 </button>
               </div>
             </div>
