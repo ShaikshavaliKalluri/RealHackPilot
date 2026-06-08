@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
-import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, fetchMyRole, isSandboxMode, setSandboxMode, type LLMHealth, type AIScreenStatus, type UserProfile, type UserRole } from './api';
+import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, exportDevOpsRepos, fetchMyRole, isSandboxMode, setSandboxMode, type LLMHealth, type AIScreenStatus, type UserProfile, type UserRole } from './api';
 import { JudgeDashboard } from './components/JudgeDashboard';
 import { JudgesPanel } from './components/JudgesPanel';
 import { LoginQRPage } from './components/LoginQRPage';
@@ -569,6 +569,16 @@ export default function App() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
           </svg>
           Export to Excel
+        </button>
+        <button
+          onClick={() => exportDevOpsRepos().catch((e) => alert(`Export failed: ${e.message ?? e}`))}
+          className="text-xs px-3 py-1.5 rounded-lg border border-sky-500/40 hover:bg-sky-500/10 text-sky-300 transition flex items-center gap-1.5"
+          title="Hand-off sheet for DevOps to create GitHub repos. One row per person, team name merged, Gitrepo url column blank for them to fill."
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+          </svg>
+          DevOps repo list
         </button>
       </section>
 

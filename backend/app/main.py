@@ -851,6 +851,93 @@ def export_csv(db: Session = Depends(get_db)) -> StreamingResponse:
     )
 
 
+@app.get("/api/export/devops-repos.xlsx")
+def export_devops_repos(db: Session = Depends(get_db)) -> StreamingResponse:
+    """Hand-off sheet for DevOps to provision GitHub repos.
+
+    One row per person (mentor first, then each member). S.No, Team Name and
+    Gitrepo url cells are merged vertically across the team's rows so the
+    DevOps team sees one team-grouped block at a glance, matching the layout
+    organizers asked for. Gitrepo url is left blank for DevOps to fill in
+    (or pre-filled if we already have one in repo_url).
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+
+    teams = db.query(models.Team).order_by(models.Team.name.asc()).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "DevOps Repos"
+
+    headers = ["S.No", "Team Name", "Member names", "Email Ids", "Gitrepo url"]
+    header_fill = PatternFill("solid", fgColor="0A4F99")
+    header_font = Font(bold=True, color="FFFFFF")
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left = Alignment(horizontal="left", vertical="center", wrap_text=True)
+    thin = Side(border_style="thin", color="B0BEC5")
+    border = Border(top=thin, bottom=thin, left=thin, right=thin)
+
+    for col_idx, h in enumerate(headers, start=1):
+        c = ws.cell(row=1, column=col_idx, value=h)
+        c.fill = header_fill
+        c.font = header_font
+        c.alignment = center
+        c.border = border
+
+    row = 2
+    for sno, t in enumerate(teams, start=1):
+        # Mentor row first, then each member. Skip teams with neither.
+        people: list[tuple[str, str]] = []
+        if (t.mentor_name or "").strip() or (t.mentor_email or "").strip():
+            people.append((
+                (t.mentor_name or "").strip() or "(mentor name missing)",
+                (t.mentor_email or "").strip(),
+            ))
+        for m in t.members:
+            people.append((
+                (m.name or "").strip(),
+                (m.email or "").strip(),
+            ))
+        if not people:
+            continue
+
+        start_row = row
+        for name, email in people:
+            ws.cell(row=row, column=3, value=name).alignment = left
+            ws.cell(row=row, column=4, value=email).alignment = left
+            for col_idx in range(1, 6):
+                ws.cell(row=row, column=col_idx).border = border
+            row += 1
+        end_row = row - 1
+
+        # Write the team-level cells in the first row of the block; merge.
+        ws.cell(row=start_row, column=1, value=sno).alignment = center
+        ws.cell(row=start_row, column=2, value=t.name).alignment = center
+        ws.cell(row=start_row, column=5, value=(t.repo_url or "")).alignment = center
+        if end_row > start_row:
+            ws.merge_cells(start_row=start_row, end_row=end_row, start_column=1, end_column=1)
+            ws.merge_cells(start_row=start_row, end_row=end_row, start_column=2, end_column=2)
+            ws.merge_cells(start_row=start_row, end_row=end_row, start_column=5, end_column=5)
+
+    # Column widths sized for the longest realistic value in each column.
+    ws.column_dimensions["A"].width = 6
+    ws.column_dimensions["B"].width = 28
+    ws.column_dimensions["C"].width = 30
+    ws.column_dimensions["D"].width = 38
+    ws.column_dimensions["E"].width = 42
+    ws.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="realhack_2026_devops_repos.xlsx"'},
+    )
+
+
 @app.post("/api/judge/{team_id}/human", response_model=dict)
 def judge_human_endpoint(team_id: int, req: JudgeHumanRequest, db: Session = Depends(get_db)) -> dict:
     team = db.query(models.Team).get(team_id)

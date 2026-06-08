@@ -1263,6 +1263,28 @@ export async function exportCsv(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
+/**
+ * DevOps hand-off sheet: one xlsx with merged team rows, columns are
+ * S.No / Team Name / Member names / Email Ids / Gitrepo url. Used to give
+ * DevOps a single file to provision GitHub repos from.
+ */
+export async function exportDevOpsRepos(): Promise<void> {
+  const r = await authFetch(`${BASE}/export/devops-repos.xlsx`);
+  if (!r.ok) {
+    const t = await r.text().catch(() => '');
+    throw new Error(`Export failed (${r.status}): ${t.slice(0, 200)}`);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `realhack-2026-devops-repos-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // ===== Tournament progression =====
 
 export interface RoundSummary {
