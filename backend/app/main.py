@@ -2074,6 +2074,134 @@ def post_team_message(team_id: int, req: TeamMessageRequest, db: Session = Depen
     return result
 
 
+@app.post("/api/comms/teams/{team_id}/post-channel-qr", response_model=dict)
+def post_channel_qr_for_team(
+    team_id: int,
+    request: Request,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Post the floor-walk QR-code message to ONE team's channel."""
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+    if not team.has_teams_channel or not team.teams_channel_id:
+        raise HTTPException(status_code=409, detail="Team has no Teams channel yet")
+    if str(team.teams_channel_id).startswith(("sandbox-", "mock-", "dryrun-")):
+        raise HTTPException(status_code=400, detail="Cannot post to a mock channel")
+
+    graph_token = request.headers.get("x-graph-token", "")
+    if not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or None
+
+    public_base = str(request.base_url).rstrip("/")
+    # request.base_url is the backend URL (e.g. http://127.0.0.1:8001). The
+    # QR needs to point at the public frontend origin. Prefer the explicit
+    # PUBLIC_BASE_URL env if set, otherwise fall back to the request Origin
+    # header (sent by browser), otherwise base_url.
+    public_base = (
+        os.environ.get("PUBLIC_BASE_URL")
+        or request.headers.get("origin")
+        or public_base
+    )
+
+    try:
+        result = comms.post_channel_qr_message_with_graph_token(
+            db=db, team=team, graph_token=graph_token,
+            public_base_url=public_base,
+            sent_by_email=organizer_email,
+        )
+    except comms._GraphChannelError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status, detail=e.message)
+    db.commit()
+    return result
+
+
+@app.post("/api/comms/teams/post-channel-qr-all", response_model=dict)
+def post_channel_qr_to_all(
+    request: Request,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Bulk: post the QR-code message to every team that has a real channel.
+    Idempotent — skips teams that already received a 'QR-code message posted'
+    log entry. Per-team failures collected; batch continues."""
+    graph_token = request.headers.get("x-graph-token", "")
+    if not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or None
+
+    public_base = (
+        os.environ.get("PUBLIC_BASE_URL")
+        or request.headers.get("origin")
+        or str(request.base_url).rstrip("/")
+    )
+
+    all_teams = (
+        db.query(models.Team)
+        .filter(models.Team.has_teams_channel.is_(True))
+        .filter(models.Team.teams_channel_id.isnot(None))
+        .order_by(models.Team.name.asc())
+        .all()
+    )
+
+    posted: list[dict] = []
+    skipped_already: list[dict] = []
+    skipped_no_real_channel: list[dict] = []
+    failed: list[dict] = []
+
+    import time
+    for team in all_teams:
+        if str(team.teams_channel_id).startswith(("sandbox-", "mock-", "dryrun-")):
+            skipped_no_real_channel.append({"team_id": team.id, "team_name": team.name})
+            continue
+        already = (
+            db.query(models.CommLog)
+            .filter(models.CommLog.team_id == team.id)
+            .filter(models.CommLog.kind == "teams_message")
+            .filter(models.CommLog.subject.like("QR-code message posted%"))
+            .first()
+        )
+        if already:
+            skipped_already.append({"team_id": team.id, "team_name": team.name})
+            continue
+        try:
+            r = comms.post_channel_qr_message_with_graph_token(
+                db=db, team=team, graph_token=graph_token,
+                public_base_url=public_base,
+                sent_by_email=organizer_email,
+            )
+            db.commit()
+            posted.append({"team_id": team.id, "team_name": team.name})
+        except comms._GraphChannelError as e:
+            db.rollback()
+            failed.append({"team_id": team.id, "team_name": team.name, "error": (e.message or "")[:200]})
+        except Exception as e:
+            db.rollback()
+            failed.append({"team_id": team.id, "team_name": team.name, "error": f"unexpected: {str(e)[:200]}"})
+        time.sleep(0.5)
+
+    return {
+        "total_teams_with_channels": len(all_teams),
+        "posted_count": len(posted),
+        "skipped_already_posted_count": len(skipped_already),
+        "skipped_no_real_channel_count": len(skipped_no_real_channel),
+        "failed_count": len(failed),
+        "posted": posted,
+        "skipped_already_posted": skipped_already,
+        "skipped_no_real_channel": skipped_no_real_channel,
+        "failed": failed,
+    }
+
+
 @app.post("/api/comms/teams/post-channel-welcome-all", response_model=dict)
 def post_channel_welcome_to_all(
     request: Request,

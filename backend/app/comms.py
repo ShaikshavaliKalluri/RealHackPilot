@@ -506,6 +506,122 @@ def post_channel_welcome_with_graph_token(
     }
 
 
+# ===== QR-code channel post (judging-walk floor cards) =====
+
+def _make_team_qr_png(team_id: int, public_base_url: str) -> bytes:
+    """Generate a PNG QR code that encodes the public team detail URL
+    (e.g. https://realhack.realpage.com/team/42). Returns raw PNG bytes
+    suitable for embedding as Microsoft Teams hostedContent."""
+    import qrcode
+    from io import BytesIO
+
+    target_url = f"{public_base_url.rstrip('/')}/team/{team_id}"
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=2,
+    )
+    qr.add_data(target_url)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="#0a4f99", back_color="white")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def post_channel_qr_message_with_graph_token(
+    db: Session,
+    team: Team,
+    graph_token: str,
+    public_base_url: str,
+    sent_by_email: str | None = None,
+) -> dict:
+    """Post the floor-walk QR-code message to a team's Teams channel.
+
+    Microsoft Graph supports inline images via hostedContents — we pass
+    base64 PNG bytes with a temporary id, then reference it in the body
+    as ../hostedContents/<id>/$value. Teams renders it inline; recipients
+    don't need to download or trust an external image source.
+
+    Requires ChannelMessage.Send delegated scope.
+    """
+    import base64
+    import html as html_lib
+
+    if not team.has_teams_channel or not team.teams_channel_id:
+        raise _GraphChannelError(400, "Team has no Teams channel — create one first")
+    if not PARENT_TEAM_ID:
+        raise _GraphChannelError(500, "GRAPH_PARENT_TEAM_ID is not set on the server")
+
+    qr_png = _make_team_qr_png(team.id, public_base_url)
+    qr_b64 = base64.b64encode(qr_png).decode("ascii")
+
+    team_name_safe = html_lib.escape(team.name)
+    target_url = f"{public_base_url.rstrip('/')}/team/{team.id}"
+
+    content = (
+        f"<p style='text-align:justify;'>Hi <strong>{team_name_safe}</strong> Team,</p>"
+        f"<p style='text-align:justify;'>Sharing your team's QR code for "
+        f"<strong>RealHack 2026</strong>. This links to your problem statement / "
+        f"project details.</p>"
+        f"<p style='text-align:justify;'>During the floor walk, judges and leaders "
+        f"will visit your desk and scan this QR code to review your idea and "
+        f"provide feedback.</p>"
+        f"<p style='text-align:justify;'>Please keep it easily accessible "
+        f"(printed or on screen) during judging.</p>"
+        # Inline QR image via hostedContents
+        f"<p><img src='../hostedContents/1/$value' alt='Team QR code' "
+        f"width='220' height='220' style='display:block;margin:8px 0;'></p>"
+        f"<p style='font-size:12px;color:#5b6b7c;'>Direct link (if QR doesn't "
+        f"scan): <a href='{target_url}'>{target_url}</a></p>"
+        f"<p>Let me know if you have any questions.</p>"
+        f"<p style='margin-top:14px;'>Regards,<br>"
+        f"<strong style='color:#0a4f99;'>Team RealHack</strong></p>"
+    )
+
+    payload = {
+        "body": {
+            "contentType": "html",
+            "content": content,
+        },
+        "hostedContents": [
+            {
+                "@microsoft.graph.temporaryId": "1",
+                "contentBytes": qr_b64,
+                "contentType": "image/png",
+            }
+        ],
+    }
+
+    with httpx.Client(
+        headers={"Authorization": f"Bearer {graph_token}", "Content-Type": "application/json"},
+        timeout=30,
+    ) as gc:
+        url = f"{GRAPH}/teams/{PARENT_TEAM_ID}/channels/{team.teams_channel_id}/messages"
+        r = gc.post(url, json=payload)
+        if r.status_code not in (200, 201):
+            req_id = r.headers.get("request-id") or r.headers.get("client-request-id") or "?"
+            raise _GraphChannelError(
+                502,
+                f"Channel QR post failed ({r.status_code}) [req {req_id}]: {r.text[:1500]}",
+            )
+        msg_id = (r.json() or {}).get("id", "")
+
+    log(
+        db, team.id, kind="teams_message",
+        subject=f"QR-code message posted: {team.name}",
+        body=f"Message ID: {msg_id} · QR -> {target_url}",
+        status="sent",
+        sent_by_email=sent_by_email,
+    )
+    return {
+        "message_id": msg_id,
+        "qr_target_url": target_url,
+        "status": "sent",
+    }
+
+
 # ===== Readiness check =====
 
 def check_repo_readiness(team: Team) -> dict:

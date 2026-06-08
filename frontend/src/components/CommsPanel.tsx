@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Team } from '../types';
-import { commsMode, createTeamsChannels, postChannelWelcomeAll, fetchWelcomedTeamIds, adoptOrphanChannels, checkWelcomeMentions, type MentionsCheckResult } from '../api';
+import { commsMode, createTeamsChannels, postChannelWelcomeAll, postChannelQrAll, fetchWelcomedTeamIds, adoptOrphanChannels, checkWelcomeMentions, type MentionsCheckResult } from '../api';
 
 interface Props {
   teams: Team[];
@@ -26,6 +26,9 @@ export function CommsPanel({ teams, onReload }: Props) {
   const [mentionsBusy, setMentionsBusy] = useState(false);
   const [mentionsResult, setMentionsResult] = useState<MentionsCheckResult | null>(null);
   const [mentionsError, setMentionsError] = useState<string | null>(null);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [qrResult, setQrResult] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
 
   useEffect(() => {
     commsMode().then((r) => setMode(r.mode)).catch(() => {});
@@ -106,6 +109,35 @@ export function CommsPanel({ teams, onReload }: Props) {
       setError(e.message ?? String(e));
     } finally {
       setAdoptBusy(false);
+    }
+  };
+
+  const handlePostQrAll = async () => {
+    const confirmText =
+      `Post the QR-code message to every team's channel?\n\n` +
+      `Each team gets a personalized message with their own QR code (encodes the team's /team/<id> URL) embedded inline. Teams already posted are skipped.\n\n` +
+      `Takes ~3-4 min for ~${teamsWithChannel.length} channels (QR generation + Graph post per team).`;
+    if (!confirm(confirmText)) return;
+    setQrBusy(true);
+    setQrError(null);
+    setQrResult(null);
+    try {
+      const r = await postChannelQrAll();
+      const parts: string[] = [];
+      parts.push(`QR posted to ${r.posted_count} channel${r.posted_count === 1 ? '' : 's'}`);
+      if (r.skipped_already_posted_count > 0) parts.push(`${r.skipped_already_posted_count} already posted`);
+      if (r.skipped_no_real_channel_count > 0) parts.push(`${r.skipped_no_real_channel_count} mock/sandbox skipped`);
+      if (r.failed_count > 0) parts.push(`${r.failed_count} failed`);
+      setQrResult(parts.join(' · '));
+      if (r.failed.length > 0) {
+        const head = r.failed.slice(0, 3).map((f) => `${f.team_name}: ${f.error}`).join(' | ');
+        const more = r.failed.length > 3 ? ` (+${r.failed.length - 3} more)` : '';
+        setQrError(`Failures: ${head}${more}`);
+      }
+    } catch (e: any) {
+      setQrError(e.message ?? String(e));
+    } finally {
+      setQrBusy(false);
     }
   };
 
@@ -277,6 +309,29 @@ export function CommsPanel({ teams, onReload }: Props) {
       )}
       {welcomeResult && <div className="text-sm text-lime-300 mt-3">✓ {welcomeResult}</div>}
       {welcomeError && <div className="text-sm text-rose-300 mt-3">⚠ {welcomeError}</div>}
+
+      {/* Bulk: post QR code message to every channel */}
+      {teamsWithChannel.length > 0 && (
+        <div className="bg-ink-900/50 rounded-lg p-4 mt-3 flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-slate-300">
+              Post the <strong className="text-slate-100">team QR-code</strong> message in every team's channel.
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              Each team gets a personalized message with their own QR code (links to <code className="text-slate-300">/team/&lt;id&gt;</code>) inlined as an image. Teams already messaged are skipped. ~3-4 min.
+            </p>
+          </div>
+          <button
+            disabled={qrBusy}
+            onClick={handlePostQrAll}
+            className="bg-cyan-400 hover:bg-cyan-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded text-sm transition"
+          >
+            {qrBusy ? 'Posting…' : `📱 Post QR to ${teamsWithChannel.length} channel${teamsWithChannel.length === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      )}
+      {qrResult && <div className="text-sm text-lime-300 mt-3">✓ {qrResult}</div>}
+      {qrError && <div className="text-sm text-rose-300 mt-3">⚠ {qrError}</div>}
 
       {/* Diagnostic: who isn't resolvable in AAD (=> didn't get @mentioned + can't see channel) */}
       <div className="bg-ink-900/50 rounded-lg p-4 mt-3 flex items-start justify-between gap-4 flex-wrap">
