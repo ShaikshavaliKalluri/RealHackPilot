@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Team } from '../types';
-import { commsMode, createTeamsChannels, postChannelWelcomeAll, postChannelQrAll, fetchWelcomedTeamIds, adoptOrphanChannels, checkWelcomeMentions, type MentionsCheckResult } from '../api';
+import { commsMode, createTeamsChannels, postChannelWelcomeAll, postChannelQrAll, fetchWelcomedTeamIds, fetchQrPostedTeamIds, adoptOrphanChannels, checkWelcomeMentions, type MentionsCheckResult } from '../api';
 
 interface Props {
   teams: Team[];
@@ -29,12 +29,16 @@ export function CommsPanel({ teams, onReload }: Props) {
   const [qrBusy, setQrBusy] = useState(false);
   const [qrResult, setQrResult] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
+  const [qrPostedIds, setQrPostedIds] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     commsMode().then((r) => setMode(r.mode)).catch(() => {});
     fetchWelcomedTeamIds()
       .then((ids) => setWelcomedIds(new Set(ids)))
       .catch(() => setWelcomedIds(new Set()));
+    fetchQrPostedTeamIds()
+      .then((ids) => setQrPostedIds(new Set(ids)))
+      .catch(() => setQrPostedIds(new Set()));
   }, []);
 
   const teamsWithoutChannel = teams
@@ -48,6 +52,9 @@ export function CommsPanel({ teams, onReload }: Props) {
     .filter((t) => !welcomedIds.has(t.id))
     .slice()
     .sort((a, b) => a.name.localeCompare(b.name));
+  // Same shape as pending-welcome but for the QR-code message — drives the
+  // bulk QR button label so it shows 'remaining' not always 95.
+  const teamsPendingQr = teamsWithChannel.filter((t) => !qrPostedIds.has(t.id));
   // The 'Simulation mode' badge was added when the only channel-create path
   // was the mock-only bulk endpoint. The per-team 'Create Teams channel'
   // button (delegated Graph) always hits real Graph, so once any real
@@ -133,6 +140,13 @@ export function CommsPanel({ teams, onReload }: Props) {
         const head = r.failed.slice(0, 3).map((f) => `${f.team_name}: ${f.error}`).join(' | ');
         const more = r.failed.length > 3 ? ` (+${r.failed.length - 3} more)` : '';
         setQrError(`Failures: ${head}${more}`);
+      }
+      // Refresh the qr-posted cache so the bulk button label updates.
+      try {
+        const ids = await fetchQrPostedTeamIds();
+        setQrPostedIds(new Set(ids));
+      } catch {
+        // non-fatal; refresh on next mount
       }
     } catch (e: any) {
       setQrError(e.message ?? String(e));
@@ -322,11 +336,15 @@ export function CommsPanel({ teams, onReload }: Props) {
             </p>
           </div>
           <button
-            disabled={qrBusy}
+            disabled={qrBusy || teamsPendingQr.length === 0}
             onClick={handlePostQrAll}
             className="bg-cyan-400 hover:bg-cyan-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded text-sm transition"
           >
-            {qrBusy ? 'Posting…' : `📱 Post QR to ${teamsWithChannel.length} channel${teamsWithChannel.length === 1 ? '' : 's'}`}
+            {qrBusy
+              ? 'Posting…'
+              : teamsPendingQr.length === 0
+                ? `✓ QR posted to all ${teamsWithChannel.length}`
+                : `📱 Post QR to ${teamsPendingQr.length} pending channel${teamsPendingQr.length === 1 ? '' : 's'}`}
           </button>
         </div>
       )}

@@ -1903,6 +1903,26 @@ def list_welcomed_team_ids(
     return {"team_ids": sorted({r[0] for r in rows})}
 
 
+@app.get("/api/comms/qr-posted-team-ids", response_model=dict)
+def list_qr_posted_team_ids(
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Returns the set of team_ids whose channels have already received the
+    floor-walk QR-code message (detected via comm_log entries with subject
+    starting 'QR-code message posted'). Used by the bulk-QR button to show
+    a 'remaining' count instead of always saying 95.
+    """
+    rows = (
+        db.query(models.CommLog.team_id)
+        .filter(models.CommLog.kind == "teams_message")
+        .filter(models.CommLog.subject.like("QR-code message posted%"))
+        .distinct()
+        .all()
+    )
+    return {"team_ids": sorted({r[0] for r in rows})}
+
+
 @app.post("/api/comms/teams/{team_id}/adopt-channel-by-link", response_model=dict)
 def adopt_channel_by_link(
     team_id: int,

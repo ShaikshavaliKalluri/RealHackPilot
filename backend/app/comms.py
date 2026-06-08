@@ -560,47 +560,81 @@ def post_channel_qr_message_with_graph_token(
     team_name_safe = html_lib.escape(team.name)
     target_url = f"{public_base_url.rstrip('/')}/team/{team.id}"
 
-    content = (
-        f"<p style='text-align:justify;'>Hi <strong>{team_name_safe}</strong> Team,</p>"
-        f"<p style='text-align:justify;'>Sharing your team's QR code for "
-        f"<strong>RealHack 2026</strong>. This links to your problem statement / "
-        f"project details.</p>"
-        f"<p style='text-align:justify;'>During the floor walk, judges and leaders "
-        f"will visit your desk and scan this QR code to review your idea and "
-        f"provide feedback.</p>"
-        f"<p style='text-align:justify;'>Please keep it easily accessible "
-        f"(printed or on screen) during judging.</p>"
-        # Inline QR image via hostedContents — Microsoft's parser is strict
-        # about finding the hostedContent reference; uses double-quoted
-        # attribute values when searching the body, so we must use double
-        # quotes here (single quotes cause 'Failed to find reference').
-        '<p><img src="../hostedContents/1/$value" alt="Team QR code" '
-        'width="220" height="220" style="display:block;margin:8px 0;"></p>'
-        f"<p style='font-size:12px;color:#5b6b7c;'>Direct link (if QR doesn't "
-        f"scan): <a href='{target_url}'>{target_url}</a></p>"
-        f"<p>Let me know if you have any questions.</p>"
-        f"<p style='margin-top:14px;'>Regards,<br>"
-        f"<strong style='color:#0a4f99;'>Team RealHack</strong></p>"
-    )
-
-    payload = {
-        "body": {
-            "contentType": "html",
-            "content": content,
-        },
-        "hostedContents": [
-            {
-                "@microsoft.graph.temporaryId": "1",
-                "contentBytes": qr_b64,
-                "contentType": "image/png",
-            }
-        ],
-    }
-
     with httpx.Client(
         headers={"Authorization": f"Bearer {graph_token}", "Content-Type": "application/json"},
         timeout=30,
     ) as gc:
+        # Resolve mentor + members to AAD ids so we can @mention them and
+        # Teams fires notifications + renders the name as a clickable pill.
+        # Anyone who can't be resolved is silently dropped — message still posts.
+        people: list[dict] = []
+        if team.mentor_email and team.mentor_name:
+            uid = _graph_get_user_id(gc, team.mentor_email.strip())
+            if uid:
+                people.append({"name": team.mentor_name.strip().title(), "aad_id": uid})
+        for m in team.members:
+            if m.email and m.name:
+                uid = _graph_get_user_id(gc, m.email.strip())
+                if uid:
+                    people.append({"name": m.name.strip().title(), "aad_id": uid})
+
+        mentions: list[dict] = []
+        mention_tags: list[str] = []
+        for i, p in enumerate(people):
+            mentions.append({
+                "id": i,
+                "mentionText": p["name"],
+                "mentioned": {
+                    "user": {
+                        "displayName": p["name"],
+                        "id": p["aad_id"],
+                        "userIdentityType": "aadUser",
+                    },
+                },
+            })
+            mention_tags.append(f'<at id="{i}">{html_lib.escape(p["name"])}</at>')
+
+        mentions_block = ", ".join(mention_tags) if mention_tags else ""
+
+        content = (
+            f"<p style='text-align:justify;'>Hi <strong>{team_name_safe}</strong> Team,</p>"
+            f"<p style='text-align:justify;'>Sharing your team's QR code for "
+            f"<strong>RealHack 2026</strong>. This links to your problem statement / "
+            f"project details.</p>"
+            f"<p style='text-align:justify;'>During the floor walk, judges and leaders "
+            f"will visit your desk and scan this QR code to review your idea and "
+            f"provide feedback.</p>"
+            f"<p style='text-align:justify;'>Please keep it easily accessible "
+            f"(printed or on screen) during judging.</p>"
+            # Inline QR image via hostedContents — Microsoft's parser is strict
+            # about finding the hostedContent reference; uses double-quoted
+            # attribute values when searching the body, so we must use double
+            # quotes here (single quotes cause 'Failed to find reference').
+            '<p><img src="../hostedContents/1/$value" alt="Team QR code" '
+            'width="220" height="220" style="display:block;margin:8px 0;"></p>'
+            f"<p style='font-size:12px;color:#5b6b7c;'>Direct link (if QR doesn't "
+            f"scan): <a href='{target_url}'>{target_url}</a></p>"
+            f"<p style='margin-top:14px;'>Regards,<br>"
+            f"<strong style='color:#0a4f99;'>Team RealHack</strong></p>"
+        )
+        if mentions_block:
+            content += f"<p>{mentions_block}</p>"
+
+        payload = {
+            "body": {
+                "contentType": "html",
+                "content": content,
+            },
+            "hostedContents": [
+                {
+                    "@microsoft.graph.temporaryId": "1",
+                    "contentBytes": qr_b64,
+                    "contentType": "image/png",
+                }
+            ],
+            "mentions": mentions,
+        }
+
         url = f"{GRAPH}/teams/{PARENT_TEAM_ID}/channels/{team.teams_channel_id}/messages"
         r = gc.post(url, json=payload)
         if r.status_code not in (200, 201):
@@ -614,13 +648,14 @@ def post_channel_qr_message_with_graph_token(
     log(
         db, team.id, kind="teams_message",
         subject=f"QR-code message posted: {team.name}",
-        body=f"Message ID: {msg_id} · QR -> {target_url}",
+        body=f"Message ID: {msg_id} · QR -> {target_url} · {len(mentions)} @mention(s)",
         status="sent",
         sent_by_email=sent_by_email,
     )
     return {
         "message_id": msg_id,
         "qr_target_url": target_url,
+        "mentions_count": len(mentions),
         "status": "sent",
     }
 

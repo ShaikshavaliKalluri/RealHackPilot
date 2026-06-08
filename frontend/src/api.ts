@@ -958,6 +958,13 @@ export async function fetchWelcomedTeamIds(): Promise<number[]> {
   return j.team_ids ?? [];
 }
 
+export async function fetchQrPostedTeamIds(): Promise<number[]> {
+  const r = await authFetch(`${BASE}/comms/qr-posted-team-ids`);
+  if (!r.ok) throw new Error(`QR-posted-team-ids fetch failed: ${r.status}`);
+  const j = await r.json();
+  return j.team_ids ?? [];
+}
+
 export async function adoptChannelByLink(
   teamId: number,
   linkOrId: string,
