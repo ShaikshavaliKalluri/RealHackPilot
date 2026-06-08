@@ -4,7 +4,7 @@ import { FlagBadge } from './FlagBadge';
 import { AIScoreBlock } from './AIScoreBlock';
 import { TeamReadiness } from './TeamReadiness';
 import { TeamEditModal } from './TeamEditModal';
-import { createTeamsChannelForTeam, postChannelWelcome, adoptChannelByLink, isSandboxMode } from '../api';
+import { createTeamsChannelForTeam, postChannelWelcome, postChannelQrForTeam, adoptChannelByLink, isSandboxMode } from '../api';
 
 interface Props {
   team: Team;
@@ -20,6 +20,8 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
   const [channelMsg, setChannelMsg] = useState<string | null>(null);
   const [welcomeBusy, setWelcomeBusy] = useState(false);
   const [welcomeMsg, setWelcomeMsg] = useState<string | null>(null);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [qrMsg, setQrMsg] = useState<string | null>(null);
   const pct = Math.round(team.completeness_score * 100);
 
   const handleCreateChannel = async (e: React.MouseEvent) => {
@@ -81,6 +83,22 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
       setWelcomeMsg(`✗ ${err.message ?? String(err)}`);
     } finally {
       setWelcomeBusy(false);
+    }
+  };
+
+  const handlePostQr = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const confirmText = `Post the floor-walk QR-code message to the "2026 ${team.name}" channel? The team will see a personalized message with their QR code inline.`;
+    if (!confirm(confirmText)) return;
+    setQrBusy(true);
+    setQrMsg(null);
+    try {
+      const r = await postChannelQrForTeam(team.id);
+      setQrMsg(`✓ QR posted · scans to ${r.qr_target_url}`);
+    } catch (err: any) {
+      setQrMsg(`✗ ${err.message ?? String(err)}`);
+    } finally {
+      setQrBusy(false);
     }
   };
 
@@ -208,17 +226,30 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
               </>
             )}
             {team.has_teams_channel && team.teams_channel_id && !team.teams_channel_id.startsWith('sandbox-') && !team.teams_channel_id.startsWith('mock-') && (
-              <button
-                onClick={handlePostWelcome}
-                disabled={welcomeBusy}
-                className="text-xs px-3 py-1 rounded-md border border-sky-500/40 hover:bg-sky-500/10 text-sky-200 disabled:opacity-40 transition flex items-center gap-1.5"
-                title="Post the RealHack 2026 welcome message in the team's channel, @mentioning the mentor and all members"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-                {welcomeBusy ? 'Posting…' : 'Post welcome to channel'}
-              </button>
+              <>
+                <button
+                  onClick={handlePostWelcome}
+                  disabled={welcomeBusy}
+                  className="text-xs px-3 py-1 rounded-md border border-sky-500/40 hover:bg-sky-500/10 text-sky-200 disabled:opacity-40 transition flex items-center gap-1.5"
+                  title="Post the RealHack 2026 welcome message in the team's channel, @mentioning the mentor and all members"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  {welcomeBusy ? 'Posting…' : 'Post welcome to channel'}
+                </button>
+                <button
+                  onClick={handlePostQr}
+                  disabled={qrBusy}
+                  className="text-xs px-3 py-1 rounded-md border border-cyan-500/40 hover:bg-cyan-500/10 text-cyan-200 disabled:opacity-40 transition flex items-center gap-1.5"
+                  title="Post the floor-walk QR-code message in the team's channel — they get their team's QR inlined as an image"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4h6v6H4V4zm10 0h6v6h-6V4zM4 14h6v6H4v-6zm10 4h2v2h-2v-2zm4 0h2v2h-2v-2zm-4-4h6v2h-6v-2z" />
+                  </svg>
+                  {qrBusy ? 'Posting…' : 'Post QR to channel'}
+                </button>
+              </>
             )}
             <button
               onClick={(e) => {
@@ -268,6 +299,11 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
           {welcomeMsg && (
             <div className={`text-xs ${welcomeMsg.startsWith('✓') ? 'text-emerald-300' : 'text-rose-300'}`}>
               {welcomeMsg}
+            </div>
+          )}
+          {qrMsg && (
+            <div className={`text-xs ${qrMsg.startsWith('✓') ? 'text-emerald-300' : 'text-rose-300'}`}>
+              {qrMsg}
             </div>
           )}
 
