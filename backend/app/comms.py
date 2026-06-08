@@ -570,9 +570,12 @@ def post_channel_qr_message_with_graph_token(
         f"provide feedback.</p>"
         f"<p style='text-align:justify;'>Please keep it easily accessible "
         f"(printed or on screen) during judging.</p>"
-        # Inline QR image via hostedContents
-        f"<p><img src='../hostedContents/1/$value' alt='Team QR code' "
-        f"width='220' height='220' style='display:block;margin:8px 0;'></p>"
+        # Inline QR image via hostedContents — Microsoft's parser is strict
+        # about finding the hostedContent reference; uses double-quoted
+        # attribute values when searching the body, so we must use double
+        # quotes here (single quotes cause 'Failed to find reference').
+        '<p><img src="../hostedContents/1/$value" alt="Team QR code" '
+        'width="220" height="220" style="display:block;margin:8px 0;"></p>'
         f"<p style='font-size:12px;color:#5b6b7c;'>Direct link (if QR doesn't "
         f"scan): <a href='{target_url}'>{target_url}</a></p>"
         f"<p>Let me know if you have any questions.</p>"
