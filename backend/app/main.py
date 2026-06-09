@@ -1024,7 +1024,21 @@ def bulk_add_judges(req: JudgeBulkRequest, db: Session = Depends(get_db)) -> Jud
 
 
 @app.post("/api/judges/dedupe-emails", response_model=dict)
-def dedupe_judge_emails(db: Session = Depends(get_db)) -> dict:
+def dedupe_judge_emails(db: Session = Depends(get_db)) -> dict:  # noqa: C901 — single linear merge loop, deliberately not split
+    try:
+        return _dedupe_judge_emails_impl(db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Bubble the actual error message back to the UI so the user (and
+        # next-me reading the toast) doesn't have to SSH to the server to
+        # find out what broke. 500 keeps the response code accurate.
+        import traceback
+        tb = traceback.format_exc(limit=4)
+        raise HTTPException(status_code=500, detail=f"Dedupe failed: {e!s} | {tb[-400:]}")
+
+
+def _dedupe_judge_emails_impl(db: Session) -> dict:
     """Merge judge rows that share the same email modulo case, then lowercase
     every remaining email. Idempotent — running it after the data is clean
     returns merged_count: 0.
@@ -1072,6 +1086,17 @@ def dedupe_judge_emails(db: Session = Depends(get_db)) -> dict:
         canonical = dups[0]
         losers = dups[1:]
 
+        # CRITICAL: clear canonical's email FIRST so the unique constraint on
+        # `judges.email` doesn't fire when SQLAlchemy reorders the flush. Both
+        # the loser DELETE and the canonical UPDATE (to lowercased email) are
+        # queued — without this, the UPDATE can hit the constraint before the
+        # DELETE of the row holding the lowercased variant lands, causing a
+        # 500. We restore the lowercased email at the end after all deletes
+        # are flushed.
+        canonical_target_email = email
+        canonical.email = f"__dedupe_pending__{canonical.id}@invalid.local"
+        db.flush()
+
         for loser in losers:
             # judge_score_records: unique on (judge_id, team_id, round)
             for s in db.query(models.JudgeScore).filter(models.JudgeScore.judge_id == loser.id).all():
@@ -1113,7 +1138,10 @@ def dedupe_judge_emails(db: Session = Depends(get_db)) -> dict:
             db.delete(loser)
             merged_count += 1
 
-        canonical.email = email  # lowercase
+        # Force all loser DELETEs to land before we reclaim the target email.
+        db.flush()
+        canonical.email = canonical_target_email
+        db.flush()
 
     db.commit()
     return {
