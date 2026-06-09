@@ -4,6 +4,7 @@ import {
   fetchJudges,
   createJudge,
   bulkAddJudges,
+  dedupeJudgeEmails,
   updateJudge,
   deleteJudge,
   PROTECTED_JUDGE_EMAILS,
@@ -41,6 +42,29 @@ export function JudgesPanel({ teams }: Props) {
   const [bulkRole, setBulkRole] = useState<'judge' | 'organizer'>('judge');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<JudgeBulkResult | null>(null);
+
+  const [dedupeBusy, setDedupeBusy] = useState(false);
+  const [dedupeMsg, setDedupeMsg] = useState<string | null>(null);
+
+  const handleDedupe = async () => {
+    if (!confirm(
+      'Merge judge rows that share the same email (ignoring case)?\n\n' +
+      'For each duplicate group, the row with the most data (scores, panel ' +
+      'assignments, organizer role) is kept; the others are deleted and any ' +
+      'attached records are moved to the kept row. All remaining emails are ' +
+      'lowercased so future lookups stay consistent.'
+    )) return;
+    setDedupeBusy(true); setErr(null); setDedupeMsg(null);
+    try {
+      const r = await dedupeJudgeEmails();
+      setDedupeMsg(`✓ Merged ${r.merged_count} duplicate${r.merged_count === 1 ? '' : 's'} · ${r.remaining_judges} judges remain.`);
+      await reloadJudges();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setDedupeBusy(false);
+    }
+  };
 
   // ===== Panels =====
   const [round, setRound] = useState<number>(1);
@@ -400,6 +424,19 @@ export function JudgesPanel({ teams }: Props) {
             )}
           </div>
         )}
+        <div className="mt-4 pt-3 border-t border-slate-700/40 flex items-center justify-between gap-3 flex-wrap">
+          <p className="text-xs text-slate-500 flex-1 min-w-[200px]">
+            See <strong className="text-slate-300">"Amit Sareen"</strong> twice? That's the same email stored with different case. Click to merge.
+          </p>
+          <button
+            onClick={handleDedupe}
+            disabled={dedupeBusy}
+            className="border border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-40 text-amber-300 font-semibold px-3 py-1.5 rounded text-xs transition"
+          >
+            {dedupeBusy ? 'Merging…' : 'Merge case-duplicate emails'}
+          </button>
+        </div>
+        {dedupeMsg && <div className="text-sm text-lime-300 mt-2">{dedupeMsg}</div>}
       </div>
 
       {err && (

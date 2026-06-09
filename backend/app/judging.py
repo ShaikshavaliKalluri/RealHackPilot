@@ -136,18 +136,25 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
 
 
 def upsert_judge_by_email(db: Session, name: str, email: str | None, role: str = "judge", ado_id: str | None = None) -> Judge:
-    """Idempotent judge creation — used by the mock SSO and the seed flow."""
+    """Idempotent judge creation — used by the mock SSO, MSAL login, bulk-add
+    and the seed flow. Email comparison is case-insensitive so signing in as
+    'Amit.Sareen@RealPage.com' resolves the same row as 'amit.sareen@realpage.com';
+    new rows always store the email lowercased to keep the data normalized."""
     judge: Judge | None = None
-    if email:
-        judge = db.query(Judge).filter(Judge.email == email).first()
+    email_norm = email.strip().lower() if email else None
+    if email_norm:
+        judge = db.query(Judge).filter(func.lower(Judge.email) == email_norm).first()
     if not judge and ado_id:
         judge = db.query(Judge).filter(Judge.ado_id == ado_id).first()
     if not judge:
-        judge = Judge(name=name, email=email, ado_id=ado_id, role=role)
+        judge = Judge(name=name, email=email_norm, ado_id=ado_id, role=role)
         db.add(judge)
         db.flush()
     else:
-        # Update name only if it's currently blank
         if not judge.name and name:
             judge.name = name
+        # Normalize a previously mixed-case email to lowercase so future
+        # equality checks (and Excel-paste lookups) match without func.lower.
+        if email_norm and judge.email and judge.email != email_norm:
+            judge.email = email_norm
     return judge

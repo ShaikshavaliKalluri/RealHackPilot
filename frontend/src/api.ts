@@ -296,6 +296,21 @@ export async function bulkAddJudges(
   return r.json();
 }
 
+export interface JudgeDedupeResult {
+  merged_count: number;
+  deleted_ids: number[];
+  remaining_judges: number;
+}
+
+export async function dedupeJudgeEmails(): Promise<JudgeDedupeResult> {
+  const r = await authFetch(`${BASE}/judges/dedupe-emails`, { method: 'POST' });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`Dedupe failed (${r.status}): ${txt.slice(0, 300)}`);
+  }
+  return r.json();
+}
+
 export async function updateJudge(
   judgeId: number,
   patch: { name?: string; email?: string | null; role?: string },

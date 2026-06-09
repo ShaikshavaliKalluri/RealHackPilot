@@ -16,7 +16,7 @@ import io
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from sqlalchemy import text
+from sqlalchemy import text, func
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -991,7 +991,10 @@ def bulk_add_judges(req: JudgeBulkRequest, db: Session = Depends(get_db)) -> Jud
         if not name or not email or "@" not in email:
             failed.append({"name": name, "email": email, "error": "name and email required (and email must look like one)"})
             continue
-        existing = db.query(models.Judge).filter(models.Judge.email == email).first()
+        # Case-insensitive match against existing rows — older rows stored
+        # via MSAL login may have mixed-case emails; we must find them or
+        # we'll create a duplicate row for the same person.
+        existing = db.query(models.Judge).filter(func.lower(models.Judge.email) == email).first()
         if existing:
             changed = False
             if existing.name != name:
@@ -1018,6 +1021,106 @@ def bulk_add_judges(req: JudgeBulkRequest, db: Session = Depends(get_db)) -> Jud
         skipped_count=skipped,
         failed=failed,
     )
+
+
+@app.post("/api/judges/dedupe-emails", response_model=dict)
+def dedupe_judge_emails(db: Session = Depends(get_db)) -> dict:
+    """Merge judge rows that share the same email modulo case, then lowercase
+    every remaining email. Idempotent — running it after the data is clean
+    returns merged_count: 0.
+
+    For each duplicate group:
+      - Picks a 'canonical' row to keep: prefers organizer > judge, then rows
+        with attached judge_scores > rows with panel memberships > oldest id.
+        This preserves any work the user has already done (scoring, panel
+        assignment) against the canonical row.
+      - Reassigns FK references (panel_judges.judge_id, judge_score_records.
+        judge_id, judge_assignments.judge_id) from each duplicate to canonical,
+        respecting the unique-constraint on (judge_id, ...) by dropping the
+        duplicate's row if canonical already has the same composite key.
+      - Deletes the duplicate Judge rows.
+      - Lowercases the canonical row's email so future equality checks line up.
+    """
+    # Pull all judges grouped by lowercase email.
+    rows = db.query(models.Judge).all()
+    by_email: dict[str, list[models.Judge]] = {}
+    for j in rows:
+        key = (j.email or "").strip().lower()
+        if not key:
+            continue
+        by_email.setdefault(key, []).append(j)
+
+    merged_count = 0
+    deleted_ids: list[int] = []
+
+    def score_judge(j: models.Judge) -> tuple:
+        # Higher tuple wins. Organizer > judge; rows with data > empty rows.
+        score_count = db.query(models.JudgeScore).filter(models.JudgeScore.judge_id == j.id).count()
+        panel_count = db.query(models.PanelJudge).filter(models.PanelJudge.judge_id == j.id).count()
+        is_org = 1 if (j.role == "organizer") else 0
+        # Prefer oldest id last (smaller id wins → invert with -id).
+        return (is_org, score_count, panel_count, -j.id)
+
+    for email, dups in by_email.items():
+        if len(dups) < 2:
+            # Even singletons get their email lowercased for consistency.
+            if dups[0].email != email:
+                dups[0].email = email
+            continue
+
+        dups.sort(key=score_judge, reverse=True)
+        canonical = dups[0]
+        losers = dups[1:]
+
+        for loser in losers:
+            # judge_score_records: unique on (judge_id, team_id, round)
+            for s in db.query(models.JudgeScore).filter(models.JudgeScore.judge_id == loser.id).all():
+                clash = db.query(models.JudgeScore).filter(
+                    models.JudgeScore.judge_id == canonical.id,
+                    models.JudgeScore.team_id == s.team_id,
+                    models.JudgeScore.round == s.round,
+                ).first()
+                if clash:
+                    db.delete(s)
+                else:
+                    s.judge_id = canonical.id
+
+            # panel_judges: unique on (panel_id, judge_id)
+            for pj in db.query(models.PanelJudge).filter(models.PanelJudge.judge_id == loser.id).all():
+                clash = db.query(models.PanelJudge).filter(
+                    models.PanelJudge.panel_id == pj.panel_id,
+                    models.PanelJudge.judge_id == canonical.id,
+                ).first()
+                if clash:
+                    db.delete(pj)
+                else:
+                    pj.judge_id = canonical.id
+
+            # judge_assignments (legacy): unique on (judge_id, team_id, round)
+            for ja in db.query(models.JudgeAssignment).filter(models.JudgeAssignment.judge_id == loser.id).all():
+                clash = db.query(models.JudgeAssignment).filter(
+                    models.JudgeAssignment.judge_id == canonical.id,
+                    models.JudgeAssignment.team_id == ja.team_id,
+                    models.JudgeAssignment.round == ja.round,
+                ).first()
+                if clash:
+                    db.delete(ja)
+                else:
+                    ja.judge_id = canonical.id
+
+            db.flush()
+            deleted_ids.append(loser.id)
+            db.delete(loser)
+            merged_count += 1
+
+        canonical.email = email  # lowercase
+
+    db.commit()
+    return {
+        "merged_count": merged_count,
+        "deleted_ids": deleted_ids,
+        "remaining_judges": db.query(models.Judge).count(),
+    }
 
 
 # Built-in organizers that can never be removed — guards the core team from
