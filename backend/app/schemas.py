@@ -89,6 +89,25 @@ class JudgeUpdate(BaseModel):
     role: str | None = None
 
 
+class JudgeBulkRow(BaseModel):
+    name: str
+    email: str
+    role: str = "judge"
+
+
+class JudgeBulkRequest(BaseModel):
+    """Bulk-add judges. Each row is upserted by email (case-insensitive) so
+    re-runs are safe — already-present judges count as 'skipped', not error."""
+    rows: list[JudgeBulkRow]
+
+
+class JudgeBulkResult(BaseModel):
+    created_count: int
+    updated_count: int
+    skipped_count: int
+    failed: list[dict]  # [{name, email, error}]
+
+
 class UserRoleOut(BaseModel):
     """Result of looking up the signed-in user's role in the Judge table."""
     role: str  # "organizer" | "judge" | "none"

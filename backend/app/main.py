@@ -44,6 +44,7 @@ from .schemas import (
     EmailTemplateOut, EmailRenderRequest, RenderedEmail,
     JudgeAIRequest, JudgeHumanRequest,
     JudgeOut, JudgeCreate, JudgeUpdate, JudgeScoreSubmit, JudgeScoreOut,
+    JudgeBulkRequest, JudgeBulkResult,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet, PanelSwapTeamDays,
     AdoptChannelByLinkRequest,
@@ -968,6 +969,55 @@ def create_judge(req: JudgeCreate, db: Session = Depends(get_db)) -> models.Judg
     judge = judging.upsert_judge_by_email(db, name=req.name, email=req.email, role=req.role)
     db.commit()
     return judge
+
+
+@app.post("/api/judges/bulk", response_model=JudgeBulkResult)
+def bulk_add_judges(req: JudgeBulkRequest, db: Session = Depends(get_db)) -> JudgeBulkResult:
+    """Bulk upsert judges by email. Skips no-op duplicates (same name + role
+    already present) so re-running is safe. Returns per-row counts + any
+    rows that failed validation."""
+    created = 0
+    updated = 0
+    skipped = 0
+    failed: list[dict] = []
+
+    for row in req.rows:
+        name = (row.name or "").strip()
+        email = (row.email or "").strip().lower()
+        role = (row.role or "judge").strip().lower()
+        if role not in ("judge", "organizer"):
+            failed.append({"name": name, "email": email, "error": "role must be 'judge' or 'organizer'"})
+            continue
+        if not name or not email or "@" not in email:
+            failed.append({"name": name, "email": email, "error": "name and email required (and email must look like one)"})
+            continue
+        existing = db.query(models.Judge).filter(models.Judge.email == email).first()
+        if existing:
+            changed = False
+            if existing.name != name:
+                existing.name = name
+                changed = True
+            if existing.role != role:
+                existing.role = role
+                changed = True
+            if not existing.is_active:
+                existing.is_active = True
+                changed = True
+            if changed:
+                updated += 1
+            else:
+                skipped += 1
+        else:
+            judging.upsert_judge_by_email(db, name=name, email=email, role=role)
+            created += 1
+
+    db.commit()
+    return JudgeBulkResult(
+        created_count=created,
+        updated_count=updated,
+        skipped_count=skipped,
+        failed=failed,
+    )
 
 
 # Built-in organizers that can never be removed — guards the core team from

@@ -274,6 +274,28 @@ export async function createJudge(name: string, email: string | null, role = 'ju
   return r.json();
 }
 
+export interface JudgeBulkResult {
+  created_count: number;
+  updated_count: number;
+  skipped_count: number;
+  failed: { name: string; email: string; error: string }[];
+}
+
+export async function bulkAddJudges(
+  rows: { name: string; email: string; role?: string }[],
+): Promise<JudgeBulkResult> {
+  const r = await authFetch(`${BASE}/judges/bulk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rows }),
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`Bulk add failed (${r.status}): ${txt.slice(0, 300)}`);
+  }
+  return r.json();
+}
+
 export async function updateJudge(
   judgeId: number,
   patch: { name?: string; email?: string | null; role?: string },

@@ -3,6 +3,7 @@ import type { Team, Judge } from '../types';
 import {
   fetchJudges,
   createJudge,
+  bulkAddJudges,
   updateJudge,
   deleteJudge,
   PROTECTED_JUDGE_EMAILS,
@@ -17,6 +18,7 @@ import {
   type Panel,
   type PanelInviteMeta,
   type ScheduleRow,
+  type JudgeBulkResult,
 } from '../api';
 
 interface Props {
@@ -33,6 +35,12 @@ export function JudgesPanel({ teams }: Props) {
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<'judge' | 'organizer'>('judge');
   const [adding, setAdding] = useState(false);
+
+  // Bulk-paste form
+  const [bulkText, setBulkText] = useState('');
+  const [bulkRole, setBulkRole] = useState<'judge' | 'organizer'>('judge');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<JudgeBulkResult | null>(null);
 
   // ===== Panels =====
   const [round, setRound] = useState<number>(1);
@@ -100,6 +108,58 @@ export function JudgesPanel({ teams }: Props) {
       setErr(e.message || String(e));
     } finally {
       setAdding(false);
+    }
+  };
+
+  // Parse "Name email" / "Name <email>" / "Name; email" / "email" lines into
+  // {name,email} pairs. Looks for an email regex anywhere on each line; the
+  // text before/around it (minus colons + angle-brackets) becomes the name.
+  // If the line has no email, it's skipped silently — header lines like
+  // 'US - Judges' shouldn't break the bulk add. If the line has only an
+  // email, we derive a name from the local part ('first.last' → 'First Last').
+  const parseBulkLines = (text: string): { name: string; email: string }[] => {
+    const emailRe = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+    const out: { name: string; email: string }[] = [];
+    const seen = new Set<string>();
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      const m = line.match(emailRe);
+      if (!m) continue;
+      const email = m[0].trim().toLowerCase();
+      if (seen.has(email)) continue;
+      seen.add(email);
+      let name = line.replace(m[0], '').replace(/[<>;,]/g, ' ').trim();
+      if (!name) {
+        // Derive from local part: 'first.last' → 'First Last'
+        name = email.split('@')[0]
+          .split(/[._-]+/)
+          .filter(Boolean)
+          .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
+          .join(' ');
+      }
+      out.push({ name, email });
+    }
+    return out;
+  };
+
+  const handleBulkAdd = async () => {
+    const rows = parseBulkLines(bulkText).map((r) => ({ ...r, role: bulkRole }));
+    if (rows.length === 0) {
+      setErr('No email addresses found in the pasted text.');
+      return;
+    }
+    if (!confirm(`Add ${rows.length} ${bulkRole}${rows.length === 1 ? '' : 's'} to the portal?\n\nAlready-present emails are upserted (name/role refreshed). Nothing is deleted.`)) return;
+    setBulkBusy(true); setErr(null); setBulkResult(null);
+    try {
+      const r = await bulkAddJudges(rows);
+      setBulkResult(r);
+      setBulkText('');
+      await reloadJudges();
+    } catch (e: any) {
+      setErr(e.message || String(e));
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -292,6 +352,54 @@ export function JudgesPanel({ teams }: Props) {
         <p className="text-xs text-slate-500 mt-2">
           Email must match the user's Azure AD account (e.g. <code>first.last@realpage.com</code>).
         </p>
+      </div>
+
+      {/* ===== Bulk add (paste a list) ===== */}
+      <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-5">
+        <h3 className="font-bold text-slate-100 mb-1">Bulk add (paste a list)</h3>
+        <p className="text-xs text-slate-400 mb-3">
+          Paste any list with one person per line. The parser picks up the email and the surrounding text as the name. Headers like "US - Judges" are ignored. Already-present emails are upserted (no duplicates).
+        </p>
+        <textarea
+          rows={6}
+          placeholder={'Travis.Koenig@RealPage.com\nAmit Sareen amit.sareen@RealPage.com\nShashi Polasa <Shashi.Polasa@RealPage.com>;'}
+          value={bulkText}
+          onChange={(e) => setBulkText(e.target.value)}
+          className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 text-sm font-mono focus:outline-none focus:border-sky-500/60"
+        />
+        <div className="flex items-center gap-3 mt-3 flex-wrap">
+          <label className="text-xs text-slate-400">Role for all:</label>
+          <select
+            value={bulkRole}
+            onChange={(e) => setBulkRole(e.target.value as 'judge' | 'organizer')}
+            className="bg-ink-900 border border-slate-700/40 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-sky-500/60"
+          >
+            <option value="judge">Judge</option>
+            <option value="organizer">Organizer</option>
+          </select>
+          <span className="text-xs text-slate-500">
+            {bulkText.trim() ? `${parseBulkLines(bulkText).length} valid email${parseBulkLines(bulkText).length === 1 ? '' : 's'} detected` : ' '}
+          </span>
+          <div className="flex-1" />
+          <button
+            onClick={handleBulkAdd}
+            disabled={bulkBusy || !bulkText.trim()}
+            className="bg-rose-400 hover:bg-rose-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded text-sm transition"
+          >
+            {bulkBusy ? 'Adding…' : 'Bulk add'}
+          </button>
+        </div>
+        {bulkResult && (
+          <div className="mt-3 text-sm text-lime-300">
+            ✓ Created {bulkResult.created_count} · Updated {bulkResult.updated_count} · Unchanged {bulkResult.skipped_count}
+            {bulkResult.failed.length > 0 && (
+              <div className="text-rose-300 mt-1">
+                ⚠ {bulkResult.failed.length} failed: {bulkResult.failed.slice(0, 3).map((f) => `${f.email}: ${f.error}`).join(' | ')}
+                {bulkResult.failed.length > 3 && ` (+${bulkResult.failed.length - 3} more)`}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {err && (
