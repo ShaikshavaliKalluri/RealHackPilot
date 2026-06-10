@@ -45,6 +45,7 @@ from .schemas import (
     JudgeAIRequest, JudgeHumanRequest,
     JudgeOut, JudgeCreate, JudgeUpdate, JudgeScoreSubmit, JudgeScoreOut,
     JudgeBulkRequest, JudgeBulkResult,
+    TeamSeatRequest,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet, PanelSwapTeamDays,
     AdoptChannelByLinkRequest,
@@ -294,6 +295,10 @@ def _public_team_dict(team: models.Team, include_idea_full: bool = True) -> dict
         "ai_summary": ai.get("summary"),
         "ai_overall_score": ai_overall_score,
         "ai_overall_headline": ai_overall_headline,
+        "seat_floor": team.seat_floor,
+        "seat_desk": team.seat_desk,
+        "seat_landmark": team.seat_landmark,
+        "seat_updated_at": team.seat_updated_at.isoformat() if team.seat_updated_at else None,
     }
 
 
@@ -321,6 +326,83 @@ def public_team_detail(team_id: int, db: Session = Depends(get_db)) -> dict:
     if not team:
         raise HTTPException(status_code=404, detail="team not found")
     return _public_team_dict(team)
+
+
+VALID_SEAT_FLOORS = {"5th", "9th", "10th"}
+
+
+@app.post("/api/public/teams/{team_id}/seat")
+def public_update_seat(team_id: int, req: TeamSeatRequest, request: Request, db: Session = Depends(get_db)) -> dict:
+    """Self-service seat update from the public team page. No auth required:
+    anyone with the QR can submit (low blast radius — three short fields, easy
+    to fix manually if vandalized). Captures submitter email from the optional
+    `x-user-email` header that the SPA sends if MSAL is signed in, for the
+    audit trail.
+    """
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+
+    floor = (req.floor or "").strip()
+    if floor not in VALID_SEAT_FLOORS:
+        raise HTTPException(status_code=400, detail=f"floor must be one of {sorted(VALID_SEAT_FLOORS)}")
+    desk = (req.desk or "").strip()
+    if not desk:
+        raise HTTPException(status_code=400, detail="desk is required")
+
+    team.seat_floor = floor
+    team.seat_desk = desk[:64]
+    team.seat_landmark = (req.landmark or "").strip()[:500] or None
+    team.seat_updated_at = datetime.utcnow()
+    team.seat_updated_by = (request.headers.get("x-user-email") or "").strip().lower() or None
+
+    db.commit()
+    return {
+        "id": team.id,
+        "seat_floor": team.seat_floor,
+        "seat_desk": team.seat_desk,
+        "seat_landmark": team.seat_landmark,
+        "seat_updated_at": team.seat_updated_at.isoformat() if team.seat_updated_at else None,
+        "seat_updated_by": team.seat_updated_by,
+    }
+
+
+@app.get("/api/seat-coverage", response_model=dict)
+def seat_coverage(claims: dict = Depends(require_auth), db: Session = Depends(get_db)) -> dict:
+    """Floor-walk coverage report for the dashboard: which teams have
+    submitted seat info, which haven't. Pending list is alphabetical so
+    organizers can hand it to a follow-up chat / Teams nudge."""
+    teams = db.query(models.Team).order_by(models.Team.name.asc()).all()
+    submitted: list[dict] = []
+    pending: list[dict] = []
+    by_floor: dict[str, int] = {}
+    for t in teams:
+        if (t.seat_floor or "").strip() and (t.seat_desk or "").strip():
+            submitted.append({
+                "id": t.id,
+                "name": t.name,
+                "floor": t.seat_floor,
+                "desk": t.seat_desk,
+                "landmark": t.seat_landmark,
+                "updated_at": t.seat_updated_at.isoformat() if t.seat_updated_at else None,
+                "updated_by": t.seat_updated_by,
+            })
+            by_floor[t.seat_floor] = by_floor.get(t.seat_floor, 0) + 1
+        else:
+            pending.append({
+                "id": t.id,
+                "name": t.name,
+                "mentor_name": t.mentor_name,
+                "has_channel": bool(t.has_teams_channel and t.teams_channel_id),
+            })
+    return {
+        "total": len(teams),
+        "submitted_count": len(submitted),
+        "pending_count": len(pending),
+        "by_floor": by_floor,
+        "submitted": submitted,
+        "pending": pending,
+    }
 
 
 @app.get("/api/stats", response_model=DashboardStats)
@@ -2413,13 +2495,17 @@ def post_channel_qr_for_team(
 @app.post("/api/comms/teams/post-channel-qr-all", response_model=dict)
 def post_channel_qr_to_all(
     request: Request,
+    force: bool = False,
     claims: dict = Depends(require_auth),
     creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
     db: Session = Depends(get_db),
 ) -> dict:
     """Bulk: post the QR-code message to every team that has a real channel.
-    Idempotent — skips teams that already received a 'QR-code message posted'
-    log entry. Per-team failures collected; batch continues."""
+    Idempotent by default — skips teams that already received a 'QR-code
+    message posted' log entry. Pass `?force=true` to re-post to every team
+    regardless (used when the message template itself changes — e.g. we
+    added the floor-walk seat-info call to action and need everyone to
+    see the updated text). Per-team failures collected; batch continues."""
     graph_token = request.headers.get("x-graph-token", "")
     if not graph_token:
         raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
@@ -2451,16 +2537,17 @@ def post_channel_qr_to_all(
         if str(team.teams_channel_id).startswith(("sandbox-", "mock-", "dryrun-")):
             skipped_no_real_channel.append({"team_id": team.id, "team_name": team.name})
             continue
-        already = (
-            db.query(models.CommLog)
-            .filter(models.CommLog.team_id == team.id)
-            .filter(models.CommLog.kind == "teams_message")
-            .filter(models.CommLog.subject.like("QR-code message posted%"))
-            .first()
-        )
-        if already:
-            skipped_already.append({"team_id": team.id, "team_name": team.name})
-            continue
+        if not force:
+            already = (
+                db.query(models.CommLog)
+                .filter(models.CommLog.team_id == team.id)
+                .filter(models.CommLog.kind == "teams_message")
+                .filter(models.CommLog.subject.like("QR-code message posted%"))
+                .first()
+            )
+            if already:
+                skipped_already.append({"team_id": team.id, "team_name": team.name})
+                continue
         try:
             r = comms.post_channel_qr_message_with_graph_token(
                 db=db, team=team, graph_token=graph_token,

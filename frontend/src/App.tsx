@@ -14,6 +14,7 @@ import { DrillDownPanel } from './components/DrillDownPanel';
 import { EmailComposer } from './components/EmailComposer';
 import { OrganizerScoring } from './components/OrganizerScoring';
 import { CommsPanel } from './components/CommsPanel';
+import { SeatCoveragePanel } from './components/SeatCoveragePanel';
 import { BroadcastPanel } from './components/BroadcastPanel';
 import { ChatPanel } from './components/ChatPanel';
 import { Analytics } from './components/Analytics';
@@ -620,6 +621,7 @@ export default function App() {
 
       {mode === 'comms' && (
         <div className="space-y-6">
+          <SeatCoveragePanel />
           <CommsPanel teams={teams} onReload={reload} />
           <BroadcastPanel teams={teams} onReload={reload} />
         </div>

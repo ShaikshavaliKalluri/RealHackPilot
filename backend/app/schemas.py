@@ -43,6 +43,11 @@ class TeamOut(BaseModel):
     repo_check_notes: str | None = None
     advanced_to_round: int = 1
     final_position: int | None = None
+    seat_floor: str | None = None
+    seat_desk: str | None = None
+    seat_landmark: str | None = None
+    seat_updated_at: datetime | None = None
+    seat_updated_by: str | None = None
 
 
 class JudgeAIRequest(BaseModel):
@@ -106,6 +111,16 @@ class JudgeBulkResult(BaseModel):
     updated_count: int
     skipped_count: int
     failed: list[dict]  # [{name, email, error}]
+
+
+class TeamSeatRequest(BaseModel):
+    """Self-service floor-walk seat update from the public /team/<id> page.
+    Floor is constrained to the three RealPage India office floors; desk and
+    landmark are free-form so teams can describe their spot in their own
+    words ('Near coffee machine', 'A-12 by window', etc.)."""
+    floor: str  # '5th' | '9th' | '10th' — server validates
+    desk: str
+    landmark: str | None = None
 
 
 class UserRoleOut(BaseModel):

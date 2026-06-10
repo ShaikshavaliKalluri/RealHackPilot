@@ -311,6 +311,54 @@ export async function dedupeJudgeEmails(): Promise<JudgeDedupeResult> {
   return r.json();
 }
 
+export interface SeatCoverage {
+  total: number;
+  submitted_count: number;
+  pending_count: number;
+  by_floor: Record<string, number>;
+  submitted: {
+    id: number;
+    name: string;
+    floor: string;
+    desk: string;
+    landmark: string | null;
+    updated_at: string | null;
+    updated_by: string | null;
+  }[];
+  pending: {
+    id: number;
+    name: string;
+    mentor_name: string | null;
+    has_channel: boolean;
+  }[];
+}
+
+export async function fetchSeatCoverage(): Promise<SeatCoverage> {
+  const r = await authFetch(`${BASE}/seat-coverage`);
+  if (!r.ok) throw new Error(`Seat coverage fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function postChannelQrAllForce(): Promise<PostQrBulkResult> {
+  const graphToken = await getGraphTeamsToken();
+  const r = await authFetch(`${BASE}/comms/teams/post-channel-qr-all?force=true`, {
+    method: 'POST',
+    headers: { 'X-Graph-Token': graphToken },
+  });
+  if (!r.ok) {
+    let msg = `Bulk QR re-post failed: ${r.status}`;
+    const bodyText = await r.text();
+    try {
+      const j = JSON.parse(bodyText);
+      if (j?.detail) msg = j.detail;
+    } catch {
+      if (bodyText) msg = bodyText;
+    }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
 export async function updateJudge(
   judgeId: number,
   patch: { name?: string; email?: string | null; role?: string },

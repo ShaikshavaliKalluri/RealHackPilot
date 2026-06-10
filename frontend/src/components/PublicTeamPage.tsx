@@ -24,7 +24,13 @@ interface PublicTeam {
   ai_summary: string | null;
   ai_overall_score: number | null;
   ai_overall_headline: string | null;
+  seat_floor: string | null;
+  seat_desk: string | null;
+  seat_landmark: string | null;
+  seat_updated_at: string | null;
 }
+
+const SEAT_FLOORS = ['5th', '9th', '10th'] as const;
 
 function teamIdFromPath(): number | null {
   const m = window.location.pathname.match(/^\/team\/(\d+)\/?$/);
@@ -36,6 +42,56 @@ export function PublicTeamPage() {
   const [team, setTeam] = useState<PublicTeam | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Seat-info edit state. Form is expanded by default if seat info hasn't
+  // been filled in yet, collapsed once someone has submitted it.
+  const [seatFloor, setSeatFloor] = useState<string>('');
+  const [seatDesk, setSeatDesk] = useState<string>('');
+  const [seatLandmark, setSeatLandmark] = useState<string>('');
+  const [seatBusy, setSeatBusy] = useState(false);
+  const [seatMsg, setSeatMsg] = useState<string | null>(null);
+  const [seatEditing, setSeatEditing] = useState(false);
+
+  useEffect(() => {
+    if (team) {
+      setSeatFloor(team.seat_floor || '');
+      setSeatDesk(team.seat_desk || '');
+      setSeatLandmark(team.seat_landmark || '');
+      setSeatEditing(!team.seat_floor || !team.seat_desk);
+    }
+  }, [team]);
+
+  const handleSubmitSeat = async () => {
+    if (!seatFloor || !seatDesk.trim()) {
+      setSeatMsg('Floor and desk number are required.');
+      return;
+    }
+    setSeatBusy(true);
+    setSeatMsg(null);
+    try {
+      const r = await fetch(`/api/public/teams/${teamId}/seat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          floor: seatFloor,
+          desk: seatDesk.trim(),
+          landmark: seatLandmark.trim() || null,
+        }),
+      });
+      if (!r.ok) {
+        const txt = await r.text();
+        throw new Error(`Save failed (${r.status}): ${txt.slice(0, 200)}`);
+      }
+      const updated = await r.json();
+      setTeam((prev) => prev ? { ...prev, ...updated } : prev);
+      setSeatMsg('✓ Saved. Judges will see this on their booklet.');
+      setSeatEditing(false);
+    } catch (e: any) {
+      setSeatMsg(`✗ ${e.message ?? String(e)}`);
+    } finally {
+      setSeatBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (teamId == null) {
@@ -92,6 +148,105 @@ export function PublicTeamPage() {
             <p className="text-sm text-slate-600 mt-1">
               Mentor: <span className="font-semibold text-slate-800">{team.mentor_name}</span>
             </p>
+          )}
+        </div>
+
+        {/* Floor-walk seating — self-service. Anyone with the QR can edit. */}
+        <div className={`mb-4 rounded-lg border-2 ${team.seat_floor && team.seat_desk ? 'border-emerald-200 bg-emerald-50' : 'border-amber-300 bg-amber-50'} p-4`}>
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div className="text-xs uppercase tracking-wider font-bold text-slate-700">
+              📍 Floor-walk seat
+            </div>
+            {team.seat_floor && team.seat_desk && !seatEditing && (
+              <button
+                onClick={() => setSeatEditing(true)}
+                className="text-xs text-[#0a4f99] hover:underline font-semibold"
+              >
+                Update
+              </button>
+            )}
+          </div>
+          {seatEditing ? (
+            <div className="space-y-3">
+              <p className="text-sm text-slate-700">
+                Tell judges where to find you during the floor walk. Any team member or your mentor can fill this in.
+              </p>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Floor *</label>
+                <select
+                  value={seatFloor}
+                  onChange={(e) => setSeatFloor(e.target.value)}
+                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0a4f99]"
+                >
+                  <option value="">Select floor…</option>
+                  {SEAT_FLOORS.map((f) => (
+                    <option key={f} value={f}>{f} floor</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Desk number *</label>
+                <input
+                  type="text"
+                  value={seatDesk}
+                  onChange={(e) => setSeatDesk(e.target.value)}
+                  placeholder="e.g. A-12, Pod 5, Desk 24"
+                  maxLength={64}
+                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0a4f99]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Landmark <span className="text-slate-500 font-normal">(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={seatLandmark}
+                  onChange={(e) => setSeatLandmark(e.target.value)}
+                  placeholder="e.g. Near cafeteria, by the elevator, conference room side"
+                  maxLength={500}
+                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0a4f99]"
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={handleSubmitSeat}
+                  disabled={seatBusy || !seatFloor || !seatDesk.trim()}
+                  className="bg-[#0a4f99] hover:bg-[#0a4f99]/90 disabled:opacity-40 text-white font-bold px-4 py-2 rounded text-sm transition"
+                >
+                  {seatBusy ? 'Saving…' : 'Save seat info'}
+                </button>
+                {team.seat_floor && (
+                  <button
+                    onClick={() => {
+                      setSeatFloor(team.seat_floor || '');
+                      setSeatDesk(team.seat_desk || '');
+                      setSeatLandmark(team.seat_landmark || '');
+                      setSeatEditing(false);
+                      setSeatMsg(null);
+                    }}
+                    className="text-sm text-slate-600 hover:text-slate-900 px-3 py-2"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+              {seatMsg && (
+                <p className={`text-xs ${seatMsg.startsWith('✓') ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {seatMsg}
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="text-sm text-slate-800">
+              <div>
+                <span className="font-semibold">{team.seat_floor} floor</span>
+                {team.seat_desk && <span> · Desk <span className="font-semibold">{team.seat_desk}</span></span>}
+              </div>
+              {team.seat_landmark && (
+                <div className="text-slate-600 mt-1">📌 {team.seat_landmark}</div>
+              )}
+            </div>
           )}
         </div>
 

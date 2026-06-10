@@ -167,6 +167,11 @@ export interface Team {
   repo_check_notes: string | null;
   advanced_to_round: number;
   final_position: number | null;
+  seat_floor: string | null;
+  seat_desk: string | null;
+  seat_landmark: string | null;
+  seat_updated_at: string | null;
+  seat_updated_by: string | null;
 }
 
 export interface DashboardStats {

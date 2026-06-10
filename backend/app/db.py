@@ -113,6 +113,16 @@ def lightweight_migrate(target_engine: Engine | None = None) -> None:
         additions.append("ALTER TABLE teams ADD COLUMN mentor_tshirt_size VARCHAR(16)")
     if "mentor_address" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN mentor_address TEXT")
+    if "seat_floor" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN seat_floor VARCHAR(16)")
+    if "seat_desk" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN seat_desk VARCHAR(64)")
+    if "seat_landmark" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN seat_landmark TEXT")
+    if "seat_updated_at" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN seat_updated_at DATETIME")
+    if "seat_updated_by" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN seat_updated_by VARCHAR(255)")
 
     # Members table — same idempotent shape.
     if "members" in insp.get_table_names():

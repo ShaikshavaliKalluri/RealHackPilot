@@ -51,6 +51,17 @@ class Team(Base):
     advanced_to_round: Mapped[int] = mapped_column(Integer, default=1)
     final_position: Mapped[int | None] = mapped_column(Integer, default=None)
 
+    # Floor-walk seating, captured from each team via the public /team/<id>
+    # page (no auth — anyone with the QR can update). Drives the dashboard
+    # 'Floor-walk coverage' panel that organizers use to chase laggards
+    # before judging starts. seat_updated_by is best-effort: filled from the
+    # MSAL ID token if the submitter happened to be signed in, otherwise null.
+    seat_floor: Mapped[str | None] = mapped_column(String(16))  # '5th' | '9th' | '10th'
+    seat_desk: Mapped[str | None] = mapped_column(String(64))
+    seat_landmark: Mapped[str | None] = mapped_column(Text)
+    seat_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    seat_updated_by: Mapped[str | None] = mapped_column(String(255))
+
     members: Mapped[list["Member"]] = relationship(back_populates="team", cascade="all, delete-orphan")
 
 
