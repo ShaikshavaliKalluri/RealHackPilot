@@ -113,6 +113,12 @@ def lightweight_migrate(target_engine: Engine | None = None) -> None:
         additions.append("ALTER TABLE teams ADD COLUMN mentor_tshirt_size VARCHAR(16)")
     if "mentor_address" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN mentor_address TEXT")
+    # Floor-walk seat capture. Postgres doesn't have a DATETIME type (it has
+    # TIMESTAMP); SQLite accepts either. Branch on dialect so the ALTER runs
+    # cleanly on both. Older 'DATETIME' migration lines above haven't hit this
+    # because those columns were already present when Postgres first ran
+    # Base.metadata.create_all -- the IF NOT EXISTS check skipped them.
+    ts_type = "TIMESTAMP" if eng.dialect.name == "postgresql" else "DATETIME"
     if "seat_floor" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN seat_floor VARCHAR(16)")
     if "seat_desk" not in existing:
@@ -120,7 +126,7 @@ def lightweight_migrate(target_engine: Engine | None = None) -> None:
     if "seat_landmark" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN seat_landmark TEXT")
     if "seat_updated_at" not in existing:
-        additions.append("ALTER TABLE teams ADD COLUMN seat_updated_at DATETIME")
+        additions.append(f"ALTER TABLE teams ADD COLUMN seat_updated_at {ts_type}")
     if "seat_updated_by" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN seat_updated_by VARCHAR(255)")
 
