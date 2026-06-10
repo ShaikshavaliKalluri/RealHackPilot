@@ -117,10 +117,13 @@ class TeamSeatRequest(BaseModel):
     """Self-service floor-walk seat update from the public /team/<id> page.
     Floor is constrained to the three RealPage India office floors; desk and
     landmark are free-form so teams can describe their spot in their own
-    words ('Near coffee machine', 'A-12 by window', etc.)."""
+    words ('Near coffee machine', 'A-12 by window', etc.). submitted_by
+    captures who in the team / mentor circle made the update so organizers
+    can chase the right person if the info turns out to be wrong."""
     floor: str  # '5th' | '9th' | '10th' — server validates
     desk: str
     landmark: str | None = None
+    submitted_by: str | None = None
 
 
 class UserRoleOut(BaseModel):

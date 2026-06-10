@@ -185,12 +185,19 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
               </span>
             </div>
             {/* Floor-walk seat row — green if set, amber if pending. */}
-            <div className="mt-1.5 flex items-center gap-1.5">
+            <div className="mt-1.5">
               {team.seat_floor && team.seat_desk ? (
-                <span className="text-emerald-300/90">
-                  📍 {team.seat_floor} floor · Desk {team.seat_desk}
-                  {team.seat_landmark && <span className="text-slate-500"> · {team.seat_landmark}</span>}
-                </span>
+                <>
+                  <span className="text-emerald-300/90">
+                    📍 {team.seat_floor} floor · Desk {team.seat_desk}
+                    {team.seat_landmark && <span className="text-slate-500"> · {team.seat_landmark}</span>}
+                  </span>
+                  {team.seat_updated_by && (
+                    <div className="text-slate-500 text-[11px] mt-0.5">
+                      by {team.seat_updated_by}
+                    </div>
+                  )}
+                </>
               ) : (
                 <span className="text-amber-300/80">
                   📍 Seat location not set yet

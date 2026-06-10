@@ -28,6 +28,7 @@ interface PublicTeam {
   seat_desk: string | null;
   seat_landmark: string | null;
   seat_updated_at: string | null;
+  seat_updated_by: string | null;
 }
 
 const SEAT_FLOORS = ['5th', '9th', '10th'] as const;
@@ -48,6 +49,8 @@ export function PublicTeamPage() {
   const [seatFloor, setSeatFloor] = useState<string>('');
   const [seatDesk, setSeatDesk] = useState<string>('');
   const [seatLandmark, setSeatLandmark] = useState<string>('');
+  const [submittedBy, setSubmittedBy] = useState<string>('');
+  const [submittedByOther, setSubmittedByOther] = useState<string>('');
   const [seatBusy, setSeatBusy] = useState(false);
   const [seatMsg, setSeatMsg] = useState<string | null>(null);
   const [seatEditing, setSeatEditing] = useState(false);
@@ -58,12 +61,26 @@ export function PublicTeamPage() {
       setSeatDesk(team.seat_desk || '');
       setSeatLandmark(team.seat_landmark || '');
       setSeatEditing(!team.seat_floor || !team.seat_desk);
+      setSubmittedBy('');
+      setSubmittedByOther('');
     }
   }, [team]);
 
   const handleSubmitSeat = async () => {
     if (!seatFloor || !seatDesk.trim()) {
       setSeatMsg('Floor and desk number are required.');
+      return;
+    }
+    // Resolve who's submitting -- either a picked roster name, or the
+    // free-text fallback when 'Someone else' was chosen.
+    let resolvedSubmitter = '';
+    if (submittedBy === '__other__') {
+      resolvedSubmitter = submittedByOther.trim();
+    } else if (submittedBy) {
+      resolvedSubmitter = submittedBy.trim();
+    }
+    if (!resolvedSubmitter) {
+      setSeatMsg('Please tell us who is submitting (so organizers know who to follow up with).');
       return;
     }
     setSeatBusy(true);
@@ -76,6 +93,7 @@ export function PublicTeamPage() {
           floor: seatFloor,
           desk: seatDesk.trim(),
           landmark: seatLandmark.trim() || null,
+          submitted_by: resolvedSubmitter,
         }),
       });
       if (!r.ok) {
@@ -208,6 +226,35 @@ export function PublicTeamPage() {
                   className="w-full rounded border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0a4f99]"
                 />
               </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Submitted by *
+                </label>
+                <select
+                  value={submittedBy}
+                  onChange={(e) => setSubmittedBy(e.target.value)}
+                  className="w-full rounded border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0a4f99]"
+                >
+                  <option value="">Pick your name…</option>
+                  {team.mentor_name && (
+                    <option value={team.mentor_name}>{team.mentor_name} (mentor)</option>
+                  )}
+                  {team.members.map((m, i) => (
+                    <option key={i} value={m.name}>{m.name}</option>
+                  ))}
+                  <option value="__other__">Someone else…</option>
+                </select>
+                {submittedBy === '__other__' && (
+                  <input
+                    type="text"
+                    value={submittedByOther}
+                    onChange={(e) => setSubmittedByOther(e.target.value)}
+                    placeholder="Your full name"
+                    maxLength={255}
+                    className="mt-2 w-full rounded border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:border-[#0a4f99]"
+                  />
+                )}
+              </div>
               <div className="flex items-center gap-2 pt-1">
                 <button
                   onClick={handleSubmitSeat}
@@ -245,6 +292,14 @@ export function PublicTeamPage() {
               </div>
               {team.seat_landmark && (
                 <div className="text-slate-600 mt-1">📌 {team.seat_landmark}</div>
+              )}
+              {team.seat_updated_by && (
+                <div className="text-xs text-slate-500 mt-1.5">
+                  Updated by {team.seat_updated_by}
+                  {team.seat_updated_at && (
+                    <span> · {new Date(team.seat_updated_at).toLocaleString()}</span>
+                  )}
+                </div>
               )}
             </div>
           )}

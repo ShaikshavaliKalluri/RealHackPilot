@@ -299,6 +299,7 @@ def _public_team_dict(team: models.Team, include_idea_full: bool = True) -> dict
         "seat_desk": team.seat_desk,
         "seat_landmark": team.seat_landmark,
         "seat_updated_at": team.seat_updated_at.isoformat() if team.seat_updated_at else None,
+        "seat_updated_by": team.seat_updated_by,
     }
 
 
@@ -354,7 +355,15 @@ def public_update_seat(team_id: int, req: TeamSeatRequest, request: Request, db:
     team.seat_desk = desk[:64]
     team.seat_landmark = (req.landmark or "").strip()[:500] or None
     team.seat_updated_at = datetime.utcnow()
-    team.seat_updated_by = (request.headers.get("x-user-email") or "").strip().lower() or None
+    # Submitter attribution: prefer the explicit body field (filled from the
+    # form dropdown of mentor + members + 'Someone else'), fall back to the
+    # MSAL email header in case the submitter happens to be signed in. Either
+    # way it lands in seat_updated_by so organizers can chase the right
+    # person if the info turns out to be wrong.
+    submitted = (req.submitted_by or "").strip()[:255]
+    if not submitted:
+        submitted = (request.headers.get("x-user-email") or "").strip().lower()[:255]
+    team.seat_updated_by = submitted or None
 
     db.commit()
     return {
