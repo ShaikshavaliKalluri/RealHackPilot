@@ -143,10 +143,22 @@ def lightweight_migrate(target_engine: Engine | None = None) -> None:
             additions.append("ALTER TABLE swag_pickups ADD COLUMN picked_up_by_name VARCHAR(255)")
         if "picked_up_by_email" not in swag_existing:
             additions.append("ALTER TABLE swag_pickups ADD COLUMN picked_up_by_email VARCHAR(255)")
-    if additions:
-        with eng.begin() as conn:
-            for sql in additions:
+    # Run each ALTER in its own transaction so one failure doesn't roll back
+    # the rest. We log+continue on per-statement errors instead of crashing
+    # the FastAPI app at startup -- previously a single permission error
+    # ('must be owner of table teams' when the DB user lacks DDL grants)
+    # took the entire service down with 502s. The new behaviour: the column
+    # is missing in the DB but the app still serves; endpoints that read the
+    # missing column will 500 individually, but everything else keeps working
+    # and an organizer can fix the DB out-of-band without an outage.
+    import logging
+    log = logging.getLogger(__name__)
+    for sql in additions:
+        try:
+            with eng.begin() as conn:
                 conn.execute(text(sql))
+        except Exception as e:
+            log.error("lightweight_migrate: skipping failed ALTER -- %s | sql=%s", e, sql)
 
     # ---- Cascade FK upgrade (Postgres only) ----
     # Drop and re-add the team-referencing foreign keys with ON DELETE
