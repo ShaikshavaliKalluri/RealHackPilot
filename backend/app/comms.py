@@ -604,11 +604,14 @@ def post_channel_qr_message_with_graph_token(
             f"<p style='text-align:justify;'>During the floor walk, judges and leaders "
             f"will visit your desk and scan this QR code to review your idea and "
             f"provide feedback. Please keep it easily accessible (printed or on "
-            f"screen) during judging.</p>"
+            f"screen) during the floor walk.</p>"
             f"<p style='text-align:justify;'><strong style='color:#0a4f99;'>"
-            f"Action needed:</strong> open the link below and share your <strong>floor, "
-            f"desk number, and a nearby landmark</strong> so judges can find you. "
-            f"Any team member or your mentor can update it.</p>"
+            f"Action needed (India-office teams only):</strong> open the link below "
+            f"and share your <strong>floor, desk number, and a nearby landmark</strong> "
+            f"so judges can find you. Any team member or your mentor can update it.</p>"
+            f"<p style='text-align:justify;font-size:13px;color:#5b6b7c;'>"
+            f"If your team is fully remote or distributed across locations, you can "
+            f"skip this step — judges will reach you online during the floor walk.</p>"
             # Inline QR image via hostedContents — Microsoft's parser is strict
             # about finding the hostedContent reference; uses double-quoted
             # attribute values when searching the body, so we must use double
