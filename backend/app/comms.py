@@ -606,12 +606,17 @@ def post_channel_qr_message_with_graph_token(
             f"provide feedback. Please keep it easily accessible (printed or on "
             f"screen) during the floor walk.</p>"
             f"<p style='text-align:justify;'><strong style='color:#0a4f99;'>"
-            f"Action needed (India-office teams only):</strong> open the link below "
-            f"and share your <strong>floor, desk number, and a nearby landmark</strong> "
-            f"so judges can find you. Any team member or your mentor can update it.</p>"
-            f"<p style='text-align:justify;font-size:13px;color:#5b6b7c;'>"
-            f"If your team is fully remote or distributed across locations, you can "
-            f"skip this step — judges will reach you online during the floor walk.</p>"
+            f"Action needed:</strong> open the link below and share your "
+            f"<strong>floor, desk number, and a nearby landmark</strong> so judges "
+            f"can find you. Any team member or your mentor can update it.</p>"
+            # Colored note: amber background + left border so it reads as a
+            # callout (not a regular paragraph) when Teams renders it. Inline
+            # styles only -- Teams strips most CSS but keeps background/border
+            # on <p>/<span> via inline style attributes.
+            f"<p style='background:#fff4d6;border-left:4px solid #d49a00;"
+            f"padding:10px 12px;margin:10px 0;color:#7a5500;'>"
+            f"<strong>Note:</strong> Please ignore this if your team is not "
+            f"co-located at the RealPage India office.</p>"
             # Inline QR image via hostedContents — Microsoft's parser is strict
             # about finding the hostedContent reference; uses double-quoted
             # attribute values when searching the body, so we must use double
