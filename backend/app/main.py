@@ -2282,6 +2282,129 @@ def list_qr_posted_team_ids(
     return {"team_ids": sorted({r[0] for r in rows})}
 
 
+@app.get("/api/comms/repo-ready-posted-team-ids", response_model=dict)
+def list_repo_ready_posted_team_ids(
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """team_ids whose channels have already received the 'your GitHub repo
+    is ready' announcement. Drives the bulk button's 'N remaining' count."""
+    rows = (
+        db.query(models.CommLog.team_id)
+        .filter(models.CommLog.kind == "teams_message")
+        .filter(models.CommLog.subject.like("Repo-ready message posted%"))
+        .distinct()
+        .all()
+    )
+    return {"team_ids": sorted({r[0] for r in rows})}
+
+
+@app.post("/api/import/repo-urls", response_model=dict)
+async def import_repo_urls(
+    file: UploadFile = File(...),
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Bulk-update Team.repo_url from the DevOps hand-off xlsx.
+
+    Expects the same shape we exported in /api/export/devops-repos.xlsx:
+    columns include 'Team Name' and 'Gitrepo url' (case-insensitive header
+    match). Reads only the FIRST row of each team's merged block — DevOps
+    keeps the URL on the team-name row and leaves member-rows blank for
+    those columns, so this is the natural place to find the value.
+
+    Matches by team name (case-insensitive, whitespace-trimmed). Returns
+    per-team counts so the user can see which names didn't match and chase
+    them up out-of-band rather than guessing fuzzy matches we'd get wrong.
+    """
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Expected an .xlsx/.xls file")
+
+    from openpyxl import load_workbook
+
+    suffix = os.path.splitext(file.filename)[1] or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp.flush()
+        path = tmp.name
+
+    try:
+        wb = load_workbook(path, data_only=True)
+        ws = wb.active
+
+        # Find the header row + locate the Team Name + Gitrepo url columns.
+        # Be generous on header name variants since DevOps may rename them.
+        headers: dict[str, int] = {}
+        header_row_idx = 1
+        for col_idx, cell in enumerate(ws[1], start=1):
+            key = str(cell.value or "").strip().lower()
+            if key:
+                headers[key] = col_idx
+        team_name_col = next(
+            (headers[k] for k in ("team name", "team", "team_name") if k in headers),
+            None,
+        )
+        repo_col = next(
+            (headers[k] for k in ("gitrepo url", "git repo url", "repo url", "repo_url", "github repo", "github url") if k in headers),
+            None,
+        )
+        if not team_name_col or not repo_col:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Couldn't find 'Team Name' + 'Gitrepo url' columns in the header row. Found: {sorted(headers.keys())}",
+            )
+
+        updates: list[dict] = []
+        not_found: list[str] = []
+        no_repo: list[str] = []
+        skipped_existing_same: list[str] = []
+
+        # Iterate data rows. Merged cells: only the top-left of each merge
+        # has a value; subsequent rows in the merge return None. That's
+        # exactly what we want -- we only need to read the row where Team
+        # Name is filled in.
+        for row in ws.iter_rows(min_row=header_row_idx + 1, values_only=True):
+            team_name = str(row[team_name_col - 1] or "").strip()
+            if not team_name:
+                continue
+            repo_url = str(row[repo_col - 1] or "").strip()
+            if not repo_url or repo_url.lower() in ("url", "tbd", "n/a", "na"):
+                no_repo.append(team_name)
+                continue
+            # Case-insensitive name match. Don't fuzzy-match -- safer to
+            # report a miss and let the organizer correct the spreadsheet.
+            team = (
+                db.query(models.Team)
+                .filter(func.lower(models.Team.name) == team_name.lower())
+                .first()
+            )
+            if not team:
+                not_found.append(team_name)
+                continue
+            if (team.repo_url or "").strip() == repo_url:
+                skipped_existing_same.append(team_name)
+                continue
+            team.repo_url = repo_url
+            updates.append({"team_id": team.id, "team_name": team.name, "repo_url": repo_url})
+
+        db.commit()
+
+        return {
+            "updated_count": len(updates),
+            "unchanged_count": len(skipped_existing_same),
+            "not_found_count": len(not_found),
+            "no_repo_url_count": len(no_repo),
+            "updated": updates[:50],  # cap for UI; full list visible in DB
+            "not_found": not_found,
+            "no_repo_url": no_repo,
+        }
+    finally:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
+
+
 @app.post("/api/comms/teams/{team_id}/adopt-channel-by-link", response_model=dict)
 def adopt_channel_by_link(
     team_id: int,
@@ -2582,6 +2705,97 @@ def post_channel_qr_to_all(
         "posted": posted,
         "skipped_already_posted": skipped_already,
         "skipped_no_real_channel": skipped_no_real_channel,
+        "failed": failed,
+    }
+
+
+@app.post("/api/comms/teams/post-channel-repo-ready-all", response_model=dict)
+def post_channel_repo_ready_to_all(
+    request: Request,
+    force: bool = False,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Bulk: announce the provisioned GitHub repo in every team's channel.
+
+    Skips teams that:
+      - have no Teams channel yet, or
+      - have a mock/sandbox channel, or
+      - have no repo_url on file (import the DevOps xlsx first), or
+      - already received a 'Repo-ready message posted' log entry (unless
+        ?force=true to override the idempotency check, used when the
+        message template itself changes and we need everyone to see the
+        updated text).
+
+    Per-team failures are collected; the batch always continues.
+    """
+    graph_token = request.headers.get("x-graph-token", "")
+    if not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    organizer_email = (profile.get("email") or "").strip().lower() or None
+
+    all_teams = (
+        db.query(models.Team)
+        .filter(models.Team.has_teams_channel.is_(True))
+        .filter(models.Team.teams_channel_id.isnot(None))
+        .order_by(models.Team.name.asc())
+        .all()
+    )
+
+    posted: list[dict] = []
+    skipped_already: list[dict] = []
+    skipped_no_real_channel: list[dict] = []
+    skipped_no_repo: list[dict] = []
+    failed: list[dict] = []
+
+    import time
+    for team in all_teams:
+        if str(team.teams_channel_id).startswith(("sandbox-", "mock-", "dryrun-")):
+            skipped_no_real_channel.append({"team_id": team.id, "team_name": team.name})
+            continue
+        if not (team.repo_url or "").strip():
+            skipped_no_repo.append({"team_id": team.id, "team_name": team.name})
+            continue
+        if not force:
+            already = (
+                db.query(models.CommLog)
+                .filter(models.CommLog.team_id == team.id)
+                .filter(models.CommLog.kind == "teams_message")
+                .filter(models.CommLog.subject.like("Repo-ready message posted%"))
+                .first()
+            )
+            if already:
+                skipped_already.append({"team_id": team.id, "team_name": team.name})
+                continue
+        try:
+            comms.post_channel_repo_ready_with_graph_token(
+                db=db, team=team, graph_token=graph_token,
+                sent_by_email=organizer_email,
+            )
+            db.commit()
+            posted.append({"team_id": team.id, "team_name": team.name})
+        except comms._GraphChannelError as e:
+            db.rollback()
+            failed.append({"team_id": team.id, "team_name": team.name, "error": (e.message or "")[:200]})
+        except Exception as e:
+            db.rollback()
+            failed.append({"team_id": team.id, "team_name": team.name, "error": f"unexpected: {str(e)[:200]}"})
+        time.sleep(0.5)
+
+    return {
+        "total_teams_with_channels": len(all_teams),
+        "posted_count": len(posted),
+        "skipped_already_posted_count": len(skipped_already),
+        "skipped_no_real_channel_count": len(skipped_no_real_channel),
+        "skipped_no_repo_url_count": len(skipped_no_repo),
+        "failed_count": len(failed),
+        "posted": posted,
+        "skipped_already_posted": skipped_already,
+        "skipped_no_real_channel": skipped_no_real_channel,
+        "skipped_no_repo_url": skipped_no_repo,
         "failed": failed,
     }
 

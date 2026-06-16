@@ -1,6 +1,21 @@
 import { useEffect, useState } from 'react';
 import type { Team } from '../types';
-import { commsMode, createTeamsChannels, postChannelWelcomeAll, postChannelQrAll, fetchWelcomedTeamIds, fetchQrPostedTeamIds, adoptOrphanChannels, checkWelcomeMentions, type MentionsCheckResult } from '../api';
+import {
+  commsMode,
+  createTeamsChannels,
+  postChannelWelcomeAll,
+  postChannelQrAll,
+  fetchWelcomedTeamIds,
+  fetchQrPostedTeamIds,
+  adoptOrphanChannels,
+  checkWelcomeMentions,
+  importRepoUrlsFromXlsx,
+  postChannelRepoReadyAll,
+  fetchRepoReadyPostedTeamIds,
+  type MentionsCheckResult,
+  type RepoUrlImportResult,
+  type PostRepoReadyBulkResult,
+} from '../api';
 
 interface Props {
   teams: Team[];
@@ -31,6 +46,16 @@ export function CommsPanel({ teams, onReload }: Props) {
   const [qrError, setQrError] = useState<string | null>(null);
   const [qrPostedIds, setQrPostedIds] = useState<Set<number>>(new Set());
 
+  // Repo-ready announcement flow: upload DevOps xlsx -> bulk-post.
+  const [repoFile, setRepoFile] = useState<File | null>(null);
+  const [repoImportBusy, setRepoImportBusy] = useState(false);
+  const [repoImportResult, setRepoImportResult] = useState<RepoUrlImportResult | null>(null);
+  const [repoImportError, setRepoImportError] = useState<string | null>(null);
+  const [repoPostBusy, setRepoPostBusy] = useState(false);
+  const [repoPostResult, setRepoPostResult] = useState<PostRepoReadyBulkResult | null>(null);
+  const [repoPostError, setRepoPostError] = useState<string | null>(null);
+  const [repoPostedIds, setRepoPostedIds] = useState<Set<number>>(new Set());
+
   useEffect(() => {
     commsMode().then((r) => setMode(r.mode)).catch(() => {});
     fetchWelcomedTeamIds()
@@ -39,6 +64,9 @@ export function CommsPanel({ teams, onReload }: Props) {
     fetchQrPostedTeamIds()
       .then((ids) => setQrPostedIds(new Set(ids)))
       .catch(() => setQrPostedIds(new Set()));
+    fetchRepoReadyPostedTeamIds()
+      .then((ids) => setRepoPostedIds(new Set(ids)))
+      .catch(() => setRepoPostedIds(new Set()));
   }, []);
 
   const teamsWithoutChannel = teams
@@ -55,6 +83,10 @@ export function CommsPanel({ teams, onReload }: Props) {
   // Same shape as pending-welcome but for the QR-code message — drives the
   // bulk QR button label so it shows 'remaining' not always 95.
   const teamsPendingQr = teamsWithChannel.filter((t) => !qrPostedIds.has(t.id));
+  // Repo-ready bulk-post pending = has a channel + has repo_url + not already messaged.
+  const teamsWithRepo = teamsWithChannel.filter((t) => !!(t.repo_url || '').trim());
+  const teamsPendingRepoReady = teamsWithRepo.filter((t) => !repoPostedIds.has(t.id));
+  const teamsWithChannelMissingRepo = teamsWithChannel.filter((t) => !(t.repo_url || '').trim());
   // The 'Simulation mode' badge was added when the only channel-create path
   // was the mock-only bulk endpoint. The per-team 'Create Teams channel'
   // button (delegated Graph) always hits real Graph, so once any real
@@ -152,6 +184,59 @@ export function CommsPanel({ teams, onReload }: Props) {
       setQrError(e.message ?? String(e));
     } finally {
       setQrBusy(false);
+    }
+  };
+
+  // === Repo-ready handlers ===
+  const handleImportRepoUrls = async () => {
+    if (!repoFile) return;
+    setRepoImportBusy(true);
+    setRepoImportError(null);
+    setRepoImportResult(null);
+    try {
+      const r = await importRepoUrlsFromXlsx(repoFile);
+      setRepoImportResult(r);
+      // Refresh the parent teams list so the new repo_urls show up everywhere.
+      onReload();
+    } catch (e: any) {
+      setRepoImportError(e.message ?? String(e));
+    } finally {
+      setRepoImportBusy(false);
+    }
+  };
+
+  const handlePostRepoReadyAll = async (force: boolean) => {
+    const target = force ? teamsWithRepo.length : teamsPendingRepoReady.length;
+    if (target === 0) return;
+    const confirmText = force
+      ? `RE-POST the 'GitHub repo is ready' announcement to all ${teamsWithRepo.length} team channels with a repo_url on file?\n\n` +
+        `This BYPASSES the 'already posted' check -- every team will get the message again, even those who already received it. Use this only when the template text itself has changed.\n\n` +
+        `Takes ~${Math.ceil(target * 0.7 / 60)} min. Keep this tab open.`
+      : `Post the 'GitHub repo is ready' announcement to ${target} pending team channel${target === 1 ? '' : 's'}?\n\n` +
+        `Teams without a repo URL on file (run the xlsx import first) and teams already posted are skipped automatically.\n\n` +
+        `Takes ~${Math.ceil(target * 0.7 / 60)} min. Keep this tab open.`;
+    if (!confirm(confirmText)) return;
+    setRepoPostBusy(true);
+    setRepoPostError(null);
+    setRepoPostResult(null);
+    try {
+      const r = await postChannelRepoReadyAll(force);
+      setRepoPostResult(r);
+      if (r.failed.length > 0) {
+        const head = r.failed.slice(0, 3).map((f) => `${f.team_name}: ${f.error}`).join(' | ');
+        const more = r.failed.length > 3 ? ` (+${r.failed.length - 3} more)` : '';
+        setRepoPostError(`Failures: ${head}${more}`);
+      }
+      try {
+        const ids = await fetchRepoReadyPostedTeamIds();
+        setRepoPostedIds(new Set(ids));
+      } catch {
+        // non-fatal; refresh on next mount
+      }
+    } catch (e: any) {
+      setRepoPostError(e.message ?? String(e));
+    } finally {
+      setRepoPostBusy(false);
     }
   };
 
@@ -350,6 +435,116 @@ export function CommsPanel({ teams, onReload }: Props) {
       )}
       {qrResult && <div className="text-sm text-lime-300 mt-3">✓ {qrResult}</div>}
       {qrError && <div className="text-sm text-rose-300 mt-3">⚠ {qrError}</div>}
+
+      {/* ===== GitHub repo-ready announcement ===== */}
+      {teamsWithChannel.length > 0 && (
+        <div className="bg-ink-900/50 rounded-lg p-4 mt-3">
+          <p className="text-sm text-slate-300 font-semibold mb-1">
+            📦 GitHub repo-ready announcement
+          </p>
+          <p className="text-xs text-slate-400 mb-3">
+            Two-step. <strong>1)</strong> Upload the DevOps xlsx — backend matches by Team Name and stores each <code className="text-slate-300">repo_url</code>. <strong>2)</strong> Post the announcement to every channel with a repo URL on file.
+          </p>
+
+          {/* Step 1: Upload xlsx */}
+          <div className="bg-ink-800/50 rounded p-3 mb-3">
+            <p className="text-xs font-semibold text-slate-300 mb-2">Step 1 · Import DevOps xlsx → team.repo_url</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => {
+                  setRepoFile(e.target.files?.[0] ?? null);
+                  setRepoImportResult(null);
+                  setRepoImportError(null);
+                }}
+                className="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-slate-700 file:text-slate-100 file:cursor-pointer file:font-semibold hover:file:bg-slate-600"
+              />
+              <button
+                onClick={handleImportRepoUrls}
+                disabled={!repoFile || repoImportBusy}
+                className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-3 py-1.5 rounded text-xs transition"
+              >
+                {repoImportBusy ? 'Importing…' : 'Import'}
+              </button>
+            </div>
+            {repoImportResult && (
+              <div className="mt-2 text-xs text-slate-300">
+                ✓ Updated <span className="text-lime-300 font-semibold">{repoImportResult.updated_count}</span> ·
+                Unchanged {repoImportResult.unchanged_count} ·
+                Not found <span className="text-rose-300">{repoImportResult.not_found_count}</span> ·
+                No URL <span className="text-amber-300">{repoImportResult.no_repo_url_count}</span>
+                {repoImportResult.not_found.length > 0 && (
+                  <div className="mt-1 text-rose-300/90">
+                    Names not matched: {repoImportResult.not_found.slice(0, 5).join(', ')}
+                    {repoImportResult.not_found.length > 5 && ` (+${repoImportResult.not_found.length - 5} more)`}
+                  </div>
+                )}
+                {repoImportResult.no_repo_url.length > 0 && (
+                  <div className="mt-1 text-amber-300/90">
+                    Teams with blank URL: {repoImportResult.no_repo_url.slice(0, 5).join(', ')}
+                    {repoImportResult.no_repo_url.length > 5 && ` (+${repoImportResult.no_repo_url.length - 5} more)`}
+                  </div>
+                )}
+              </div>
+            )}
+            {repoImportError && <div className="mt-2 text-xs text-rose-300">⚠ {repoImportError}</div>}
+          </div>
+
+          {/* Step 2: Bulk post */}
+          <div className="bg-ink-800/50 rounded p-3">
+            <p className="text-xs font-semibold text-slate-300 mb-2">Step 2 · Post the announcement to every channel</p>
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <p className="text-xs text-slate-400 flex-1 min-w-0">
+                <span className="text-lime-300 font-semibold">{teamsWithRepo.length}</span> team{teamsWithRepo.length === 1 ? '' : 's'} have a repo URL.
+                {teamsWithChannelMissingRepo.length > 0 && (
+                  <span className="text-amber-300">
+                    {' '}· {teamsWithChannelMissingRepo.length} channel{teamsWithChannelMissingRepo.length === 1 ? '' : 's'} still missing a URL — re-run step 1.
+                  </span>
+                )}
+                {teamsPendingRepoReady.length === 0 && teamsWithRepo.length > 0 && (
+                  <span className="text-slate-500"> · Already posted to all of them.</span>
+                )}
+              </p>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  disabled={repoPostBusy || teamsPendingRepoReady.length === 0}
+                  onClick={() => handlePostRepoReadyAll(false)}
+                  className="bg-emerald-400 hover:bg-emerald-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded text-sm transition"
+                >
+                  {repoPostBusy
+                    ? 'Posting…'
+                    : teamsPendingRepoReady.length === 0
+                      ? `✓ Posted to all ${teamsWithRepo.length}`
+                      : `📦 Post to ${teamsPendingRepoReady.length} pending channel${teamsPendingRepoReady.length === 1 ? '' : 's'}`}
+                </button>
+                {teamsWithRepo.length > 0 && (
+                  <button
+                    disabled={repoPostBusy}
+                    onClick={() => handlePostRepoReadyAll(true)}
+                    className="border border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-40 text-amber-300 font-semibold px-3 py-2 rounded text-xs transition"
+                    title="Re-post to every team with a repo URL, even ones already messaged. Use when the template text has changed."
+                  >
+                    🔁 Re-post (force)
+                  </button>
+                )}
+              </div>
+            </div>
+            {repoPostResult && (
+              <div className="mt-2 text-xs text-lime-300">
+                ✓ Posted to {repoPostResult.posted_count} channel{repoPostResult.posted_count === 1 ? '' : 's'}
+                {repoPostResult.skipped_already_posted_count > 0 && ` · ${repoPostResult.skipped_already_posted_count} already posted`}
+                {repoPostResult.skipped_no_repo_url_count > 0 && ` · ${repoPostResult.skipped_no_repo_url_count} no repo URL`}
+                {repoPostResult.skipped_no_real_channel_count > 0 && ` · ${repoPostResult.skipped_no_real_channel_count} mock channel`}
+                {repoPostResult.failed_count > 0 && (
+                  <span className="text-rose-300"> · {repoPostResult.failed_count} failed</span>
+                )}
+              </div>
+            )}
+            {repoPostError && <div className="mt-2 text-xs text-rose-300">⚠ {repoPostError}</div>}
+          </div>
+        </div>
+      )}
 
       {/* Diagnostic: who isn't resolvable in AAD (=> didn't get @mentioned + can't see channel) */}
       <div className="bg-ink-900/50 rounded-lg p-4 mt-3 flex items-start justify-between gap-4 flex-wrap">

@@ -671,6 +671,139 @@ def post_channel_qr_message_with_graph_token(
     }
 
 
+# ===== Repo-ready announcement =====
+
+def post_channel_repo_ready_with_graph_token(
+    db: Session,
+    team: Team,
+    graph_token: str,
+    sent_by_email: str | None = None,
+) -> dict:
+    """Announce the team's provisioned GitHub repo in their Teams channel.
+
+    The repo URL must already be set on the team -- callers should run the
+    DevOps xlsx import first so team.repo_url is populated for everyone we're
+    about to message. Teams without a repo URL on file raise immediately so
+    the bulk caller can collect them as 'skipped'.
+
+    Mirrors the welcome / QR message pattern: @-mentions the mentor and every
+    member, logs to comm_log so the bulk endpoint can be idempotent. Requires
+    ChannelMessage.Send delegated scope.
+    """
+    import html as html_lib
+
+    if not team.has_teams_channel or not team.teams_channel_id:
+        raise _GraphChannelError(400, "Team has no Teams channel — create one first")
+    if not PARENT_TEAM_ID:
+        raise _GraphChannelError(500, "GRAPH_PARENT_TEAM_ID is not set on the server")
+    repo_url = (team.repo_url or "").strip()
+    if not repo_url:
+        raise _GraphChannelError(400, "Team has no repo_url on file — import the DevOps xlsx first")
+
+    with httpx.Client(
+        headers={"Authorization": f"Bearer {graph_token}", "Content-Type": "application/json"},
+        timeout=30,
+    ) as gc:
+        # Resolve mentor + members to AAD ids (same shape as the welcome / QR
+        # posts). Anyone we can't resolve is silently dropped — message still
+        # posts, just without that person's @mention pill.
+        people: list[dict] = []
+        if team.mentor_email and team.mentor_name:
+            uid = _graph_get_user_id(gc, team.mentor_email.strip())
+            if uid:
+                people.append({"name": team.mentor_name.strip().title(), "aad_id": uid})
+        for m in team.members:
+            if m.email and m.name:
+                uid = _graph_get_user_id(gc, m.email.strip())
+                if uid:
+                    people.append({"name": m.name.strip().title(), "aad_id": uid})
+
+        mentions: list[dict] = []
+        mention_tags: list[str] = []
+        for i, p in enumerate(people):
+            mentions.append({
+                "id": i,
+                "mentionText": p["name"],
+                "mentioned": {
+                    "user": {
+                        "displayName": p["name"],
+                        "id": p["aad_id"],
+                        "userIdentityType": "aadUser",
+                    },
+                },
+            })
+            mention_tags.append(f'<at id="{i}">{html_lib.escape(p["name"])}</at>')
+
+        team_name_safe = html_lib.escape(team.name)
+        repo_url_safe = html_lib.escape(repo_url)
+        mentions_block = ", ".join(mention_tags) if mention_tags else ""
+
+        # Inline-only CSS -- Teams strips most stylesheets but preserves
+        # background/border/padding/color on <p>/<span> via inline style.
+        content = (
+            f"<p>Hi <strong>{team_name_safe}</strong> Team,</p>"
+            f"<p>Your <strong>GitHub repository</strong> for RealHack 2026 is ready.</p>"
+            f"<p style='background:#f0f5fb;border-left:4px solid #0a4f99;"
+            f"padding:10px 12px;margin:10px 0;'>"
+            f"<strong style='color:#0a4f99;'>GitHub Repo:</strong> "
+            f"<a href='{repo_url_safe}' style='color:#0a4f99;font-weight:600;'>"
+            f"{repo_url_safe}</a></p>"
+            f"<p>Please use this repository as the <strong>official code repo</strong> "
+            f"for your RealHack project. All code, setup instructions, README updates, "
+            f"and supporting files should be maintained here.</p>"
+            f"<p style='margin-bottom:4px;'><strong>A few quick reminders:</strong></p>"
+            f"<p style='margin-top:0;margin-bottom:4px;'>✅ Please check that all team "
+            f"members are able to access the repo</p>"
+            f"<p style='margin-top:0;margin-bottom:4px;'>✅ Keep your code checked in regularly</p>"
+            f"<p style='margin-top:0;margin-bottom:4px;'>✅ Use clear commit messages</p>"
+            f"<p style='margin-top:0;margin-bottom:4px;'>✅ Keep the README updated with "
+            f"setup / run instructions</p>"
+            f"<p style='margin-top:0;'>✅ Continue using this Teams channel for all team "
+            f"discussions</p>"
+            f"<p style='background:#fff4d6;border-left:4px solid #d49a00;"
+            f"padding:10px 12px;margin:10px 0;color:#7a5500;'>"
+            f"<strong>Note:</strong> Repositories will be locked by "
+            f"<strong>10:00 AM IST on June 20th</strong>, so please make sure all "
+            f"required code and files are checked in before the deadline.</p>"
+            f"<p>If you face any access issues, please reply in this channel and we'll "
+            f"help you get it resolved.</p>"
+            f"<p>Happy building! 🚀</p>"
+            f"<p style='margin-top:14px;'>Regards,<br>"
+            f"<strong style='color:#0a4f99;'>Team RealHack</strong></p>"
+        )
+        if mentions_block:
+            content += f"<p>{mentions_block}</p>"
+
+        payload = {
+            "body": {"contentType": "html", "content": content},
+            "mentions": mentions,
+        }
+
+        url = f"{GRAPH}/teams/{PARENT_TEAM_ID}/channels/{team.teams_channel_id}/messages"
+        r = gc.post(url, json=payload)
+        if r.status_code not in (200, 201):
+            req_id = r.headers.get("request-id") or r.headers.get("client-request-id") or "?"
+            raise _GraphChannelError(
+                502,
+                f"Channel repo-ready post failed ({r.status_code}) [req {req_id}]: {r.text[:1500]}",
+            )
+        msg_id = (r.json() or {}).get("id", "")
+
+    log(
+        db, team.id, kind="teams_message",
+        subject=f"Repo-ready message posted: {team.name}",
+        body=f"Message ID: {msg_id} · repo -> {repo_url} · {len(mentions)} @mention(s)",
+        status="sent",
+        sent_by_email=sent_by_email,
+    )
+    return {
+        "message_id": msg_id,
+        "repo_url": repo_url,
+        "mentions_count": len(mentions),
+        "status": "sent",
+    }
+
+
 # ===== Readiness check =====
 
 def check_repo_readiness(team: Team) -> dict:

@@ -559,6 +559,69 @@ export async function postChannelQrForTeam(teamId: number): Promise<{ message_id
   return r.json();
 }
 
+// === Repo-ready announcement bulk flow ===
+
+export interface RepoUrlImportResult {
+  updated_count: number;
+  unchanged_count: number;
+  not_found_count: number;
+  no_repo_url_count: number;
+  updated: { team_id: number; team_name: string; repo_url: string }[];
+  not_found: string[];
+  no_repo_url: string[];
+}
+
+export async function importRepoUrlsFromXlsx(file: File): Promise<RepoUrlImportResult> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await authFetch(`${BASE}/import/repo-urls`, {
+    method: 'POST',
+    body: fd,
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    let msg = `Import failed (${r.status})`;
+    try { const j = JSON.parse(txt); if (j?.detail) msg = j.detail; } catch { msg += ': ' + txt.slice(0, 200); }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+export interface PostRepoReadyBulkResult {
+  total_teams_with_channels: number;
+  posted_count: number;
+  skipped_already_posted_count: number;
+  skipped_no_real_channel_count: number;
+  skipped_no_repo_url_count: number;
+  failed_count: number;
+  posted: { team_id: number; team_name: string }[];
+  skipped_no_repo_url: { team_id: number; team_name: string }[];
+  failed: { team_id: number; team_name: string; error: string }[];
+}
+
+export async function postChannelRepoReadyAll(force = false): Promise<PostRepoReadyBulkResult> {
+  const graphToken = await getGraphTeamsToken();
+  const qs = force ? '?force=true' : '';
+  const r = await authFetch(`${BASE}/comms/teams/post-channel-repo-ready-all${qs}`, {
+    method: 'POST',
+    headers: { 'X-Graph-Token': graphToken },
+  });
+  if (!r.ok) {
+    let msg = `Bulk repo-ready post failed: ${r.status}`;
+    const bodyText = await r.text();
+    try { const j = JSON.parse(bodyText); if (j?.detail) msg = j.detail; } catch { if (bodyText) msg = bodyText; }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+export async function fetchRepoReadyPostedTeamIds(): Promise<number[]> {
+  const r = await authFetch(`${BASE}/comms/repo-ready-posted-team-ids`);
+  if (!r.ok) throw new Error(`Repo-ready posted-ids fetch failed: ${r.status}`);
+  const j = await r.json();
+  return j.team_ids ?? [];
+}
+
 export async function postChannelWelcomeAll(): Promise<PostChannelWelcomeBulkResult> {
   const graphToken = await getGraphTeamsToken();
   // Backend loops through every team with a channel; ~2-3 min for 95 teams.
