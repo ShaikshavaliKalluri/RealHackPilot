@@ -4,7 +4,7 @@ import { FlagBadge } from './FlagBadge';
 import { AIScoreBlock } from './AIScoreBlock';
 import { TeamReadiness } from './TeamReadiness';
 import { TeamEditModal } from './TeamEditModal';
-import { createTeamsChannelForTeam, postChannelWelcome, postChannelQrForTeam, adoptChannelByLink, isSandboxMode } from '../api';
+import { createTeamsChannelForTeam, postChannelWelcome, postChannelQrForTeam, postChannelRepoReadyForTeam, adoptChannelByLink, isSandboxMode } from '../api';
 
 interface Props {
   team: Team;
@@ -22,6 +22,8 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
   const [welcomeMsg, setWelcomeMsg] = useState<string | null>(null);
   const [qrBusy, setQrBusy] = useState(false);
   const [qrMsg, setQrMsg] = useState<string | null>(null);
+  const [repoReadyBusy, setRepoReadyBusy] = useState(false);
+  const [repoReadyMsg, setRepoReadyMsg] = useState<string | null>(null);
   const pct = Math.round(team.completeness_score * 100);
 
   const handleCreateChannel = async (e: React.MouseEvent) => {
@@ -99,6 +101,29 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
       setQrMsg(`✗ ${err.message ?? String(err)}`);
     } finally {
       setQrBusy(false);
+    }
+  };
+
+  const handlePostRepoReady = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!team.repo_url) {
+      setRepoReadyMsg('✗ This team has no GitHub repo URL on file. Run the DevOps xlsx import on the Comms tab first.');
+      return;
+    }
+    const confirmText =
+      `Post the 'GitHub repo is ready' announcement to the "2026 ${team.name}" channel?\n\n` +
+      `Repo URL: ${team.repo_url}\n\n` +
+      `Used for sanity-checking on one team before the bulk send. Mentor + members will be @-mentioned.`;
+    if (!confirm(confirmText)) return;
+    setRepoReadyBusy(true);
+    setRepoReadyMsg(null);
+    try {
+      const r = await postChannelRepoReadyForTeam(team.id);
+      setRepoReadyMsg(`✓ Repo-ready posted · ${r.repo_url}`);
+    } catch (err: any) {
+      setRepoReadyMsg(`✗ ${err.message ?? String(err)}`);
+    } finally {
+      setRepoReadyBusy(false);
     }
   };
 
@@ -269,6 +294,19 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
                   </svg>
                   {qrBusy ? 'Posting…' : 'Post QR to channel'}
                 </button>
+                <button
+                  onClick={handlePostRepoReady}
+                  disabled={repoReadyBusy || !team.repo_url}
+                  className="text-xs px-3 py-1 rounded-md border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-200 disabled:opacity-40 transition flex items-center gap-1.5"
+                  title={team.repo_url
+                    ? `Post the 'GitHub repo is ready' announcement in the team's channel.\nRepo: ${team.repo_url}`
+                    : 'No repo URL on file. Import the DevOps xlsx on the Comms tab first.'}
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                  </svg>
+                  {repoReadyBusy ? 'Posting…' : 'Post repo-ready'}
+                </button>
               </>
             )}
             <button
@@ -324,6 +362,11 @@ export function TeamCard({ team, expanded, onToggle, onRescore, onReload }: Prop
           {qrMsg && (
             <div className={`text-xs ${qrMsg.startsWith('✓') ? 'text-emerald-300' : 'text-rose-300'}`}>
               {qrMsg}
+            </div>
+          )}
+          {repoReadyMsg && (
+            <div className={`text-xs ${repoReadyMsg.startsWith('✓') ? 'text-emerald-300' : 'text-rose-300'}`}>
+              {repoReadyMsg}
             </div>
           )}
 

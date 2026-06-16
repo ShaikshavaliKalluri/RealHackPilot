@@ -622,6 +622,23 @@ export async function fetchRepoReadyPostedTeamIds(): Promise<number[]> {
   return j.team_ids ?? [];
 }
 
+export async function postChannelRepoReadyForTeam(
+  teamId: number,
+): Promise<{ message_id: string; repo_url: string; status: string }> {
+  const graphToken = await getGraphTeamsToken();
+  const r = await authFetch(`${BASE}/comms/teams/${teamId}/post-channel-repo-ready`, {
+    method: 'POST',
+    headers: { 'X-Graph-Token': graphToken },
+  });
+  if (!r.ok) {
+    let msg = `Repo-ready post failed: ${r.status}`;
+    const bodyText = await r.text();
+    try { const j = JSON.parse(bodyText); if (j?.detail) msg = j.detail; } catch { if (bodyText) msg = bodyText; }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
 export async function postChannelWelcomeAll(): Promise<PostChannelWelcomeBulkResult> {
   const graphToken = await getGraphTeamsToken();
   // Backend loops through every team with a channel; ~2-3 min for 95 teams.
