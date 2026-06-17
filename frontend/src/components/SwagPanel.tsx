@@ -13,6 +13,7 @@ import {
 
 type StatusFilter = 'all' | 'pending' | 'collected';
 type CountryFilter = string; // 'all' | 'India' | 'US' | …
+type CategoryFilter = string; // 'all' | 'Member' | 'Mentor' | 'Judge' | 'Organiser' | …
 
 // CSV escape: wrap in double quotes when the value contains a comma, quote,
 // or newline; double-up any internal quotes per RFC 4180.
@@ -24,9 +25,9 @@ function csvCell(v: unknown): string {
   return s;
 }
 
-function exportFilteredToCsv(rows: SwagPerson[], country: string, status: string): void {
+function exportFilteredToCsv(rows: SwagPerson[], country: string, category: string, status: string): void {
   const headers = [
-    'Name', 'Email', 'Country', 'T-shirt Size',
+    'Name', 'Email', 'Category', 'Country', 'T-shirt Size',
     'Role(s)', 'Team(s)',
     'Status', 'Collected At (UTC)',
     'Picked Up By (Name)', 'Picked Up By (Email)',
@@ -39,6 +40,7 @@ function exportFilteredToCsv(rows: SwagPerson[], country: string, status: string
     lines.push([
       csvCell(p.name),
       csvCell(p.email),
+      csvCell(p.category),
       csvCell(p.country),
       csvCell(p.tshirt_size),
       csvCell(p.roles.join('; ')),
@@ -60,6 +62,7 @@ function exportFilteredToCsv(rows: SwagPerson[], country: string, status: string
   const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
   const filterTag = [
     country !== 'all' ? country.toLowerCase() : '',
+    category !== 'all' ? category.toLowerCase() : '',
     status !== 'all' ? status : '',
   ].filter(Boolean).join('_') || 'all';
   const filename = `realhack-swag_${filterTag}_${ts}.csv`;
@@ -108,6 +111,7 @@ export function SwagPanel({ mode = 'organizer' }: Props = {}) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('all');
   const [country, setCountry] = useState<CountryFilter>('all');
+  const [category, setCategory] = useState<CategoryFilter>('all');
   const [busyEmail, setBusyEmail] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   // Pickup-by modal state
@@ -254,12 +258,34 @@ export function SwagPanel({ mode = 'organizer' }: Props = {}) {
     return Array.from(set).sort();
   }, [people]);
 
+  // Distinct categories present in the roster (used to populate the category
+  // pills). Sort with Member + Mentor first (most common at the desk),
+  // everyone else alphabetical after, so the pill row reads predictably.
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of people) if (p.category) set.add(p.category);
+    const arr = Array.from(set);
+    const PRIORITY = ['Member', 'Mentor'];
+    arr.sort((a, b) => {
+      const ai = PRIORITY.indexOf(a);
+      const bi = PRIORITY.indexOf(b);
+      if (ai !== -1 || bi !== -1) {
+        if (ai === -1) return 1;
+        if (bi === -1) return -1;
+        return ai - bi;
+      }
+      return a.localeCompare(b);
+    });
+    return arr;
+  }, [people]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let list = people;
     if (status === 'pending') list = list.filter((p) => !p.collected);
     if (status === 'collected') list = list.filter((p) => p.collected);
     if (country !== 'all') list = list.filter((p) => (p.country ?? 'Unknown') === country);
+    if (category !== 'all') list = list.filter((p) => (p.category ?? 'Member') === category);
     if (q) {
       list = list.filter((p) =>
         p.name.toLowerCase().includes(q) ||
@@ -268,7 +294,7 @@ export function SwagPanel({ mode = 'organizer' }: Props = {}) {
       );
     }
     return list;
-  }, [people, search, status, country]);
+  }, [people, search, status, country, category]);
 
   const stats = useMemo(() => {
     const total = people.length;
@@ -481,6 +507,39 @@ export function SwagPanel({ mode = 'organizer' }: Props = {}) {
               })}
             </div>
           )}
+          {/* Category filter pills — Member / Mentor / Judge / Organiser /
+              Support / Leadership / HR. Combines additively with the country
+              filter (e.g. India + Judge = India-based judges only). */}
+          {categories.length > 0 && (
+            <div className="flex gap-1.5 flex-wrap mb-2.5">
+              <button
+                onClick={() => setCategory('all')}
+                className={`text-xs px-3 py-1.5 rounded-full font-semibold transition border ${
+                  category === 'all'
+                    ? 'bg-violet-500/20 border-violet-500/60 text-violet-200'
+                    : 'bg-ink-900/40 border-slate-700/40 text-slate-300 hover:border-slate-500'
+                }`}
+              >
+                All categories ({people.length})
+              </button>
+              {categories.map((c) => {
+                const count = people.filter((p) => (p.category ?? 'Member') === c).length;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => setCategory(c)}
+                    className={`text-xs px-3 py-1.5 rounded-full font-semibold transition border ${
+                      category === c
+                        ? 'bg-violet-500/20 border-violet-500/60 text-violet-200'
+                        : 'bg-ink-900/40 border-slate-700/40 text-slate-300 hover:border-slate-500'
+                    }`}
+                  >
+                    {c} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {/* Status filter pills */}
           <div className="flex gap-1 bg-ink-900/60 border border-slate-700/40 rounded-lg p-1">
             {(['all', 'pending', 'collected'] as StatusFilter[]).map((f) => (
@@ -502,11 +561,12 @@ export function SwagPanel({ mode = 'organizer' }: Props = {}) {
           <div className="text-xs text-slate-500 mt-2 flex items-center justify-between gap-3 flex-wrap">
             <div>
               Showing {filtered.length} of {people.length}
-              {country !== 'all' && <span className="text-slate-600"> · filtered by {country}</span>}
+              {country !== 'all' && <span className="text-slate-600"> · {country}</span>}
+              {category !== 'all' && <span className="text-slate-600"> · {category}</span>}
             </div>
             {!isStaffMode && (
               <button
-                onClick={() => exportFilteredToCsv(filtered, country, status)}
+                onClick={() => exportFilteredToCsv(filtered, country, category, status)}
                 disabled={filtered.length === 0}
                 className="text-xs px-3 py-1.5 rounded-lg border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 transition disabled:opacity-40 flex items-center gap-1.5 font-semibold"
                 title="Download the current filtered list as a CSV (opens directly in Excel)"
