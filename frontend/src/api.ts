@@ -757,7 +757,11 @@ export async function fetchJudgeScores(opts: { round?: number; judge_id?: number
 // ===== Role + judge assignments =====
 
 export interface UserRole {
-  role: 'organizer' | 'judge' | 'none';
+  // 'rews' = swag-distribution volunteer. Routes to a stripped-down pickup-
+  // desk UI (search + mark only, no undo, no nav, no Excel export). Added
+  // by an organizer via the Judges & Organizers admin panel with role='rews'.
+  // 'none' = signed in via AAD but not on any roster -> 'Not registered' card.
+  role: 'organizer' | 'judge' | 'rews' | 'none';
   judge_id: number | null;
   name: string | null;
   email: string | null;

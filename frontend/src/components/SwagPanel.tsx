@@ -85,7 +85,18 @@ function exportFilteredToCsv(rows: SwagPerson[], country: string, status: string
  * signs for an absent person, the organizer captures who-physically-picked-up
  * before confirming. Audit-logged separately from which organizer marked it.
  */
-export function SwagPanel() {
+interface Props {
+  /** 'organizer' (default) shows full controls -- search, mark, undo, CSV
+   *  export, full filter row. 'staff' is the volunteer-desk view used when
+   *  a non-organizer signs in: hides the Undo button (only organizers can
+   *  reverse a mark) and the CSV export (volunteers don't need to take a
+   *  copy off-platform). Everything else stays so the desk flow is the
+   *  same UX for everyone. */
+  mode?: 'organizer' | 'staff';
+}
+
+export function SwagPanel({ mode = 'organizer' }: Props = {}) {
+  const isStaffMode = mode === 'staff';
   const [people, setPeople] = useState<SwagPerson[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -300,14 +311,16 @@ export function SwagPanel() {
               Showing {filtered.length} of {people.length}
               {country !== 'all' && <span className="text-slate-600"> · filtered by {country}</span>}
             </div>
-            <button
-              onClick={() => exportFilteredToCsv(filtered, country, status)}
-              disabled={filtered.length === 0}
-              className="text-xs px-3 py-1.5 rounded-lg border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 transition disabled:opacity-40 flex items-center gap-1.5 font-semibold"
-              title="Download the current filtered list as a CSV (opens directly in Excel)"
-            >
-              📥 Export to Excel ({filtered.length})
-            </button>
+            {!isStaffMode && (
+              <button
+                onClick={() => exportFilteredToCsv(filtered, country, status)}
+                disabled={filtered.length === 0}
+                className="text-xs px-3 py-1.5 rounded-lg border border-emerald-500/40 hover:bg-emerald-500/10 text-emerald-300 transition disabled:opacity-40 flex items-center gap-1.5 font-semibold"
+                title="Download the current filtered list as a CSV (opens directly in Excel)"
+              >
+                📥 Export to Excel ({filtered.length})
+              </button>
+            )}
           </div>
           {country !== 'all' && country.toLowerCase() !== 'india' && (
             <div className="text-xs text-amber-300/90 mt-1.5 italic">
@@ -393,13 +406,22 @@ export function SwagPanel() {
                   </div>
                   <div className="shrink-0">
                     {p.collected ? (
-                      <button
-                        onClick={() => handleUnmark(p)}
-                        disabled={isBusy}
-                        className="text-xs px-3 py-2 rounded border border-rose-500/30 hover:border-rose-500/60 hover:bg-rose-500/10 text-rose-300 disabled:opacity-40 transition"
-                      >
-                        Undo
-                      </button>
+                      isStaffMode ? (
+                        <span
+                          className="text-xs px-3 py-2 rounded border border-lime-500/30 bg-lime-500/5 text-lime-300/80 font-semibold"
+                          title="To reverse this, ask an organizer."
+                        >
+                          ✓ Done
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleUnmark(p)}
+                          disabled={isBusy}
+                          className="text-xs px-3 py-2 rounded border border-rose-500/30 hover:border-rose-500/60 hover:bg-rose-500/10 text-rose-300 disabled:opacity-40 transition"
+                        >
+                          Undo
+                        </button>
+                      )
                     ) : (
                       <button
                         onClick={() => openPickupModal(p)}

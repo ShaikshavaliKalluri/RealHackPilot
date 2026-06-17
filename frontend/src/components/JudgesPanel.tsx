@@ -34,12 +34,12 @@ export function JudgesPanel({ teams }: Props) {
   // Add-judge form
   const [newName, setNewName] = useState('');
   const [newEmail, setNewEmail] = useState('');
-  const [newRole, setNewRole] = useState<'judge' | 'organizer'>('judge');
+  const [newRole, setNewRole] = useState<'judge' | 'organizer' | 'rews'>('judge');
   const [adding, setAdding] = useState(false);
 
   // Bulk-paste form
   const [bulkText, setBulkText] = useState('');
-  const [bulkRole, setBulkRole] = useState<'judge' | 'organizer'>('judge');
+  const [bulkRole, setBulkRole] = useState<'judge' | 'organizer' | 'rews'>('judge');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState<JudgeBulkResult | null>(null);
 
@@ -190,9 +190,9 @@ export function JudgesPanel({ teams }: Props) {
   const isProtected = (email: string | null | undefined): boolean =>
     PROTECTED_JUDGE_EMAILS.has((email || '').trim().toLowerCase());
 
-  const handleToggleRole = async (j: Judge) => {
+  const handleSetRole = async (j: Judge, nextRole: 'judge' | 'organizer' | 'rews') => {
+    if (j.role === nextRole) return;
     setErr(null);
-    const nextRole = j.role === 'organizer' ? 'judge' : 'organizer';
     try {
       await updateJudge(j.id, { role: nextRole });
       await reloadJudges();
@@ -359,11 +359,12 @@ export function JudgesPanel({ teams }: Props) {
           />
           <select
             value={newRole}
-            onChange={(e) => setNewRole(e.target.value as 'judge' | 'organizer')}
+            onChange={(e) => setNewRole(e.target.value as 'judge' | 'organizer' | 'rews')}
             className="md:col-span-2 bg-ink-900 border border-slate-700/40 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-500/60"
           >
             <option value="judge">Judge</option>
             <option value="organizer">Organizer</option>
+            <option value="rews">REWS (swag desk)</option>
           </select>
           <button
             onClick={handleAddJudge}
@@ -395,11 +396,12 @@ export function JudgesPanel({ teams }: Props) {
           <label className="text-xs text-slate-400">Role for all:</label>
           <select
             value={bulkRole}
-            onChange={(e) => setBulkRole(e.target.value as 'judge' | 'organizer')}
+            onChange={(e) => setBulkRole(e.target.value as 'judge' | 'organizer' | 'rews')}
             className="bg-ink-900 border border-slate-700/40 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-sky-500/60"
           >
             <option value="judge">Judge</option>
             <option value="organizer">Organizer</option>
+            <option value="rews">REWS (swag desk)</option>
           </select>
           <span className="text-xs text-slate-500">
             {bulkText.trim() ? `${parseBulkLines(bulkText).length} valid email${parseBulkLines(bulkText).length === 1 ? '' : 's'} detected` : ' '}
@@ -490,14 +492,23 @@ export function JudgesPanel({ teams }: Props) {
                     >
                       Rename
                     </button>
-                    <button
-                      onClick={() => handleToggleRole(j)}
-                      disabled={protectedAcct && j.role === 'organizer'}
-                      title={protectedAcct ? 'Protected — must remain organizer' : `Switch to ${j.role === 'organizer' ? 'judge' : 'organizer'}`}
-                      className="text-[11px] px-2 py-0.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                    >
-                      Make {j.role === 'organizer' ? 'judge' : 'organizer'}
-                    </button>
+                    {(['organizer', 'judge', 'rews'] as const)
+                      .filter((r) => r !== j.role)
+                      .map((r) => {
+                        const blocked = protectedAcct && r !== 'organizer';
+                        const label = r === 'rews' ? 'REWS' : r.charAt(0).toUpperCase() + r.slice(1);
+                        return (
+                          <button
+                            key={r}
+                            onClick={() => handleSetRole(j, r)}
+                            disabled={blocked}
+                            title={blocked ? 'Protected — must remain organizer' : `Set role to ${label}`}
+                            className="text-[11px] px-2 py-0.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                          >
+                            Make {label}
+                          </button>
+                        );
+                      })}
                     {!protectedAcct && (
                       <button
                         onClick={() => handleDeleteJudge(j)}

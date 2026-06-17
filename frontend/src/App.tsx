@@ -209,7 +209,39 @@ export default function App() {
     );
   }
 
-  // Users authenticated by Azure AD but not registered in our Judge table.
+  // REWS swag-distribution volunteers: signed in via AAD, on the judges
+  // roster with role='rews'. Stripped-down UI scoped to the pickup-desk
+  // flow -- no nav, no undo, no Excel export, no team data. Backend's
+  // middleware further restricts them to /api/swag/people + /api/swag/mark
+  // (unmark is organizer-only) so even if they craft a curl they can't
+  // escape this scope.
+  if (role.role === 'rews') {
+    return (
+      <div className="min-h-screen bg-ink-950 text-slate-100">
+        <div className="bg-ink-900/80 border-b border-slate-800/60 px-4 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <img src="/realhack-logo.png" alt="RealHack 2026" className="h-8" />
+            <div>
+              <div className="text-sm font-bold text-slate-100">Swag pickup desk</div>
+              <div className="text-[11px] text-slate-500">
+                Signed in as {role.name || role.email}
+              </div>
+            </div>
+          </div>
+          <span className="text-[10px] uppercase tracking-wider px-2 py-1 rounded-full border border-lime-500/40 bg-lime-500/10 text-lime-300 font-semibold">
+            REWS · Swag desk
+          </span>
+        </div>
+        <div className="px-4 sm:px-6 lg:px-8 py-4 max-w-4xl mx-auto">
+          <SwagPanel mode="staff" />
+        </div>
+      </div>
+    );
+  }
+
+  // Signed in via AAD but not on any roster -- show 'Not registered' so
+  // an organizer can add them via the Judges & Organizers admin panel
+  // (as judge / organizer / rews depending on what they're helping with).
   if (role.role === 'none') {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
@@ -217,7 +249,7 @@ export default function App() {
           <img src="/realhack-logo.png" alt="RealHack 2026" className="h-12 mx-auto mb-4" />
           <h2 className="text-lg font-bold text-slate-100 mb-2">Not registered for this app</h2>
           <p className="text-sm text-slate-400 mb-4">
-            You're signed in as <span className="text-slate-200">{role.email || role.name}</span>, but you're not on the judge or organizer list yet. Please contact the RealHack organizers if this looks wrong.
+            You're signed in as <span className="text-slate-200">{role.email || role.name}</span>, but you're not on any RealHack roster yet. Ask an organizer to add you via Judges &amp; Organizers — as <strong>Judge</strong>, <strong>Organizer</strong>, or <strong>REWS</strong> (swag desk).
           </p>
         </div>
       </div>

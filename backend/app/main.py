@@ -75,6 +75,58 @@ app.add_middleware(
 # exempt so monitoring + dev-time exploration still work without sign-in.
 _AUTH_EXEMPT_PATHS = {"/api/health", "/docs", "/redoc", "/openapi.json"}
 
+# Paths where ANY signed-in RealPage AAD user is allowed, regardless of
+# whether they're an organizer or judge in our DB. Used for the swag-staff
+# flow: volunteers who sign in with their normal AAD account but aren't on
+# the dashboard roster get a stripped-down 'mark collected' UI scoped to
+# these endpoints. Everything NOT in this set requires the user to be in the
+# `judges` table (any role) or be a sandbox admin -- enforced below.
+#
+# This used to be guaranteed by Entra's 'Assignment Required = Yes' on the
+# Enterprise App. Once that's flipped to No (so swag staff can sign in), the
+# token alone no longer proves the user belongs here -- the role check
+# below replaces that guarantee at the application layer.
+_SIGNED_IN_OK_PATHS = {
+    "/api/me",
+    "/api/me/role",
+    "/api/swag/people",
+    "/api/swag/mark",
+    "/api/sandbox/mode",
+}
+
+
+def _lookup_role_for_email(email: str) -> str | None:
+    """Returns the role string from the judges table for this email, or
+    'organizer' for sandbox admins, or None if unknown. Used by the
+    middleware to gate non-allowlist endpoints. Opens its own DB session
+    because middleware runs outside of Depends().
+    """
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    if email in SANDBOX_ADMIN_EMAILS:
+        return "organizer"
+    from .db import SessionLocal
+    with SessionLocal() as db:
+        row = (
+            db.query(models.Judge)
+            .filter(func.lower(models.Judge.email) == email)
+            .filter(models.Judge.is_active.is_(True))
+            .first()
+        )
+        return (row.role or "judge") if row else None
+
+
+# Roles that can read general dashboard data + perform actions on team /
+# scoring / comms endpoints. REWS is intentionally excluded -- they have
+# the AAD group membership to sign in but are scoped to pickup-desk swag
+# operations only.
+_DASHBOARD_ROLES = {"organizer", "judge"}
+
+# Roles allowed to mark swag collected (no Undo). Organizers + judges can
+# also do this (they're typically the ones at the desk if no REWS is there).
+_SWAG_DESK_ROLES = {"organizer", "judge", "rews"}
+
 
 @app.middleware("http")
 async def _require_auth_middleware(request, call_next):
@@ -99,13 +151,45 @@ async def _require_auth_middleware(request, call_next):
     token = auth_header.split(" ", 1)[1].strip()
     try:
         from .auth import validate_token  # local import to avoid circular
-        validate_token(token)
+        claims = validate_token(token)
     except Exception as e:
         return JSONResponse(
             status_code=401,
             content={"detail": f"Invalid token: {e}"},
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Role gate, three tiers:
+    #   1. _SIGNED_IN_OK_PATHS -- any valid AAD token works. Used so the
+    #      'Not registered' card has somewhere to call (/api/me/role) and
+    #      so the frontend can negotiate its routing decision.
+    #   2. /api/swag/{people,mark} -- organizer OR judge OR rews. REWS
+    #      volunteers can mark people collected. (unmark gates organizer-
+    #      only inside the handler itself.)
+    #   3. Everything else under /api/* -- organizer OR judge. Excludes
+    #      rews so a volunteer who somehow crafts a curl can't read team
+    #      data or fire comms.
+    if path not in _SIGNED_IN_OK_PATHS:
+        email = (
+            claims.get("preferred_username")
+            or claims.get("upn")
+            or claims.get("email")
+            or ""
+        )
+        role = _lookup_role_for_email(email)
+        allowed = _SWAG_DESK_ROLES if path.startswith("/api/swag/") else _DASHBOARD_ROLES
+        if role not in allowed:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": (
+                        "You're signed in but don't have the role required for this action. "
+                        "If you're helping with swag pickup, an organizer needs to add you "
+                        "to the Judges & Organizers panel with role 'REWS'."
+                    ),
+                },
+            )
+
     return await call_next(request)
 
 
@@ -1076,8 +1160,8 @@ def bulk_add_judges(req: JudgeBulkRequest, db: Session = Depends(get_db)) -> Jud
         name = (row.name or "").strip()
         email = (row.email or "").strip().lower()
         role = (row.role or "judge").strip().lower()
-        if role not in ("judge", "organizer"):
-            failed.append({"name": name, "email": email, "error": "role must be 'judge' or 'organizer'"})
+        if role not in ("judge", "organizer", "rews"):
+            failed.append({"name": name, "email": email, "error": "role must be 'judge', 'organizer', or 'rews'"})
             continue
         if not name or not email or "@" not in email:
             failed.append({"name": name, "email": email, "error": "name and email required (and email must look like one)"})
@@ -1265,10 +1349,13 @@ def update_judge(judge_id: int, req: JudgeUpdate, db: Session = Depends(get_db))
             raise HTTPException(status_code=403, detail="Protected account email cannot be changed")
         judge.email = new_email
     if req.role:
+        new_role = req.role.strip().lower()
+        if new_role not in ("judge", "organizer", "rews"):
+            raise HTTPException(status_code=400, detail="role must be 'judge', 'organizer', or 'rews'")
         # Protected accounts cannot be downgraded from organizer.
-        if (judge.email or "").strip().lower() in PROTECTED_EMAILS and req.role != "organizer":
+        if (judge.email or "").strip().lower() in PROTECTED_EMAILS and new_role != "organizer":
             raise HTTPException(status_code=403, detail="Protected account must remain an organizer")
-        judge.role = req.role
+        judge.role = new_role
     db.commit()
     db.refresh(judge)
     return judge
@@ -1326,6 +1413,11 @@ def me_role(
                 name=profile.get("name"),
                 email=email,
             )
+        # Anyone signed in but not on the roster: tell the frontend to show
+        # the 'Not registered' card. REWS volunteers should be added to the
+        # judges table with role='rews' explicitly so they get the scoped
+        # pickup-desk UI -- we don't want implicit access by virtue of
+        # 'signed in but not on the roster'.
         return UserRoleOut(role="none", name=profile.get("name"), email=email)
     return UserRoleOut(
         role=judge.role or "judge",
@@ -1818,8 +1910,37 @@ def mark_swag_collected(
 
 
 @app.post("/api/swag/unmark", response_model=SwagPersonOut)
-def unmark_swag_collected(req: SwagMarkRequest, db: Session = Depends(get_db)) -> SwagPersonOut:
-    """Undo a mark — used if an organizer accidentally clicked the wrong person."""
+def unmark_swag_collected(
+    req: SwagMarkRequest,
+    claims: dict = Depends(require_auth),
+    creds: HTTPAuthorizationCredentials = Security(_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> SwagPersonOut:
+    """Undo a mark — used if an organizer accidentally clicked the wrong person.
+
+    Restricted to **organizers only**. REWS volunteers + judges at the
+    desk can mark but not unmark, so a fat-finger at the pickup desk can't
+    be silently reversed without organizer review. The middleware lets
+    REWS through to /api/swag/unmark (since it's under /api/swag/*), so
+    this dependency is the actual organizer-only enforcement.
+    """
+    profile = build_profile_payload(claims, fetch_profile(creds.credentials) if creds else {})
+    actor_email = (profile.get("email") or "").strip().lower()
+    is_org = False
+    if actor_email in SANDBOX_ADMIN_EMAILS:
+        is_org = True
+    else:
+        row = (
+            db.query(models.Judge)
+            .filter(func.lower(models.Judge.email) == actor_email)
+            .filter(models.Judge.is_active.is_(True))
+            .first()
+        )
+        if row and (row.role or "").lower() == "organizer":
+            is_org = True
+    if not is_org:
+        raise HTTPException(status_code=403, detail="Only organizers can undo a swag mark.")
+
     email = req.email.strip().lower()
     if not email:
         raise HTTPException(status_code=400, detail="email is required")
