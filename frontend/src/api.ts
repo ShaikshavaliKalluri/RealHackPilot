@@ -508,6 +508,67 @@ export async function deleteSwagExtra(id: number): Promise<void> {
   }
 }
 
+// === Floor-walk judge visits ===
+
+export interface JudgeVisit {
+  id: number;
+  team_id: number;
+  judge_id: number;
+  judge_name: string | null;
+  visited_at: string;
+  marked_by_email: string | null;
+}
+
+export interface JudgeVisitsByTeam {
+  by_team: Record<number, JudgeVisit[]>;
+}
+
+export interface JudgeVisitsStats {
+  total_teams: number;
+  teams_with_any_visit: number;
+  teams_with_zero_visits: number;
+  total_visits: number;
+  per_team_counts: Record<number, number>;
+  per_judge_counts: Record<number, number>;
+}
+
+export async function fetchVisitsByTeam(): Promise<JudgeVisitsByTeam> {
+  const r = await authFetch(`${BASE}/visits/by-team`);
+  if (!r.ok) throw new Error(`Visits-by-team fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function fetchVisitsStats(): Promise<JudgeVisitsStats> {
+  const r = await authFetch(`${BASE}/visits/stats`);
+  if (!r.ok) throw new Error(`Visits-stats fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function markVisit(teamId: number, judgeId: number): Promise<JudgeVisit> {
+  const r = await authFetch(`${BASE}/visits`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ team_id: teamId, judge_id: judgeId }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Mark visit failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
+export async function unmarkVisit(teamId: number, judgeId: number): Promise<void> {
+  const r = await authFetch(`${BASE}/visits`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ team_id: teamId, judge_id: judgeId }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Unmark visit failed: ${r.status} — ${t}`);
+  }
+}
+
 
 // ===== Teams channel — per-team button =====
 

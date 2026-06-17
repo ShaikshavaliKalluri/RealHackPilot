@@ -47,6 +47,7 @@ from .schemas import (
     JudgeBulkRequest, JudgeBulkResult,
     TeamSeatRequest,
     SwagExtraOut, SwagExtraImportResult,
+    JudgeVisitMarkRequest, JudgeVisitOut, JudgeVisitsByTeam, JudgeVisitsStats,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet, PanelSwapTeamDays,
     AdoptChannelByLinkRequest,
@@ -1148,6 +1149,133 @@ def judging_rubric() -> dict:
     return {"axes": [{"key": k, "label": v} for k, v in JUDGE_RUBRIC_AXES], "max_per_axis": 10}
 
 
+# ===== Judge floor-walk visits =====
+
+@app.get("/api/visits/by-team", response_model=JudgeVisitsByTeam)
+def list_visits_by_team(db: Session = Depends(get_db)) -> JudgeVisitsByTeam:
+    """All visits grouped by team_id. Drives the Floor walk panel: each
+    team row reads its own list to render judge-name chips + toggle state."""
+    rows = (
+        db.query(models.JudgeVisit, models.Judge.name)
+        .outerjoin(models.Judge, models.Judge.id == models.JudgeVisit.judge_id)
+        .order_by(models.JudgeVisit.visited_at.asc())
+        .all()
+    )
+    by_team: dict[int, list[JudgeVisitOut]] = {}
+    for visit, judge_name in rows:
+        by_team.setdefault(visit.team_id, []).append(
+            JudgeVisitOut(
+                id=visit.id,
+                team_id=visit.team_id,
+                judge_id=visit.judge_id,
+                judge_name=judge_name,
+                visited_at=visit.visited_at.isoformat() if visit.visited_at else "",
+                marked_by_email=visit.marked_by_email,
+            )
+        )
+    return JudgeVisitsByTeam(by_team=by_team)
+
+
+@app.get("/api/visits/stats", response_model=JudgeVisitsStats)
+def visits_stats(db: Session = Depends(get_db)) -> JudgeVisitsStats:
+    """Aggregate counts -- per team (how many distinct judges visited),
+    per judge (how many teams they've stopped by). Powers the top-of-panel
+    coverage tiles + the 'judge ranking' sub-list."""
+    total_teams = db.query(models.Team).count()
+    per_team_counts: dict[int, int] = {}
+    per_judge_counts: dict[int, int] = {}
+    rows = db.query(models.JudgeVisit.team_id, models.JudgeVisit.judge_id).all()
+    for team_id, judge_id in rows:
+        per_team_counts[team_id] = per_team_counts.get(team_id, 0) + 1
+        per_judge_counts[judge_id] = per_judge_counts.get(judge_id, 0) + 1
+    teams_with_any = len(per_team_counts)
+    return JudgeVisitsStats(
+        total_teams=total_teams,
+        teams_with_any_visit=teams_with_any,
+        teams_with_zero_visits=total_teams - teams_with_any,
+        total_visits=sum(per_team_counts.values()),
+        per_team_counts=per_team_counts,
+        per_judge_counts=per_judge_counts,
+    )
+
+
+@app.post("/api/visits", response_model=JudgeVisitOut)
+def mark_visit(
+    req: JudgeVisitMarkRequest,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> JudgeVisitOut:
+    """Idempotent: marking the same judge->team again returns the existing
+    row without duplicating. Organizer-only -- this is event ops, not
+    something REWS volunteers or judges themselves should touch."""
+    actor_email = _require_organizer_role(claims, db)
+
+    team = db.query(models.Team).get(req.team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail=f"team {req.team_id} not found")
+    judge = db.query(models.Judge).get(req.judge_id)
+    if not judge:
+        raise HTTPException(status_code=404, detail=f"judge {req.judge_id} not found")
+
+    existing = (
+        db.query(models.JudgeVisit)
+        .filter(models.JudgeVisit.team_id == req.team_id)
+        .filter(models.JudgeVisit.judge_id == req.judge_id)
+        .first()
+    )
+    if existing:
+        # Refresh notes if provided, otherwise no-op
+        if req.notes is not None:
+            existing.notes = req.notes
+            db.commit()
+        return JudgeVisitOut(
+            id=existing.id,
+            team_id=existing.team_id,
+            judge_id=existing.judge_id,
+            judge_name=judge.name,
+            visited_at=existing.visited_at.isoformat() if existing.visited_at else "",
+            marked_by_email=existing.marked_by_email,
+        )
+
+    visit = models.JudgeVisit(
+        team_id=req.team_id,
+        judge_id=req.judge_id,
+        visited_at=datetime.utcnow(),
+        marked_by_email=actor_email,
+        notes=req.notes,
+    )
+    db.add(visit)
+    db.commit()
+    db.refresh(visit)
+    return JudgeVisitOut(
+        id=visit.id,
+        team_id=visit.team_id,
+        judge_id=visit.judge_id,
+        judge_name=judge.name,
+        visited_at=visit.visited_at.isoformat() if visit.visited_at else "",
+        marked_by_email=visit.marked_by_email,
+    )
+
+
+@app.delete("/api/visits", response_model=dict)
+def unmark_visit(
+    req: JudgeVisitMarkRequest,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Remove the (team, judge) visit row. Idempotent -- returns
+    {removed: False} if there was no row to begin with."""
+    _require_organizer_role(claims, db)
+    deleted = (
+        db.query(models.JudgeVisit)
+        .filter(models.JudgeVisit.team_id == req.team_id)
+        .filter(models.JudgeVisit.judge_id == req.judge_id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"removed": deleted > 0, "team_id": req.team_id, "judge_id": req.judge_id}
+
+
 @app.get("/api/judges", response_model=list[JudgeOut])
 def list_judges(db: Session = Depends(get_db)) -> list[models.Judge]:
     return db.query(models.Judge).filter(models.Judge.is_active == True).order_by(models.Judge.name.asc()).all()  # noqa: E712
@@ -2002,6 +2130,27 @@ def unmark_swag_collected(
     if email not in roster:
         raise HTTPException(status_code=404, detail="not found after unmark")
     return SwagPersonOut(**roster[email])
+
+
+def _require_organizer_role(claims: dict, db: Session) -> str:
+    """Inline check used by handlers that need organizer-only enforcement
+    on top of the middleware's role gate (which accepts organizer/judge
+    for /api/* and organizer/judge/rews for /api/swag/*). Raises 403 if
+    the signed-in user isn't an organizer; returns the actor email on
+    success so it can be stored in audit columns."""
+    profile = build_profile_payload(claims, {})
+    actor_email = (profile.get("email") or "").strip().lower()
+    if actor_email in SANDBOX_ADMIN_EMAILS:
+        return actor_email
+    row = (
+        db.query(models.Judge)
+        .filter(func.lower(models.Judge.email) == actor_email)
+        .filter(models.Judge.is_active.is_(True))
+        .first()
+    )
+    if row and (row.role or "").lower() == "organizer":
+        return actor_email
+    raise HTTPException(status_code=403, detail="Organizer role required.")
 
 
 # ===== Swag extras: non-team people who still need a t-shirt =====

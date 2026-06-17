@@ -236,6 +236,29 @@ class SwagPickup(Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class JudgeVisit(Base):
+    """Floor-walk visit log — one row per (judge, team) pair representing
+    that the judge has stopped by the team's desk during the floor walk.
+
+    Marked by an organizer at the team's desk via the Floor walk tab.
+    Idempotent on (judge_id, team_id) -- a judge revisiting is a no-op,
+    matching the 'how many UNIQUE judges visited this team' semantic.
+    Multi-round: if Round 2 introduces fresh visits we can add a `round`
+    column later; for the v1 we assume a single floor-walk event.
+    """
+    __tablename__ = "judge_visits"
+    __table_args__ = (
+        UniqueConstraint("judge_id", "team_id", name="uq_judge_team_visit"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    judge_id: Mapped[int] = mapped_column(ForeignKey("judges.id", ondelete="CASCADE"), index=True)
+    team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
+    visited_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    marked_by_email: Mapped[str | None] = mapped_column(String(255))  # organizer who tapped the toggle
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class SwagExtra(Base):
     """People who need a swag kit but aren't team members or mentors.
 

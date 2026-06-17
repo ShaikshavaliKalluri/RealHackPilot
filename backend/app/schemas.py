@@ -227,6 +227,39 @@ class SwagExtraImportResult(BaseModel):
     by_category: dict[str, int]           # 'Judge': 23, 'Support': 11, ...
 
 
+class JudgeVisitMarkRequest(BaseModel):
+    team_id: int
+    judge_id: int
+    notes: str | None = None
+
+
+class JudgeVisitOut(BaseModel):
+    """One judge -> team visit record, with the judge's name denormalized
+    so the frontend doesn't need a second join lookup."""
+    id: int
+    team_id: int
+    judge_id: int
+    judge_name: str | None = None
+    visited_at: str  # ISO timestamp
+    marked_by_email: str | None = None
+
+
+class JudgeVisitsByTeam(BaseModel):
+    """Map of team_id -> list of judges who visited that team. Drives the
+    main Floor walk view: per-team rows show a visit count + an expandable
+    toggle list of all judges."""
+    by_team: dict[int, list[JudgeVisitOut]]
+
+
+class JudgeVisitsStats(BaseModel):
+    total_teams: int
+    teams_with_any_visit: int
+    teams_with_zero_visits: int
+    total_visits: int
+    per_team_counts: dict[int, int]   # team_id -> visitor count
+    per_judge_counts: dict[int, int]  # judge_id -> teams-visited count
+
+
 class SwagMarkRequest(BaseModel):
     email: str
     notes: str | None = None
