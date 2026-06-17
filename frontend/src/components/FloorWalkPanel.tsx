@@ -6,30 +6,63 @@ import {
   fetchVisitsStats,
   markVisit,
   unmarkVisit,
+  updateVisitNotes,
   type JudgeVisit,
   type JudgeVisitsStats,
 } from '../api';
 
 /**
  * Floor walk tracker. Organizers stand at each team's desk during the
- * Round 1 walk and tap to mark which judges have stopped by. Designed
- * for mobile-first use -- big touch targets, minimal nav, optimistic
- * updates so a slow Graph call doesn't block the next tap.
+ * Round 1 walk and tap to mark which judges have stopped by, optionally
+ * with a comment captured from the judge. Designed for mobile-first use.
  *
- * Per-team workflow:
- *   1. Search / scroll to the team you're standing at.
- *   2. Card shows N judges visited + a chip per judge already marked.
- *   3. Tap 'Add visit' -> picker overlay with searchable judge list.
- *   4. Tap a judge name -> they're added; the picker stays open so a
- *      flurry of arrivals can all be marked in seconds.
- *   5. Tap an existing judge chip's × to undo a mistaken mark.
+ * Audit-log semantic: each call to /api/visits inserts a new row. The same
+ * judge visiting a team on Day 1 AND Day 2 produces TWO rows, so the
+ * timeline of when each visit happened is preserved. The on-screen chip
+ * groups visits per (judge, team) for compact display -- expand the team
+ * row to see the per-visit timeline.
  *
- * All endpoints are organizer-only at the API; this panel is also
- * hidden from the nav for non-organizers.
+ * Workflow at the desk:
+ *   1. Search / scroll to the team.
+ *   2. Tap "+ Add visit" -> picker overlay opens.
+ *   3. Tap a judge name -> the row expands inline with a "Comments (optional)"
+ *      textarea + "Mark visit" button. Hitting Mark inserts the row.
+ *   4. Repeat for the next judge -- modal stays open for a flurry.
+ *   5. On the team card, each unique judge appears as a chip with a visit
+ *      count badge if visited more than once. Click the chip to expand the
+ *      audit log: list of visits with timestamp, comment, and per-visit ✏ /
+ *      × controls.
+ *
+ * All endpoints are organizer-only at the API.
  */
 
 interface Props {
   teams: Team[];
+}
+
+interface GroupedVisits {
+  judge_id: number;
+  judge_name: string | null;
+  visits: JudgeVisit[]; // sorted by visited_at ascending
+}
+
+function groupByJudge(visits: JudgeVisit[]): GroupedVisits[] {
+  const m = new Map<number, GroupedVisits>();
+  for (const v of visits) {
+    let g = m.get(v.judge_id);
+    if (!g) {
+      g = { judge_id: v.judge_id, judge_name: v.judge_name, visits: [] };
+      m.set(v.judge_id, g);
+    }
+    g.visits.push(v);
+  }
+  for (const g of m.values()) {
+    g.visits.sort((a, b) => (a.visited_at < b.visited_at ? -1 : 1));
+    if (!g.judge_name) g.judge_name = g.visits[0]?.judge_name ?? null;
+  }
+  return Array.from(m.values()).sort((a, b) =>
+    (a.judge_name ?? '').localeCompare(b.judge_name ?? ''),
+  );
 }
 
 export function FloorWalkPanel({ teams }: Props) {
@@ -39,12 +72,20 @@ export function FloorWalkPanel({ teams }: Props) {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  // Per-team busy set so multiple tap interactions can be in-flight at
-  // once without flickering a single global spinner. Keyed by 'teamid:judgeid'.
+  // Per-action busy keys -- keyed on visit_id for unmark/edit, or
+  // 'pick:<teamid>:<judgeid>' for in-flight picker marks.
   const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
-  // Picker overlay state: when set, opens the 'add visit' modal for that team.
+  // Picker modal state.
   const [pickerForTeam, setPickerForTeam] = useState<number | null>(null);
   const [pickerSearch, setPickerSearch] = useState('');
+  const [pickerSelectedJudge, setPickerSelectedJudge] = useState<number | null>(null);
+  const [pickerComment, setPickerComment] = useState('');
+  // Which team's audit log is currently expanded inline (one at a time
+  // to keep mobile scroll manageable).
+  const [expandedTeam, setExpandedTeam] = useState<number | null>(null);
+  // Which visit row is currently being edited (notes).
+  const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
+  const [notesDraft, setNotesDraft] = useState('');
 
   const reload = async () => {
     setLoading(true);
@@ -73,20 +114,27 @@ export function FloorWalkPanel({ teams }: Props) {
     return m;
   }, [judges]);
 
-  // Sort: teams that have NO visits yet first (organizer's attention),
-  // then by visit count descending, then alphabetical.
+  // Distinct-judge count per team -- this is the "how many judges visited"
+  // number the organizer cares about (Day 1 + Day 2 by the same judge = 1).
+  const distinctJudgeCount = (teamId: number): number => {
+    const visits = visitsByTeam[teamId] ?? [];
+    return new Set(visits.map((v) => v.judge_id)).size;
+  };
+
+  // Sort: 0-distinct-judge teams first (need attention), then descending by
+  // distinct-judge count, then alphabetical by team name.
   const sortedTeams = useMemo(() => {
     return teams.slice().sort((a, b) => {
-      const va = visitsByTeam[a.id]?.length ?? 0;
-      const vb = visitsByTeam[b.id]?.length ?? 0;
-      if (va !== vb) {
-        // 0-visit teams first, then descending by visits
-        if (va === 0 && vb > 0) return -1;
-        if (vb === 0 && va > 0) return 1;
-        return vb - va;
+      const da = distinctJudgeCount(a.id);
+      const db = distinctJudgeCount(b.id);
+      if (da !== db) {
+        if (da === 0 && db > 0) return -1;
+        if (db === 0 && da > 0) return 1;
+        return db - da;
       }
       return a.name.localeCompare(b.name);
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [teams, visitsByTeam]);
 
   const filteredTeams = useMemo(() => {
@@ -98,12 +146,11 @@ export function FloorWalkPanel({ teams }: Props) {
     );
   }, [sortedTeams, search]);
 
-  const handleMark = async (teamId: number, judgeId: number) => {
-    const key = `${teamId}:${judgeId}`;
+  const handleMark = async (teamId: number, judgeId: number, comment: string | null) => {
+    const key = `pick:${teamId}:${judgeId}`;
     setBusyKeys((s) => new Set(s).add(key));
     setErr(null);
-    // Optimistic update -- add the visit locally so the chip appears
-    // instantly, then reconcile with the server response.
+    // Optimistic: insert a temp visit row so the chip count updates instantly.
     const tempVisit: JudgeVisit = {
       id: -Date.now(),
       team_id: teamId,
@@ -111,25 +158,24 @@ export function FloorWalkPanel({ teams }: Props) {
       judge_name: judgesById.get(judgeId)?.name ?? null,
       visited_at: new Date().toISOString(),
       marked_by_email: null,
+      notes: comment,
     };
     setVisitsByTeam((prev) => ({
       ...prev,
-      [teamId]: [...(prev[teamId] ?? []).filter((v) => v.judge_id !== judgeId), tempVisit],
+      [teamId]: [...(prev[teamId] ?? []), tempVisit],
     }));
     try {
-      const saved = await markVisit(teamId, judgeId);
-      // Replace the optimistic row with the server-confirmed one.
+      const saved = await markVisit(teamId, judgeId, comment);
       setVisitsByTeam((prev) => ({
         ...prev,
-        [teamId]: (prev[teamId] ?? []).map((v) => (v.judge_id === judgeId ? saved : v)),
+        [teamId]: (prev[teamId] ?? []).map((v) => (v.id === tempVisit.id ? saved : v)),
       }));
-      // Refresh stats lazily -- don't block the next tap on this.
       fetchVisitsStats().then(setStats).catch(() => {});
     } catch (e: any) {
-      // Roll back the optimistic update on failure.
+      // Roll back the optimistic row.
       setVisitsByTeam((prev) => ({
         ...prev,
-        [teamId]: (prev[teamId] ?? []).filter((v) => v.judge_id !== judgeId),
+        [teamId]: (prev[teamId] ?? []).filter((v) => v.id !== tempVisit.id),
       }));
       setErr(e.message || String(e));
     } finally {
@@ -141,21 +187,50 @@ export function FloorWalkPanel({ teams }: Props) {
     }
   };
 
-  const handleUnmark = async (teamId: number, judgeId: number) => {
-    const key = `${teamId}:${judgeId}`;
+  const handleUnmarkVisit = async (visit: JudgeVisit) => {
+    const key = `del:${visit.id}`;
     setBusyKeys((s) => new Set(s).add(key));
     setErr(null);
-    const prevList = visitsByTeam[teamId] ?? [];
+    const prevList = visitsByTeam[visit.team_id] ?? [];
     setVisitsByTeam((prev) => ({
       ...prev,
-      [teamId]: (prev[teamId] ?? []).filter((v) => v.judge_id !== judgeId),
+      [visit.team_id]: (prev[visit.team_id] ?? []).filter((v) => v.id !== visit.id),
     }));
     try {
-      await unmarkVisit(teamId, judgeId);
+      await unmarkVisit(visit.id);
       fetchVisitsStats().then(setStats).catch(() => {});
     } catch (e: any) {
-      setVisitsByTeam((prev) => ({ ...prev, [teamId]: prevList }));
+      setVisitsByTeam((prev) => ({ ...prev, [visit.team_id]: prevList }));
       setErr(e.message || String(e));
+    } finally {
+      setBusyKeys((s) => {
+        const next = new Set(s);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
+  const handleSaveNotes = async (visit: JudgeVisit) => {
+    const key = `edit:${visit.id}`;
+    setBusyKeys((s) => new Set(s).add(key));
+    setErr(null);
+    const draft = notesDraft;
+    // Optimistic update -- swap the local notes in immediately.
+    setVisitsByTeam((prev) => ({
+      ...prev,
+      [visit.team_id]: (prev[visit.team_id] ?? []).map((v) =>
+        v.id === visit.id ? { ...v, notes: draft.trim() || null } : v,
+      ),
+    }));
+    setEditingVisitId(null);
+    setNotesDraft('');
+    try {
+      await updateVisitNotes(visit.id, draft);
+    } catch (e: any) {
+      // Reload the team's visits from server on failure.
+      setErr(e.message || String(e));
+      fetchVisitsByTeam().then((r) => setVisitsByTeam(r.by_team)).catch(() => {});
     } finally {
       setBusyKeys((s) => {
         const next = new Set(s);
@@ -170,9 +245,6 @@ export function FloorWalkPanel({ teams }: Props) {
   }
 
   const pickerTeam = pickerForTeam != null ? teams.find((t) => t.id === pickerForTeam) ?? null : null;
-  const pickerVisitedIds = pickerForTeam != null
-    ? new Set((visitsByTeam[pickerForTeam] ?? []).map((v) => v.judge_id))
-    : new Set<number>();
   const pickerFilteredJudges = (() => {
     const q = pickerSearch.trim().toLowerCase();
     if (!q) return judges;
@@ -181,6 +253,15 @@ export function FloorWalkPanel({ teams }: Props) {
       (j.email ?? '').toLowerCase().includes(q),
     );
   })();
+  const pickerVisitCountByJudge = pickerForTeam != null
+    ? (() => {
+        const m = new Map<number, number>();
+        for (const v of (visitsByTeam[pickerForTeam] ?? [])) {
+          m.set(v.judge_id, (m.get(v.judge_id) ?? 0) + 1);
+        }
+        return m;
+      })()
+    : new Map<number, number>();
 
   return (
     <div className="space-y-4">
@@ -198,7 +279,7 @@ export function FloorWalkPanel({ teams }: Props) {
             value={stats.teams_with_zero_visits}
             tone={stats.teams_with_zero_visits > 0 ? 'text-amber-300' : 'text-slate-300'}
           />
-          <Tile label="Total visits logged" value={stats.total_visits} tone="text-sky-300" />
+          <Tile label="Total visit events" value={stats.total_visits} tone="text-sky-300" />
         </div>
       )}
 
@@ -217,16 +298,19 @@ export function FloorWalkPanel({ teams }: Props) {
         </div>
       )}
 
-      {/* Team list -- 0-visit first, then descending by count */}
+      {/* Team list */}
       <div className="space-y-2">
         {filteredTeams.map((t) => {
           const visits = visitsByTeam[t.id] ?? [];
-          const count = visits.length;
+          const grouped = groupByJudge(visits);
+          const distinctCount = grouped.length;
+          const totalEvents = visits.length;
+          const isExpanded = expandedTeam === t.id;
           return (
             <div
               key={t.id}
               className={`rounded-xl border p-3 sm:p-4 ${
-                count === 0
+                distinctCount === 0
                   ? 'bg-amber-500/5 border-amber-500/30'
                   : 'bg-ink-800/60 border-slate-700/40'
               }`}
@@ -236,11 +320,14 @@ export function FloorWalkPanel({ teams }: Props) {
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-bold text-slate-100 text-base">{t.name}</h4>
                     <span className={`text-[11px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${
-                      count === 0
+                      distinctCount === 0
                         ? 'border-amber-500/40 bg-amber-500/15 text-amber-200'
                         : 'border-lime-500/40 bg-lime-500/15 text-lime-200'
                     }`}>
-                      {count} visit{count === 1 ? '' : 's'}
+                      {distinctCount} judge{distinctCount === 1 ? '' : 's'}
+                      {totalEvents > distinctCount && (
+                        <span className="text-lime-300/80 ml-1">· {totalEvents} events</span>
+                      )}
                     </span>
                   </div>
                   {t.mentor_name && (
@@ -251,36 +338,132 @@ export function FloorWalkPanel({ teams }: Props) {
                   onClick={() => {
                     setPickerForTeam(t.id);
                     setPickerSearch('');
+                    setPickerSelectedJudge(null);
+                    setPickerComment('');
                   }}
                   className="bg-lime-400 hover:bg-lime-300 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
                 >
                   + Add visit
                 </button>
               </div>
-              {/* Existing visits as chips. × removes. */}
-              {visits.length > 0 && (
+              {/* Judge chips. Click to expand audit-log section below. */}
+              {grouped.length > 0 && (
                 <div className="flex gap-1.5 flex-wrap">
-                  {visits.map((v) => {
-                    const key = `${v.team_id}:${v.judge_id}`;
-                    const busy = busyKeys.has(key);
+                  {grouped.map((g) => {
+                    const hasNotes = g.visits.some((v) => (v.notes ?? '').trim().length > 0);
                     return (
-                      <span
-                        key={v.id}
-                        className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-lime-500/40 bg-lime-500/10 text-lime-200"
-                        title={`Marked ${v.visited_at ? new Date(v.visited_at).toLocaleString() : ''}${v.marked_by_email ? ` by ${v.marked_by_email}` : ''}`}
+                      <button
+                        key={g.judge_id}
+                        onClick={() => setExpandedTeam(isExpanded ? null : t.id)}
+                        className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition ${
+                          isExpanded
+                            ? 'border-lime-500/60 bg-lime-500/20 text-lime-100'
+                            : 'border-lime-500/40 bg-lime-500/10 text-lime-200 hover:border-lime-500/60'
+                        }`}
+                        title="Click to view / edit visit timeline + notes"
                       >
-                        <span className="font-semibold">{v.judge_name ?? `Judge #${v.judge_id}`}</span>
-                        <button
-                          onClick={() => handleUnmark(v.team_id, v.judge_id)}
-                          disabled={busy}
-                          className="text-slate-400 hover:text-rose-300 disabled:opacity-40 -mr-0.5"
-                          title="Remove this visit"
-                        >
-                          ×
-                        </button>
-                      </span>
+                        <span className="font-semibold">{g.judge_name ?? `Judge #${g.judge_id}`}</span>
+                        {g.visits.length > 1 && (
+                          <span className="text-lime-300/90 font-bold">×{g.visits.length}</span>
+                        )}
+                        {hasNotes && <span title="Has notes">💬</span>}
+                      </button>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Audit-log expansion: per-judge timeline with notes + edit + remove */}
+              {isExpanded && grouped.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-700/40 space-y-3">
+                  {grouped.map((g) => (
+                    <div key={g.judge_id} className="space-y-1.5">
+                      <div className="text-xs font-bold text-slate-200">
+                        {g.judge_name ?? `Judge #${g.judge_id}`}
+                        <span className="text-slate-500 font-normal ml-2">
+                          {g.visits.length} visit{g.visits.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      {g.visits.map((v) => {
+                        const editing = editingVisitId === v.id;
+                        const busyDel = busyKeys.has(`del:${v.id}`);
+                        const busyEdit = busyKeys.has(`edit:${v.id}`);
+                        return (
+                          <div key={v.id} className="bg-ink-900/40 rounded-lg p-2.5 text-xs">
+                            <div className="flex items-center justify-between gap-2 mb-1">
+                              <div className="text-slate-400">
+                                {v.visited_at ? new Date(v.visited_at).toLocaleString() : ''}
+                                {v.marked_by_email && (
+                                  <span className="text-slate-600"> · by {v.marked_by_email}</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {!editing && (
+                                  <button
+                                    onClick={() => {
+                                      setEditingVisitId(v.id);
+                                      setNotesDraft(v.notes ?? '');
+                                    }}
+                                    className="text-[11px] px-2 py-0.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                                  >
+                                    {v.notes ? 'Edit' : '+ Add note'}
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => handleUnmarkVisit(v)}
+                                  disabled={busyDel}
+                                  className="text-[11px] px-2 py-0.5 rounded border border-rose-500/30 hover:border-rose-500/60 text-rose-300 disabled:opacity-40 transition"
+                                  title="Remove this visit from the audit log"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            </div>
+                            {editing ? (
+                              <div className="space-y-1.5">
+                                <textarea
+                                  value={notesDraft}
+                                  onChange={(e) => setNotesDraft(e.target.value)}
+                                  placeholder="Judge's comment, observation, feedback…"
+                                  rows={2}
+                                  autoFocus
+                                  className="w-full bg-ink-900 border border-slate-700/40 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-lime-500/60"
+                                />
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => handleSaveNotes(v)}
+                                    disabled={busyEdit}
+                                    className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-3 py-1 rounded text-[11px] transition"
+                                  >
+                                    {busyEdit ? 'Saving…' : 'Save note'}
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setEditingVisitId(null);
+                                      setNotesDraft('');
+                                    }}
+                                    className="text-[11px] text-slate-400 hover:text-white px-2 py-1"
+                                  >
+                                    Cancel
+                                  </button>
+                                </div>
+                              </div>
+                            ) : v.notes ? (
+                              <div className="text-slate-300 italic">{v.notes}</div>
+                            ) : (
+                              <div className="text-slate-600 italic">No note.</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setExpandedTeam(null)}
+                    className="text-xs text-slate-500 hover:text-slate-300"
+                  >
+                    Collapse
+                  </button>
                 </div>
               )}
             </div>
@@ -291,7 +474,7 @@ export function FloorWalkPanel({ teams }: Props) {
         )}
       </div>
 
-      {/* Add-visit picker modal */}
+      {/* ===== Add-visit picker modal ===== */}
       {pickerForTeam != null && pickerTeam && (
         <div
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4"
@@ -299,12 +482,13 @@ export function FloorWalkPanel({ teams }: Props) {
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md bg-ink-800 border border-lime-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col max-h-[80vh]"
+            className="w-full max-w-md bg-ink-800 border border-lime-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden flex flex-col max-h-[90vh]"
           >
             <div className="bg-gradient-to-br from-lime-500/20 to-emerald-500/10 p-4 border-b border-lime-500/40">
               <h3 className="font-bold text-lime-200">Add visit — {pickerTeam.name}</h3>
               <p className="text-xs text-slate-300 mt-0.5">
-                Tap a judge name to mark them as visited. Already-marked judges show ✓.
+                Tap a judge, optionally add a comment, then tap "Mark visit". Each tap inserts a new
+                row in the audit log -- a judge visiting on Day 2 is a separate entry from Day 1.
               </p>
             </div>
             <div className="p-3 border-b border-slate-700/40">
@@ -322,30 +506,78 @@ export function FloorWalkPanel({ teams }: Props) {
                 <p className="text-sm text-slate-400 italic">No judges match.</p>
               ) : (
                 pickerFilteredJudges.map((j) => {
-                  const already = pickerVisitedIds.has(j.id);
-                  const key = `${pickerForTeam}:${j.id}`;
-                  const busy = busyKeys.has(key);
+                  const selected = pickerSelectedJudge === j.id;
+                  const visitCount = pickerVisitCountByJudge.get(j.id) ?? 0;
                   return (
-                    <button
-                      key={j.id}
-                      onClick={() => {
-                        if (already || busy) return;
-                        handleMark(pickerForTeam, j.id);
-                      }}
-                      disabled={already || busy}
-                      className={`w-full text-left px-3 py-2.5 rounded transition flex items-center justify-between gap-2 ${
-                        already
-                          ? 'bg-lime-500/15 border border-lime-500/40 text-lime-200 cursor-not-allowed'
-                          : 'bg-ink-900/40 border border-slate-700/40 text-slate-200 hover:border-lime-500/60 hover:bg-lime-500/5'
-                      }`}
-                    >
-                      <span>
-                        <span className="font-semibold">{j.name}</span>
-                        {j.email && <span className="text-slate-500 ml-2 text-xs">{j.email}</span>}
-                      </span>
-                      {already && <span className="text-lime-400 font-bold">✓ Visited</span>}
-                      {busy && <span className="text-slate-400 text-xs">Saving…</span>}
-                    </button>
+                    <div key={j.id}>
+                      <button
+                        onClick={() => {
+                          if (selected) {
+                            setPickerSelectedJudge(null);
+                            setPickerComment('');
+                          } else {
+                            setPickerSelectedJudge(j.id);
+                            // Don't clobber a typed comment when swapping judges --
+                            // organizer may have started typing before tapping.
+                          }
+                        }}
+                        className={`w-full text-left px-3 py-2.5 rounded transition flex items-center justify-between gap-2 ${
+                          selected
+                            ? 'bg-lime-500/15 border-2 border-lime-500/70 text-lime-100'
+                            : 'bg-ink-900/40 border-2 border-transparent text-slate-200 hover:bg-lime-500/5'
+                        }`}
+                      >
+                        <span>
+                          <span className="font-semibold">{j.name}</span>
+                          {j.email && <span className="text-slate-500 ml-2 text-xs">{j.email}</span>}
+                        </span>
+                        {visitCount > 0 && (
+                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-lime-500/40 bg-lime-500/10 text-lime-300 font-semibold">
+                            {visitCount} prior visit{visitCount === 1 ? '' : 's'}
+                          </span>
+                        )}
+                      </button>
+                      {/* Expand inline below the selected judge: comment + Mark */}
+                      {selected && (
+                        <div className="mt-2 mb-2 p-3 bg-ink-900/60 border border-lime-500/40 rounded-lg space-y-2">
+                          <label className="block text-[11px] uppercase tracking-wider font-semibold text-slate-400">
+                            Comments (optional)
+                          </label>
+                          <textarea
+                            value={pickerComment}
+                            onChange={(e) => setPickerComment(e.target.value)}
+                            placeholder={`What did ${j.name.split(' ')[0]} say? Observations, feedback, follow-ups…`}
+                            rows={3}
+                            className="w-full bg-ink-900 border border-slate-700/40 rounded px-3 py-2 text-sm focus:outline-none focus:border-lime-500/60"
+                          />
+                          <div className="flex items-center gap-2 pt-1">
+                            <button
+                              onClick={() => {
+                                const c = pickerComment.trim();
+                                const judgeId = j.id;
+                                handleMark(pickerForTeam, judgeId, c || null);
+                                // Reset selection + comment so next judge can be marked quickly.
+                                setPickerSelectedJudge(null);
+                                setPickerComment('');
+                              }}
+                              disabled={busyKeys.has(`pick:${pickerForTeam}:${j.id}`)}
+                              className="bg-lime-400 hover:bg-lime-300 disabled:opacity-40 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
+                            >
+                              Mark visit
+                            </button>
+                            <button
+                              onClick={() => {
+                                setPickerSelectedJudge(null);
+                                setPickerComment('');
+                              }}
+                              className="text-sm text-slate-400 hover:text-white px-3 py-2"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   );
                 })
               )}

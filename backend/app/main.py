@@ -48,6 +48,7 @@ from .schemas import (
     TeamSeatRequest,
     SwagExtraOut, SwagExtraImportResult,
     JudgeVisitMarkRequest, JudgeVisitOut, JudgeVisitsByTeam, JudgeVisitsStats,
+    VisitNotesUpdate,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet, PanelSwapTeamDays,
     AdoptChannelByLinkRequest,
@@ -1171,6 +1172,7 @@ def list_visits_by_team(db: Session = Depends(get_db)) -> JudgeVisitsByTeam:
                 judge_name=judge_name,
                 visited_at=visit.visited_at.isoformat() if visit.visited_at else "",
                 marked_by_email=visit.marked_by_email,
+                notes=visit.notes,
             )
         )
     return JudgeVisitsByTeam(by_team=by_team)
@@ -1182,18 +1184,24 @@ def visits_stats(db: Session = Depends(get_db)) -> JudgeVisitsStats:
     per judge (how many teams they've stopped by). Powers the top-of-panel
     coverage tiles + the 'judge ranking' sub-list."""
     total_teams = db.query(models.Team).count()
-    per_team_counts: dict[int, int] = {}
-    per_judge_counts: dict[int, int] = {}
+    # per_team_counts counts DISTINCT judges per team -- "X unique judges
+    # visited" rather than "X total visit events". per_judge_counts counts
+    # DISTINCT teams per judge, same reasoning. Total_visits is the raw row
+    # count of the audit log.
     rows = db.query(models.JudgeVisit.team_id, models.JudgeVisit.judge_id).all()
+    team_to_judges: dict[int, set[int]] = {}
+    judge_to_teams: dict[int, set[int]] = {}
     for team_id, judge_id in rows:
-        per_team_counts[team_id] = per_team_counts.get(team_id, 0) + 1
-        per_judge_counts[judge_id] = per_judge_counts.get(judge_id, 0) + 1
+        team_to_judges.setdefault(team_id, set()).add(judge_id)
+        judge_to_teams.setdefault(judge_id, set()).add(team_id)
+    per_team_counts = {tid: len(s) for tid, s in team_to_judges.items()}
+    per_judge_counts = {jid: len(s) for jid, s in judge_to_teams.items()}
     teams_with_any = len(per_team_counts)
     return JudgeVisitsStats(
         total_teams=total_teams,
         teams_with_any_visit=teams_with_any,
         teams_with_zero_visits=total_teams - teams_with_any,
-        total_visits=sum(per_team_counts.values()),
+        total_visits=len(rows),
         per_team_counts=per_team_counts,
         per_judge_counts=per_judge_counts,
     )
@@ -1205,9 +1213,12 @@ def mark_visit(
     claims: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> JudgeVisitOut:
-    """Idempotent: marking the same judge->team again returns the existing
-    row without duplicating. Organizer-only -- this is event ops, not
-    something REWS volunteers or judges themselves should touch."""
+    """Always inserts a new visit row -- no upsert. The same judge visiting
+    a team again on Day 2 creates a separate row so the audit log preserves
+    when each visit happened, what the judge said, and which organizer
+    captured it. Use the per-id PATCH / DELETE endpoints below to edit or
+    remove a specific visit. Organizer-only -- judges shouldn't be marking
+    visits about themselves."""
     actor_email = _require_organizer_role(claims, db)
 
     team = db.query(models.Team).get(req.team_id)
@@ -1217,32 +1228,12 @@ def mark_visit(
     if not judge:
         raise HTTPException(status_code=404, detail=f"judge {req.judge_id} not found")
 
-    existing = (
-        db.query(models.JudgeVisit)
-        .filter(models.JudgeVisit.team_id == req.team_id)
-        .filter(models.JudgeVisit.judge_id == req.judge_id)
-        .first()
-    )
-    if existing:
-        # Refresh notes if provided, otherwise no-op
-        if req.notes is not None:
-            existing.notes = req.notes
-            db.commit()
-        return JudgeVisitOut(
-            id=existing.id,
-            team_id=existing.team_id,
-            judge_id=existing.judge_id,
-            judge_name=judge.name,
-            visited_at=existing.visited_at.isoformat() if existing.visited_at else "",
-            marked_by_email=existing.marked_by_email,
-        )
-
     visit = models.JudgeVisit(
         team_id=req.team_id,
         judge_id=req.judge_id,
         visited_at=datetime.utcnow(),
         marked_by_email=actor_email,
-        notes=req.notes,
+        notes=(req.notes or "").strip() or None,
     )
     db.add(visit)
     db.commit()
@@ -1254,26 +1245,56 @@ def mark_visit(
         judge_name=judge.name,
         visited_at=visit.visited_at.isoformat() if visit.visited_at else "",
         marked_by_email=visit.marked_by_email,
+        notes=visit.notes,
     )
 
 
-@app.delete("/api/visits", response_model=dict)
+@app.patch("/api/visits/{visit_id}", response_model=JudgeVisitOut)
+def update_visit_notes(
+    visit_id: int,
+    req: VisitNotesUpdate,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> JudgeVisitOut:
+    """Edit the notes on a specific visit. Empty string clears the field.
+    Other fields (judge, team, timestamp, marked_by) are immutable -- if
+    you need to change those, delete this visit and re-add a new one so
+    the audit log is honest."""
+    _require_organizer_role(claims, db)
+    visit = db.query(models.JudgeVisit).get(visit_id)
+    if not visit:
+        raise HTTPException(status_code=404, detail="visit not found")
+    visit.notes = (req.notes or "").strip() or None
+    db.commit()
+    db.refresh(visit)
+    judge = db.query(models.Judge).get(visit.judge_id)
+    return JudgeVisitOut(
+        id=visit.id,
+        team_id=visit.team_id,
+        judge_id=visit.judge_id,
+        judge_name=judge.name if judge else None,
+        visited_at=visit.visited_at.isoformat() if visit.visited_at else "",
+        marked_by_email=visit.marked_by_email,
+        notes=visit.notes,
+    )
+
+
+@app.delete("/api/visits/{visit_id}", response_model=dict)
 def unmark_visit(
-    req: JudgeVisitMarkRequest,
+    visit_id: int,
     claims: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Remove the (team, judge) visit row. Idempotent -- returns
-    {removed: False} if there was no row to begin with."""
+    """Remove a specific visit row by id. Returns {removed: False} if the
+    visit_id didn't exist (idempotent)."""
     _require_organizer_role(claims, db)
     deleted = (
         db.query(models.JudgeVisit)
-        .filter(models.JudgeVisit.team_id == req.team_id)
-        .filter(models.JudgeVisit.judge_id == req.judge_id)
+        .filter(models.JudgeVisit.id == visit_id)
         .delete(synchronize_session=False)
     )
     db.commit()
-    return {"removed": deleted > 0, "team_id": req.team_id, "judge_id": req.judge_id}
+    return {"removed": deleted > 0, "visit_id": visit_id}
 
 
 @app.get("/api/judges", response_model=list[JudgeOut])

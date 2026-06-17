@@ -233,6 +233,12 @@ class JudgeVisitMarkRequest(BaseModel):
     notes: str | None = None
 
 
+class VisitNotesUpdate(BaseModel):
+    """PATCH /api/visits/{id} body. Empty string clears the field; None
+    leaves the existing value alone (FastAPI default model behaviour)."""
+    notes: str | None = None
+
+
 class JudgeVisitOut(BaseModel):
     """One judge -> team visit record, with the judge's name denormalized
     so the frontend doesn't need a second join lookup."""
@@ -242,6 +248,7 @@ class JudgeVisitOut(BaseModel):
     judge_name: str | None = None
     visited_at: str  # ISO timestamp
     marked_by_email: str | None = None
+    notes: str | None = None
 
 
 class JudgeVisitsByTeam(BaseModel):

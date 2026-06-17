@@ -517,6 +517,7 @@ export interface JudgeVisit {
   judge_name: string | null;
   visited_at: string;
   marked_by_email: string | null;
+  notes: string | null;
 }
 
 export interface JudgeVisitsByTeam {
@@ -544,11 +545,15 @@ export async function fetchVisitsStats(): Promise<JudgeVisitsStats> {
   return r.json();
 }
 
-export async function markVisit(teamId: number, judgeId: number): Promise<JudgeVisit> {
+export async function markVisit(
+  teamId: number,
+  judgeId: number,
+  notes: string | null = null,
+): Promise<JudgeVisit> {
   const r = await authFetch(`${BASE}/visits`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ team_id: teamId, judge_id: judgeId }),
+    body: JSON.stringify({ team_id: teamId, judge_id: judgeId, notes }),
   });
   if (!r.ok) {
     const t = await r.text();
@@ -557,16 +562,25 @@ export async function markVisit(teamId: number, judgeId: number): Promise<JudgeV
   return r.json();
 }
 
-export async function unmarkVisit(teamId: number, judgeId: number): Promise<void> {
-  const r = await authFetch(`${BASE}/visits`, {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ team_id: teamId, judge_id: judgeId }),
-  });
+export async function unmarkVisit(visitId: number): Promise<void> {
+  const r = await authFetch(`${BASE}/visits/${visitId}`, { method: 'DELETE' });
   if (!r.ok) {
     const t = await r.text();
     throw new Error(`Unmark visit failed: ${r.status} — ${t}`);
   }
+}
+
+export async function updateVisitNotes(visitId: number, notes: string | null): Promise<JudgeVisit> {
+  const r = await authFetch(`${BASE}/visits/${visitId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ notes }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Update visit notes failed: ${r.status} — ${t}`);
+  }
+  return r.json();
 }
 
 

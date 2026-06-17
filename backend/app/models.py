@@ -237,19 +237,25 @@ class SwagPickup(Base):
 
 
 class JudgeVisit(Base):
-    """Floor-walk visit log — one row per (judge, team) pair representing
-    that the judge has stopped by the team's desk during the floor walk.
+    """Floor-walk visit audit log — one row per individual visit event.
 
-    Marked by an organizer at the team's desk via the Floor walk tab.
-    Idempotent on (judge_id, team_id) -- a judge revisiting is a no-op,
-    matching the 'how many UNIQUE judges visited this team' semantic.
-    Multi-round: if Round 2 introduces fresh visits we can add a `round`
-    column later; for the v1 we assume a single floor-walk event.
+    Marked by an organizer at the team's desk via the Floor walk tab. Each
+    call to /api/visits inserts a new row, so the same judge revisiting the
+    same team on Day 2 produces a second row -- preserved as an audit trail
+    of when each visit happened, what the judge said (notes), and which
+    organizer logged it.
+
+    Counting:
+      - "how many UNIQUE judges visited team X" = SELECT COUNT(DISTINCT judge_id)
+        WHERE team_id = X. Used by the stats tile + per-team count chips.
+      - "total visit events for team X" = COUNT(*) WHERE team_id = X.
+      - "list of Judge Y's visits to team X with timestamps" = SELECT *
+        WHERE judge_id = Y AND team_id = X ORDER BY visited_at.
+
+    NB: there is intentionally NO uq(judge_id, team_id) constraint -- the
+    audit-log semantic requires multiple rows per pair.
     """
     __tablename__ = "judge_visits"
-    __table_args__ = (
-        UniqueConstraint("judge_id", "team_id", name="uq_judge_team_visit"),
-    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     judge_id: Mapped[int] = mapped_column(ForeignKey("judges.id", ondelete="CASCADE"), index=True)

@@ -130,6 +130,14 @@ def lightweight_migrate(target_engine: Engine | None = None) -> None:
     if "seat_updated_by" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN seat_updated_by VARCHAR(255)")
 
+    # Drop the (judge_id, team_id) unique constraint on judge_visits if it
+    # exists -- earlier model had it for "one visit per pair" semantics, then
+    # the organizer asked for an audit-log shape (multiple visits per pair
+    # across Day 1 / Day 2). Postgres-only: SQLite can't DROP CONSTRAINT
+    # in-place. Dev SQLite users delete + recreate the file if affected.
+    if eng.dialect.name == "postgresql" and "judge_visits" in insp.get_table_names():
+        additions.append("ALTER TABLE judge_visits DROP CONSTRAINT IF EXISTS uq_judge_team_visit")
+
     # Members table — same idempotent shape.
     if "members" in insp.get_table_names():
         member_existing = {c["name"] for c in insp.get_columns("members")}
