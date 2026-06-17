@@ -46,6 +46,7 @@ from .schemas import (
     JudgeOut, JudgeCreate, JudgeUpdate, JudgeScoreSubmit, JudgeScoreOut,
     JudgeBulkRequest, JudgeBulkResult,
     TeamSeatRequest,
+    SwagExtraOut, SwagExtraImportResult,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet, PanelSwapTeamDays,
     AdoptChannelByLinkRequest,
@@ -195,13 +196,26 @@ async def _require_auth_middleware(request, call_next):
 
 @app.on_event("startup")
 def _startup() -> None:
-    Base.metadata.create_all(bind=engine)
+    # Wrap create_all in try/except: if the DB user lacks CREATE on the
+    # public schema (same trap as the ALTER permission issue -- the
+    # realhack_pilot_app user only has DML grants), we don't want the
+    # app to crash at startup. The relevant table simply won't exist
+    # and the endpoints that touch it will 500 individually; everything
+    # else keeps working. Organizer fixes ownership out-of-band via psql.
+    _startup_log = logging.getLogger("startup")
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        _startup_log.error("create_all on prod DB failed (likely missing CREATE on schema): %s", e)
     lightweight_migrate()
     # Mirror the schema onto the sandbox DB if one is configured. Sandbox content
     # itself is populated on demand via POST /api/admin/sandbox/refresh.
     from .db import sandbox_engine
     if sandbox_engine is not None:
-        Base.metadata.create_all(bind=sandbox_engine)
+        try:
+            Base.metadata.create_all(bind=sandbox_engine)
+        except Exception as e:
+            _startup_log.error("create_all on sandbox DB failed: %s", e)
         # Run the same lightweight column migrations against sandbox so it gets
         # any columns added to the model after the sandbox was first created.
         lightweight_migrate(target_engine=sandbox_engine)
@@ -1785,8 +1799,8 @@ def _normalize_country(raw: str | None) -> str | None:
 
 def _swag_roster(db: Session) -> list[dict]:
     """Build the canonical pickup list — one entry per unique email across
-    all members + mentors, with their team(s), role(s), country, and
-    collection state.
+    all members + mentors + non-team extras (judges/organisers/support/etc.),
+    with their team(s), role(s), country, category badge, and collection state.
     """
     by_email: dict[str, dict] = {}
 
@@ -1804,11 +1818,16 @@ def _swag_roster(db: Session) -> list[dict]:
                 "country": _normalize_country(country),
                 "roles": [],
                 "teams": [],
+                "category": "Mentor" if role == "mentor" else "Member",
             }
         entry = by_email[key]
         entry["roles"].append(f"{role}:{team_name}")
         if team_name not in entry["teams"]:
             entry["teams"].append(team_name)
+        # Mentor role outranks member -- if the same email appears as both
+        # (rare but possible), show 'Mentor' on the badge.
+        if role == "mentor":
+            entry["category"] = "Mentor"
         # Keep first non-empty values seen (member + mentor rows may have
         # different completeness; trust whatever appeared first).
         if not entry["tshirt_size"] and tshirt_size:
@@ -1820,6 +1839,39 @@ def _swag_roster(db: Session) -> list[dict]:
         for m in team.members:
             _add(m.email, m.name, m.tshirt_size, m.location, "member", team.name)
         _add(team.mentor_email, team.mentor_name, team.mentor_tshirt_size, team.mentor_location, "mentor", team.name)
+
+    # Merge in the non-team extras (Judges, Organisers, Support, HR, ...).
+    # If an extra's email already appears as a member/mentor, the team
+    # role wins on the badge -- they're getting the t-shirt either way,
+    # and 'Mentor of TeamX' is more useful at pickup than 'Judge'. The
+    # extras entry then just supplements anything that's missing (size,
+    # country) without changing the category.
+    try:
+        extras_rows = db.query(models.SwagExtra).all()
+    except Exception:
+        # Table may not exist yet (fresh DB, ownership not transferred).
+        # Don't crash the roster fetch -- just return the member/mentor list.
+        extras_rows = []
+    for x in extras_rows:
+        key = (x.email or "").strip().lower()
+        if not key:
+            continue
+        if key in by_email:
+            entry = by_email[key]
+            if not entry.get("tshirt_size") and x.tshirt_size:
+                entry["tshirt_size"] = x.tshirt_size
+            if not entry.get("country") and x.country:
+                entry["country"] = _normalize_country(x.country)
+            continue
+        by_email[key] = {
+            "email": key,
+            "name": (x.name or "").strip() or key,
+            "tshirt_size": x.tshirt_size,
+            "country": _normalize_country(x.country),
+            "roles": [f"{(x.category or 'extra').lower()}:"],
+            "teams": [],
+            "category": (x.category or "Extra").strip() or "Extra",
+        }
 
     # Merge in collection state from swag_pickups
     pickups = {p.email.lower(): p for p in db.query(models.SwagPickup).all()}
@@ -1950,6 +2002,221 @@ def unmark_swag_collected(
     if email not in roster:
         raise HTTPException(status_code=404, detail="not found after unmark")
     return SwagPersonOut(**roster[email])
+
+
+# ===== Swag extras: non-team people who still need a t-shirt =====
+
+@app.get("/api/swag/extras", response_model=list[SwagExtraOut])
+def list_swag_extras(db: Session = Depends(get_db)) -> list[SwagExtraOut]:
+    """List of non-team people enrolled in the swag roster (judges,
+    organisers, support, leadership, HR). Used by the organizer admin
+    UI to show what's currently in the table + offer delete buttons."""
+    try:
+        rows = (
+            db.query(models.SwagExtra)
+            .order_by(models.SwagExtra.category.asc(), models.SwagExtra.name.asc())
+            .all()
+        )
+    except Exception:
+        # Table likely doesn't exist yet -- return empty so the UI can
+        # show a friendly 'upload to get started' state.
+        return []
+    return [
+        SwagExtraOut(
+            id=r.id,
+            email=r.email,
+            name=r.name,
+            tshirt_size=r.tshirt_size,
+            country=r.country,
+            category=r.category,
+            created_at=r.created_at.isoformat() if r.created_at else None,
+        )
+        for r in rows
+    ]
+
+
+@app.delete("/api/swag/extras/{extra_id}", response_model=dict)
+def delete_swag_extra(
+    extra_id: int,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Remove a single extras row. Restricted to organizers (same posture
+    as swag/unmark -- only organizers can edit the roster, REWS volunteers
+    can only mark people collected)."""
+    profile = build_profile_payload(claims, {})
+    actor_email = (profile.get("email") or "").strip().lower()
+    is_org = actor_email in SANDBOX_ADMIN_EMAILS
+    if not is_org:
+        row = (
+            db.query(models.Judge)
+            .filter(func.lower(models.Judge.email) == actor_email)
+            .filter(models.Judge.is_active.is_(True))
+            .first()
+        )
+        is_org = bool(row and (row.role or "").lower() == "organizer")
+    if not is_org:
+        raise HTTPException(status_code=403, detail="Only organizers can edit the swag-extras roster.")
+    extra = db.query(models.SwagExtra).get(extra_id)
+    if not extra:
+        raise HTTPException(status_code=404, detail="Swag extra not found")
+    db.delete(extra)
+    db.commit()
+    return {"deleted": True, "id": extra_id}
+
+
+@app.post("/api/swag/extras/import", response_model=SwagExtraImportResult)
+async def import_swag_extras(
+    file: UploadFile = File(...),
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> SwagExtraImportResult:
+    """Bulk-load non-team people who need a swag kit from an xlsx upload.
+
+    Expected columns (case-insensitive header match, in any order):
+      - Name
+      - Email
+      - T-shirt Size  (or 'Size')
+      - Country       (or 'Location')
+      - Category      (or 'Role' / 'Type')
+
+    Idempotent on email: re-uploading the same file updates existing rows
+    rather than duplicating. Emails already on the member/mentor roster
+    are skipped (they get a t-shirt via team membership, no extras row
+    needed) and reported back as skipped_existing_roster_count so the
+    organizer can sanity-check.
+    """
+    profile = build_profile_payload(claims, {})
+    actor_email = (profile.get("email") or "").strip().lower()
+    is_org = actor_email in SANDBOX_ADMIN_EMAILS
+    if not is_org:
+        row = (
+            db.query(models.Judge)
+            .filter(func.lower(models.Judge.email) == actor_email)
+            .filter(models.Judge.is_active.is_(True))
+            .first()
+        )
+        is_org = bool(row and (row.role or "").lower() == "organizer")
+    if not is_org:
+        raise HTTPException(status_code=403, detail="Only organizers can import the swag-extras roster.")
+
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="Expected an .xlsx/.xls file")
+
+    from openpyxl import load_workbook
+
+    suffix = os.path.splitext(file.filename)[1] or ".xlsx"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(await file.read())
+        tmp.flush()
+        path = tmp.name
+
+    try:
+        wb = load_workbook(path, data_only=True)
+        ws = wb.active
+
+        # Locate columns by case-insensitive header. Some headers are aliases
+        # (Size for T-shirt Size, Location for Country, Role for Category)
+        # so the organizer doesn't have to rename their existing spreadsheet.
+        headers: dict[str, int] = {}
+        for col_idx, cell in enumerate(ws[1], start=1):
+            key = str(cell.value or "").strip().lower()
+            if key:
+                headers[key] = col_idx
+        def _col(*names: str) -> int | None:
+            for n in names:
+                if n.lower() in headers:
+                    return headers[n.lower()]
+            return None
+        name_col = _col("name", "full name")
+        email_col = _col("email", "email id", "email ids")
+        size_col = _col("t-shirt size", "tshirt size", "size", "shirt size")
+        country_col = _col("country", "location", "based out of")
+        category_col = _col("category", "role", "type", "group")
+        if not name_col or not email_col or not category_col:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Required headers missing. Need at minimum Name, Email, and Category. Found: {sorted(headers.keys())}",
+            )
+
+        # Build the lookup of emails already on the team-member / mentor list
+        # so we can skip rows that don't need an extras entry.
+        team_emails: set[str] = set()
+        for team in db.query(models.Team).all():
+            if team.mentor_email:
+                team_emails.add(team.mentor_email.strip().lower())
+            for m in team.members:
+                if m.email:
+                    team_emails.add(m.email.strip().lower())
+
+        created = 0
+        updated = 0
+        skipped_existing = 0
+        failed: list[dict] = []
+        by_category: dict[str, int] = {}
+
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            name = str(row[name_col - 1] or "").strip()
+            email = str(row[email_col - 1] or "").strip().lower()
+            if not name and not email:
+                continue
+            if not email or "@" not in email:
+                failed.append({"name": name, "email": email, "error": "missing or malformed email"})
+                continue
+            category = str(row[category_col - 1] or "").strip()
+            if not category:
+                failed.append({"name": name, "email": email, "error": "missing category"})
+                continue
+            tshirt = str(row[size_col - 1] or "").strip().upper() if size_col else None
+            tshirt = tshirt or None
+            country = str(row[country_col - 1] or "").strip() if country_col else None
+            country = country or None
+
+            if email in team_emails:
+                skipped_existing += 1
+                continue
+
+            existing = (
+                db.query(models.SwagExtra)
+                .filter(func.lower(models.SwagExtra.email) == email)
+                .first()
+            )
+            if existing:
+                changed = False
+                if existing.name != name:
+                    existing.name = name; changed = True
+                if existing.tshirt_size != tshirt:
+                    existing.tshirt_size = tshirt; changed = True
+                if existing.country != country:
+                    existing.country = country; changed = True
+                if existing.category != category:
+                    existing.category = category; changed = True
+                if changed:
+                    updated += 1
+            else:
+                db.add(models.SwagExtra(
+                    email=email,
+                    name=name or email,
+                    tshirt_size=tshirt,
+                    country=country,
+                    category=category,
+                ))
+                created += 1
+            by_category[category] = by_category.get(category, 0) + 1
+
+        db.commit()
+        return SwagExtraImportResult(
+            created_count=created,
+            updated_count=updated,
+            skipped_existing_roster_count=skipped_existing,
+            failed=failed,
+            by_category=by_category,
+        )
+    finally:
+        try:
+            os.unlink(path)
+        except Exception:
+            pass
 
 
 @app.get("/api/judges/{judge_id}/assignments", response_model=list[JudgeAssignmentOut])

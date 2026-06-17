@@ -393,12 +393,35 @@ export interface SwagPerson {
   country: string | null;
   roles: string[];
   teams: string[];
+  /** Badge shown next to the person's name. 'Member' / 'Mentor' / 'Judge' /
+   *  'Organiser' / 'Support' / 'Leadership' / 'HR' / etc. -- whatever the
+   *  swag-extras upload set the category to, or computed from the member/
+   *  mentor source for team participants. */
+  category: string;
   collected: boolean;
   collected_at: string | null;
   collected_by_email: string | null;
   picked_up_by_name: string | null;
   picked_up_by_email: string | null;
   notes: string | null;
+}
+
+export interface SwagExtra {
+  id: number;
+  email: string;
+  name: string;
+  tshirt_size: string | null;
+  country: string | null;
+  category: string;
+  created_at: string | null;
+}
+
+export interface SwagExtraImportResult {
+  created_count: number;
+  updated_count: number;
+  skipped_existing_roster_count: number;
+  failed: { name: string; email: string; error: string }[];
+  by_category: Record<string, number>;
 }
 
 export interface SwagStats {
@@ -451,6 +474,38 @@ export async function unmarkSwagCollected(email: string): Promise<SwagPerson> {
     throw new Error(`Unmark failed: ${r.status} — ${t}`);
   }
   return r.json();
+}
+
+// === Swag extras: non-team people who still need a t-shirt ===
+
+export async function fetchSwagExtras(): Promise<SwagExtra[]> {
+  const r = await authFetch(`${BASE}/swag/extras`);
+  if (!r.ok) throw new Error(`Swag extras fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function importSwagExtrasFromXlsx(file: File): Promise<SwagExtraImportResult> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await authFetch(`${BASE}/swag/extras/import`, {
+    method: 'POST',
+    body: fd,
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    let msg = `Import failed (${r.status})`;
+    try { const j = JSON.parse(txt); if (j?.detail) msg = j.detail; } catch { msg += ': ' + txt.slice(0, 200); }
+    throw new Error(msg);
+  }
+  return r.json();
+}
+
+export async function deleteSwagExtra(id: number): Promise<void> {
+  const r = await authFetch(`${BASE}/swag/extras/${id}`, { method: 'DELETE' });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Delete swag extra failed: ${r.status} — ${t}`);
+  }
 }
 
 

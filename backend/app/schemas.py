@@ -194,12 +194,37 @@ class SwagPersonOut(BaseModel):
     country: str | None = None  # 'India', 'US', 'Philippines', etc. — used for filtering pickup vs shipment lists
     roles: list[str] = []  # e.g. ['member:AgenTicket', 'mentor:DeepThinkers']
     teams: list[str] = []  # team names the person is associated with
+    # Category badge shown in the SwagPanel UI: 'Member', 'Mentor', 'Judge',
+    # 'Organiser', 'Support', 'Leadership', 'HR', etc. Computed server-side
+    # from the roster source (member/mentor roster vs. extras table) so the
+    # UI doesn't have to parse role strings.
+    category: str = "Member"
     collected: bool = False
     collected_at: str | None = None  # ISO timestamp when collected
     collected_by_email: str | None = None  # organizer who marked it
     picked_up_by_name: str | None = None   # person who physically picked up (null = self)
     picked_up_by_email: str | None = None
     notes: str | None = None
+
+
+class SwagExtraOut(BaseModel):
+    """One non-team person in the swag-extras roster (judge / organiser /
+    support / leadership / HR). Returned by GET /api/swag/extras."""
+    id: int
+    email: str
+    name: str
+    tshirt_size: str | None = None
+    country: str | None = None
+    category: str
+    created_at: str | None = None
+
+
+class SwagExtraImportResult(BaseModel):
+    created_count: int
+    updated_count: int
+    skipped_existing_roster_count: int  # email already on member/mentor list
+    failed: list[dict]                    # [{name, email, error}]
+    by_category: dict[str, int]           # 'Judge': 23, 'Support': 11, ...
 
 
 class SwagMarkRequest(BaseModel):

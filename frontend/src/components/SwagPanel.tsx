@@ -3,7 +3,12 @@ import {
   fetchSwagPeople,
   markSwagCollected,
   unmarkSwagCollected,
+  fetchSwagExtras,
+  importSwagExtrasFromXlsx,
+  deleteSwagExtra,
   type SwagPerson,
+  type SwagExtra,
+  type SwagExtraImportResult,
 } from '../api';
 
 type StatusFilter = 'all' | 'pending' | 'collected';
@@ -110,6 +115,55 @@ export function SwagPanel({ mode = 'organizer' }: Props = {}) {
   const [byName, setByName] = useState('');
   const [byEmail, setByEmail] = useState('');
 
+  // Manage-extras admin state (organizer-only). Hidden in staff mode.
+  const [showExtrasAdmin, setShowExtrasAdmin] = useState(false);
+  const [extras, setExtras] = useState<SwagExtra[]>([]);
+  const [extrasLoading, setExtrasLoading] = useState(false);
+  const [extrasFile, setExtrasFile] = useState<File | null>(null);
+  const [extrasUploadBusy, setExtrasUploadBusy] = useState(false);
+  const [extrasUploadResult, setExtrasUploadResult] = useState<SwagExtraImportResult | null>(null);
+  const [extrasUploadError, setExtrasUploadError] = useState<string | null>(null);
+
+  const reloadExtras = async () => {
+    setExtrasLoading(true);
+    try {
+      setExtras(await fetchSwagExtras());
+    } catch {
+      setExtras([]);
+    } finally {
+      setExtrasLoading(false);
+    }
+  };
+
+  const handleExtrasUpload = async () => {
+    if (!extrasFile) return;
+    setExtrasUploadBusy(true);
+    setExtrasUploadError(null);
+    setExtrasUploadResult(null);
+    try {
+      const r = await importSwagExtrasFromXlsx(extrasFile);
+      setExtrasUploadResult(r);
+      setExtrasFile(null);
+      // Reload both the extras admin list AND the main pickup roster so the
+      // new people appear in the searchable list immediately.
+      await Promise.all([reloadExtras(), reload()]);
+    } catch (e: any) {
+      setExtrasUploadError(e.message ?? String(e));
+    } finally {
+      setExtrasUploadBusy(false);
+    }
+  };
+
+  const handleDeleteExtra = async (x: SwagExtra) => {
+    if (!confirm(`Remove ${x.name} (${x.email}) from the swag-extras list? They'll no longer appear on the pickup roster (re-upload to add back).`)) return;
+    try {
+      await deleteSwagExtra(x.id);
+      await Promise.all([reloadExtras(), reload()]);
+    } catch (e: any) {
+      setExtrasUploadError(e.message ?? String(e));
+    }
+  };
+
   const reload = async () => {
     setLoading(true);
     setErr(null);
@@ -123,6 +177,13 @@ export function SwagPanel({ mode = 'organizer' }: Props = {}) {
   };
 
   useEffect(() => { reload(); }, []);
+  // Lazy-load the extras list only when the organizer opens the admin panel.
+  useEffect(() => {
+    if (showExtrasAdmin && extras.length === 0 && !extrasLoading) {
+      reloadExtras();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showExtrasAdmin]);
 
   // Toast auto-dismiss
   useEffect(() => {
@@ -219,6 +280,138 @@ export function SwagPanel({ mode = 'organizer' }: Props = {}) {
 
   return (
     <div className="space-y-4">
+      {/* ===== Manage extras (organizer-only) =====
+          Lets organizers add non-team people (judges, organisers, support,
+          leadership, HR) to the swag pickup roster via xlsx upload. Hidden
+          in staff mode -- REWS volunteers shouldn't see this. */}
+      {!isStaffMode && (
+        <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 sm:p-5">
+          <button
+            onClick={() => setShowExtrasAdmin(!showExtrasAdmin)}
+            className="w-full flex items-center justify-between gap-2 text-left"
+          >
+            <div>
+              <h3 className="font-bold text-slate-100 text-sm">
+                📋 Manage swag extras (non-team people)
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Judges, organisers, support, leadership, HR — anyone at the event who isn't on a team but still gets a t-shirt.
+              </p>
+            </div>
+            <svg
+              className={`w-4 h-4 text-slate-400 transition-transform ${showExtrasAdmin ? 'rotate-180' : ''}`}
+              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          {showExtrasAdmin && (
+            <div className="mt-4 space-y-4">
+              {/* Upload xlsx */}
+              <div className="bg-ink-900/50 rounded-lg p-3">
+                <p className="text-xs font-semibold text-slate-300 mb-2">
+                  Bulk upload from Excel
+                </p>
+                <p className="text-[11px] text-slate-500 mb-2">
+                  Required columns (case-insensitive, any order): <code>Name</code>,
+                  <code> Email</code>, <code> Category</code>.
+                  Optional: <code>T-shirt Size</code>, <code> Country</code>.
+                  Emails already on the team-member / mentor list are skipped automatically.
+                  Re-uploading the same file updates existing rows (no duplicates).
+                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    onChange={(e) => {
+                      setExtrasFile(e.target.files?.[0] ?? null);
+                      setExtrasUploadResult(null);
+                      setExtrasUploadError(null);
+                    }}
+                    className="text-xs text-slate-300 file:mr-2 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-slate-700 file:text-slate-100 file:cursor-pointer file:font-semibold hover:file:bg-slate-600"
+                  />
+                  <button
+                    onClick={handleExtrasUpload}
+                    disabled={!extrasFile || extrasUploadBusy}
+                    className="bg-sky-400 hover:bg-sky-300 disabled:opacity-40 text-ink-950 font-bold px-3 py-1.5 rounded text-xs transition"
+                  >
+                    {extrasUploadBusy ? 'Uploading…' : 'Upload'}
+                  </button>
+                </div>
+                {extrasUploadResult && (
+                  <div className="mt-2 text-xs text-slate-300">
+                    ✓ Created <span className="text-lime-300 font-semibold">{extrasUploadResult.created_count}</span>
+                    {' · '}Updated {extrasUploadResult.updated_count}
+                    {' · '}Skipped (already on team roster) <span className="text-amber-300">{extrasUploadResult.skipped_existing_roster_count}</span>
+                    {extrasUploadResult.failed.length > 0 && (
+                      <div className="text-rose-300/90 mt-1">
+                        ⚠ {extrasUploadResult.failed.length} rows failed:{' '}
+                        {extrasUploadResult.failed.slice(0, 3).map((f) => `${f.email}: ${f.error}`).join(' | ')}
+                        {extrasUploadResult.failed.length > 3 && ` (+${extrasUploadResult.failed.length - 3} more)`}
+                      </div>
+                    )}
+                    {Object.keys(extrasUploadResult.by_category).length > 0 && (
+                      <div className="mt-1 flex gap-1.5 flex-wrap">
+                        {Object.entries(extrasUploadResult.by_category).sort().map(([cat, n]) => (
+                          <span key={cat} className="text-[10px] px-2 py-0.5 rounded-full border border-slate-600/40 bg-slate-800/40 text-slate-300">
+                            {cat}: <strong>{n}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {extrasUploadError && (
+                  <div className="mt-2 text-xs text-rose-300">⚠ {extrasUploadError}</div>
+                )}
+              </div>
+
+              {/* Current extras list with delete buttons */}
+              <div className="bg-ink-900/50 rounded-lg p-3">
+                <p className="text-xs font-semibold text-slate-300 mb-2">
+                  Currently in the swag-extras list
+                  <span className="text-slate-500 font-normal ml-1">({extras.length})</span>
+                </p>
+                {extrasLoading ? (
+                  <p className="text-xs text-slate-500">Loading…</p>
+                ) : extras.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic">Nobody added yet. Upload an Excel file above to populate.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-1 max-h-72 overflow-y-auto">
+                    {extras.map((x) => (
+                      <div
+                        key={x.id}
+                        className="flex items-center justify-between gap-2 text-xs px-2 py-1.5 rounded border border-slate-700/40 hover:border-slate-600 bg-ink-900/40"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="text-slate-200 font-semibold truncate">{x.name}</div>
+                          <div className="text-slate-500 text-[11px] truncate">
+                            {x.email}
+                            {x.tshirt_size && <span className="text-violet-300 ml-1.5">{x.tshirt_size}</span>}
+                            {x.country && <span className="text-slate-600 ml-1.5">· {x.country}</span>}
+                          </div>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full border border-slate-600/40 bg-slate-800/60 text-slate-300 font-semibold uppercase tracking-wider">
+                          {x.category}
+                        </span>
+                        <button
+                          onClick={() => handleDeleteExtra(x)}
+                          className="text-[11px] px-2 py-0.5 rounded border border-rose-500/30 hover:border-rose-500/60 text-rose-300 transition"
+                          title="Remove from the swag-extras list"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Sticky header — counter + progress + search + filters */}
       <div className="sticky top-0 z-10 bg-ink-950/95 backdrop-blur -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 pt-2 pb-3 border-b border-slate-800/60">
         <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 sm:p-5">
@@ -354,7 +547,7 @@ export function SwagPanel({ mode = 'organizer' }: Props = {}) {
               : p.teams.length === 1
                 ? p.teams[0]
                 : `${p.teams[0]} +${p.teams.length - 1}`;
-            const roleLabel = p.roles.some((r) => r.startsWith('mentor:')) ? 'Mentor' : 'Member';
+            const roleLabel = p.category || 'Member';
             const isIndia = (p.country || '').toLowerCase() === 'india';
             return (
               <div

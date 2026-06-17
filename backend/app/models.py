@@ -236,6 +236,30 @@ class SwagPickup(Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class SwagExtra(Base):
+    """People who need a swag kit but aren't team members or mentors.
+
+    Covers judges, organisers, support staff, leadership, HR, etc. — anyone
+    attending the event in a role outside the team rosters. Maintained
+    separately from the `judges` table because most of these people don't
+    need application access (no sign-in role) -- they just need to appear
+    on the swag pickup list with the right t-shirt size and category badge.
+
+    Bulk-loaded from an organizer-uploaded Excel; can also be added one at
+    a time via the Swag admin panel. Joined with members + team-mentors at
+    query time by _swag_roster() to build the canonical pickup list.
+    """
+    __tablename__ = "swag_extras"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True)  # lowercased
+    name: Mapped[str] = mapped_column(String(255))
+    tshirt_size: Mapped[str | None] = mapped_column(String(16))
+    country: Mapped[str | None] = mapped_column(String(64))
+    category: Mapped[str] = mapped_column(String(64))  # 'Judge', 'Organiser', 'Support', 'Leadership', 'HR', ...
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class CommLog(Base):
     """Audit trail for every email / Teams message / channel-create action.
 
