@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Team, DashboardStats, LeaderboardData } from '../types';
-import { backfillMentorLocations, fetchLeaderboard } from '../api';
+import { backfillMentorLocations, fetchLeaderboard, fetchSeatCoverage, type SeatCoverage } from '../api';
 
 // The active edition for all export filenames and report headers. Bump this
 // for next year's event (e.g. 'RealHack 2027') — keeps the 2026 reports
@@ -147,6 +147,10 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
   // Cache of judge leaderboards per round so we can stitch judge totals into
   // the round-results CSV exports without refetching on every download.
   const [leaderboards, setLeaderboards] = useState<Record<number, LeaderboardData>>({});
+  // Floor-walk seat coverage report (powers the new analytics section that
+  // shows organizers exactly who has / hasn't shared their seat info, with
+  // per-floor distribution + Excel export).
+  const [seatCoverage, setSeatCoverage] = useState<SeatCoverage | null>(null);
 
   useEffect(() => {
     // Pull R1 + R2 leaderboards in parallel. Missing rounds (no scores yet)
@@ -159,6 +163,7 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
         setLeaderboards(next);
       },
     );
+    fetchSeatCoverage().then(setSeatCoverage).catch(() => setSeatCoverage(null));
   }, []);
   const handleBackfill = async () => {
     setBackfillBusy(true);
@@ -465,6 +470,159 @@ export function Analytics({ teams, stats, onJumpToTeam, onReload }: Props & { on
           <Tile label="AI screened" value={`${derived.aiScreened} (${aiPct}%)`} tone="text-sky-300" />
         </div>
       </Section>
+
+      {/* === Floor-walk seat completion — who's shared their pickup-walk seat info === */}
+      {seatCoverage && (
+        <Section title="Floor-walk seat completion">
+          <ExportButton
+            label="Export to Excel"
+            onClick={() => {
+              // One row per team. Status column for at-a-glance filtering;
+              // floor / desk / landmark for organizers to use during the
+              // walk; updated_by + updated_at for follow-ups on missing rows.
+              const submittedById = new Map(seatCoverage.submitted.map((s) => [s.id, s]));
+              const pendingById = new Map(seatCoverage.pending.map((p) => [p.id, p]));
+              const rows = teams
+                .slice()
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map((t) => {
+                  const sub = submittedById.get(t.id);
+                  const pen = pendingById.get(t.id);
+                  return [
+                    t.name,
+                    sub ? 'Submitted' : 'Pending',
+                    sub?.floor ?? '',
+                    sub?.desk ?? '',
+                    sub?.landmark ?? '',
+                    sub?.updated_by ?? '',
+                    sub?.updated_at ? new Date(sub.updated_at).toLocaleString() : '',
+                    t.mentor_name ?? '',
+                    t.mentor_email ?? '',
+                    pen ? (pen.has_channel ? 'Yes' : 'No (no channel)') : 'Yes',
+                  ];
+                });
+              downloadCsv(
+                `${FILE_PREFIX}_floor-walk-seats.csv`,
+                ['Team', 'Status', 'Floor', 'Desk', 'Landmark', 'Submitted By', 'Submitted At', 'Mentor', 'Mentor Email', 'Has Teams Channel'],
+                rows,
+              );
+            }}
+          />
+
+          {/* Top tiles + per-floor bars */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+            <Tile label="Teams" value={seatCoverage.total} />
+            <Tile
+              label="Submitted"
+              value={`${seatCoverage.submitted_count} (${seatCoverage.total > 0 ? Math.round((seatCoverage.submitted_count / seatCoverage.total) * 100) : 0}%)`}
+              tone="text-lime-300"
+            />
+            <Tile
+              label="Pending"
+              value={`${seatCoverage.pending_count}`}
+              tone="text-amber-300"
+            />
+            <Tile
+              label="Floors used"
+              value={Object.keys(seatCoverage.by_floor).length}
+              tone="text-sky-300"
+            />
+          </div>
+
+          {/* Per-floor distribution */}
+          {Object.keys(seatCoverage.by_floor).length > 0 && (
+            <div className="mb-5">
+              <div className="text-xs uppercase tracking-wider text-slate-400 mb-2">
+                Submitted teams by floor
+              </div>
+              <div className="space-y-2.5">
+                {Object.entries(seatCoverage.by_floor)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([floor, count]) => (
+                    <HBar
+                      key={floor}
+                      label={`${floor} floor`}
+                      count={count}
+                      total={seatCoverage.submitted_count || 1}
+                      color="bg-lime-500/60"
+                    />
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Side-by-side: submitted (detail) vs pending (name only) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs uppercase tracking-wider text-lime-300 mb-2">
+                Submitted ({seatCoverage.submitted_count})
+              </div>
+              {seatCoverage.submitted.length === 0 ? (
+                <p className="text-sm text-slate-400 italic">No team has shared their seat yet.</p>
+              ) : (
+                <div className="bg-ink-900/40 rounded-lg max-h-[420px] overflow-y-auto divide-y divide-slate-800/50">
+                  {seatCoverage.submitted
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => onJumpToTeam(s.id)}
+                        className="w-full text-left px-3 py-2 hover:bg-slate-700/20 transition"
+                        title={s.updated_by ? `Updated by ${s.updated_by}` : 'Updated by unknown'}
+                      >
+                        <div className="text-sm text-slate-100 font-semibold">{s.name}</div>
+                        <div className="text-xs text-slate-400">
+                          {s.floor} floor · Desk <span className="text-slate-300">{s.desk}</span>
+                          {s.landmark && <span className="text-slate-500"> · {s.landmark}</span>}
+                        </div>
+                        {s.updated_by && (
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            by {s.updated_by}
+                            {s.updated_at && <span> · {new Date(s.updated_at).toLocaleString()}</span>}
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wider text-amber-300 mb-2">
+                Pending ({seatCoverage.pending_count})
+              </div>
+              {seatCoverage.pending.length === 0 ? (
+                <p className="text-sm text-lime-300">✓ Every team has shared their seat info.</p>
+              ) : (
+                <div className="bg-ink-900/40 rounded-lg max-h-[420px] overflow-y-auto divide-y divide-slate-800/50">
+                  {seatCoverage.pending
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => onJumpToTeam(p.id)}
+                        className="w-full text-left px-3 py-2 hover:bg-slate-700/20 transition"
+                      >
+                        <div className="text-sm text-slate-100 font-semibold flex items-center gap-2">
+                          {p.name}
+                          {!p.has_channel && (
+                            <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                              no channel
+                            </span>
+                          )}
+                        </div>
+                        {p.mentor_name && (
+                          <div className="text-xs text-slate-500">Mentor: {p.mentor_name}</div>
+                        )}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </Section>
+      )}
 
       {/* === Top row: mentor / member locations + tshirt sizing — with Excel exports === */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
