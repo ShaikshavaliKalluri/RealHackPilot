@@ -1184,17 +1184,18 @@ def visits_stats(db: Session = Depends(get_db)) -> JudgeVisitsStats:
     per judge (how many teams they've stopped by). Powers the top-of-panel
     coverage tiles + the 'judge ranking' sub-list."""
     total_teams = db.query(models.Team).count()
-    # per_team_counts counts DISTINCT judges per team -- "X unique judges
-    # visited" rather than "X total visit events". per_judge_counts counts
-    # DISTINCT teams per judge, same reasoning. Total_visits is the raw row
-    # count of the audit log.
+    # per_team_counts: total VISITS per team (each row is one visit event;
+    # group visits without an individual judge are counted equally with
+    # judge-tagged visits). per_judge_counts: distinct teams per identified
+    # judge (group visits where judge_id is NULL are excluded from the
+    # per-judge map -- they don't belong to any one judge).
     rows = db.query(models.JudgeVisit.team_id, models.JudgeVisit.judge_id).all()
-    team_to_judges: dict[int, set[int]] = {}
+    per_team_counts: dict[int, int] = {}
     judge_to_teams: dict[int, set[int]] = {}
     for team_id, judge_id in rows:
-        team_to_judges.setdefault(team_id, set()).add(judge_id)
-        judge_to_teams.setdefault(judge_id, set()).add(team_id)
-    per_team_counts = {tid: len(s) for tid, s in team_to_judges.items()}
+        per_team_counts[team_id] = per_team_counts.get(team_id, 0) + 1
+        if judge_id is not None:
+            judge_to_teams.setdefault(judge_id, set()).add(team_id)
     per_judge_counts = {jid: len(s) for jid, s in judge_to_teams.items()}
     teams_with_any = len(per_team_counts)
     return JudgeVisitsStats(
@@ -1224,9 +1225,11 @@ def mark_visit(
     team = db.query(models.Team).get(req.team_id)
     if not team:
         raise HTTPException(status_code=404, detail=f"team {req.team_id} not found")
-    judge = db.query(models.Judge).get(req.judge_id)
-    if not judge:
-        raise HTTPException(status_code=404, detail=f"judge {req.judge_id} not found")
+    judge = None
+    if req.judge_id is not None:
+        judge = db.query(models.Judge).get(req.judge_id)
+        if not judge:
+            raise HTTPException(status_code=404, detail=f"judge {req.judge_id} not found")
 
     visit = models.JudgeVisit(
         team_id=req.team_id,
@@ -1242,7 +1245,7 @@ def mark_visit(
         id=visit.id,
         team_id=visit.team_id,
         judge_id=visit.judge_id,
-        judge_name=judge.name,
+        judge_name=judge.name if judge else None,
         visited_at=visit.visited_at.isoformat() if visit.visited_at else "",
         marked_by_email=visit.marked_by_email,
         notes=visit.notes,

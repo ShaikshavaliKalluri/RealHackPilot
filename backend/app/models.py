@@ -258,7 +258,12 @@ class JudgeVisit(Base):
     __tablename__ = "judge_visits"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    judge_id: Mapped[int] = mapped_column(ForeignKey("judges.id", ondelete="CASCADE"), index=True)
+    # judge_id is nullable: organizers walk with groups of judges as a unit,
+    # so 'a group visited this team at 10:32' is a meaningful row even when
+    # we don't track which specific judges were in the group. Legacy rows
+    # where a single judge was tagged still work; new rows from the
+    # streamlined Add-visit flow are inserted with judge_id=NULL.
+    judge_id: Mapped[int | None] = mapped_column(ForeignKey("judges.id", ondelete="CASCADE"), index=True, nullable=True)
     team_id: Mapped[int] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"), index=True)
     visited_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     marked_by_email: Mapped[str | None] = mapped_column(String(255))  # organizer who tapped the toggle

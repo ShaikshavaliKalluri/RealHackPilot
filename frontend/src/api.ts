@@ -513,7 +513,10 @@ export async function deleteSwagExtra(id: number): Promise<void> {
 export interface JudgeVisit {
   id: number;
   team_id: number;
-  judge_id: number;
+  /** Null when this is a group-walk visit (no individual judge attribution).
+   *  Legacy rows with a specific judge keep judge_id populated; new group-
+   *  walk rows have it null + judge_name null. */
+  judge_id: number | null;
   judge_name: string | null;
   visited_at: string;
   marked_by_email: string | null;
@@ -547,7 +550,7 @@ export async function fetchVisitsStats(): Promise<JudgeVisitsStats> {
 
 export async function markVisit(
   teamId: number,
-  judgeId: number,
+  judgeId: number | null,
   notes: string | null = null,
 ): Promise<JudgeVisit> {
   const r = await authFetch(`${BASE}/visits`, {

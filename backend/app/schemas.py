@@ -229,7 +229,7 @@ class SwagExtraImportResult(BaseModel):
 
 class JudgeVisitMarkRequest(BaseModel):
     team_id: int
-    judge_id: int
+    judge_id: int | None = None  # null = group visit (no individual judge attribution)
     notes: str | None = None
 
 

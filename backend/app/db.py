@@ -137,6 +137,10 @@ def lightweight_migrate(target_engine: Engine | None = None) -> None:
     # in-place. Dev SQLite users delete + recreate the file if affected.
     if eng.dialect.name == "postgresql" and "judge_visits" in insp.get_table_names():
         additions.append("ALTER TABLE judge_visits DROP CONSTRAINT IF EXISTS uq_judge_team_visit")
+        # Make judge_id nullable: organizers now walk with groups of judges
+        # as a unit, so individual judge attribution per visit is optional.
+        # Each visit is still owned by the organizer who logged it.
+        additions.append("ALTER TABLE judge_visits ALTER COLUMN judge_id DROP NOT NULL")
 
     # Members table — same idempotent shape.
     if "members" in insp.get_table_names():
