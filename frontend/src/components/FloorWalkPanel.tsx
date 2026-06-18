@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { QRCodeCanvas } from 'qrcode.react';
 import type { Team } from '../types';
 import {
   fetchVisitsByTeam,
@@ -64,6 +65,14 @@ export function FloorWalkPanel({ teams }: Props) {
   // Per-visit notes editing.
   const [editingVisitId, setEditingVisitId] = useState<number | null>(null);
   const [notesDraft, setNotesDraft] = useState('');
+
+  // When set, opens a modal showing a large QR for that team -- judges
+  // standing in front of the organizer's phone scan from the bigger QR.
+  const [zoomQrForTeam, setZoomQrForTeam] = useState<number | null>(null);
+
+  // Public origin for the QR URL. Falls back to current host so this works
+  // in test/preview environments without env-var configuration.
+  const publicOrigin = typeof window !== 'undefined' ? window.location.origin : '';
 
   const reload = async () => {
     setLoading(true);
@@ -376,12 +385,29 @@ export function FloorWalkPanel({ teams }: Props) {
                     <div className="text-xs text-slate-500 mt-0.5">Mentor: {t.mentor_name}</div>
                   )}
                 </div>
-                <button
-                  onClick={() => openAddVisit(t.id)}
-                  className="bg-lime-400 hover:bg-lime-300 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
-                >
-                  + Add visit
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Inline QR -- judges scan to land on /team/<id>.
+                      Tap to enlarge for easier scanning. */}
+                  <button
+                    onClick={() => setZoomQrForTeam(t.id)}
+                    className="bg-white p-1.5 rounded-md hover:ring-2 hover:ring-lime-400 transition"
+                    title="Tap to enlarge — judges can scan to open the team page"
+                  >
+                    <QRCodeCanvas
+                      value={`${publicOrigin}/team/${t.id}`}
+                      size={72}
+                      bgColor="#ffffff"
+                      fgColor="#0a4f99"
+                      level="M"
+                    />
+                  </button>
+                  <button
+                    onClick={() => openAddVisit(t.id)}
+                    className="bg-lime-400 hover:bg-lime-300 text-ink-950 font-bold px-4 py-2 rounded-lg text-sm transition"
+                  >
+                    + Add visit
+                  </button>
+                </div>
               </div>
 
               {/* Audit log -- newest first, with edit / remove + comments */}
@@ -477,6 +503,49 @@ export function FloorWalkPanel({ teams }: Props) {
           <p className="text-slate-400 text-sm italic">No teams match the current filters.</p>
         )}
       </div>
+
+      {/* QR zoom modal — big QR for judges to scan from the organizer's screen */}
+      {zoomQrForTeam != null && (() => {
+        const t = teams.find((x) => x.id === zoomQrForTeam);
+        if (!t) return null;
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+            onClick={() => setZoomQrForTeam(null)}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-2xl p-6 shadow-2xl max-w-sm w-full text-center"
+            >
+              <div className="text-2xl font-extrabold text-[#0a4f99] mb-1">{t.name}</div>
+              {t.seat_floor && (
+                <div className="text-sm text-slate-600 mb-4">
+                  {t.seat_floor} floor{t.seat_desk && <> · Desk {t.seat_desk}</>}
+                </div>
+              )}
+              <div className="flex justify-center mb-4">
+                <QRCodeCanvas
+                  value={`${publicOrigin}/team/${t.id}`}
+                  size={280}
+                  bgColor="#ffffff"
+                  fgColor="#0a4f99"
+                  level="M"
+                  includeMargin
+                />
+              </div>
+              <div className="text-xs text-slate-500 break-all mb-4">
+                {publicOrigin}/team/{t.id}
+              </div>
+              <button
+                onClick={() => setZoomQrForTeam(null)}
+                className="bg-[#0a4f99] hover:bg-[#0a4f99]/90 text-white font-bold px-5 py-2 rounded-lg text-sm transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Add-visit modal -- simple comment + Mark */}
       {modalForTeam != null && modalTeam && (
