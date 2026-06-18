@@ -241,10 +241,11 @@ class VisitNotesUpdate(BaseModel):
 
 class JudgeVisitOut(BaseModel):
     """One judge -> team visit record, with the judge's name denormalized
-    so the frontend doesn't need a second join lookup."""
+    so the frontend doesn't need a second join lookup. judge_id is nullable
+    for group-walk visits where no individual judge attribution is captured."""
     id: int
     team_id: int
-    judge_id: int
+    judge_id: int | None = None
     judge_name: str | None = None
     visited_at: str  # ISO timestamp
     marked_by_email: str | None = None
