@@ -46,6 +46,13 @@ export function JudgesPanel({ teams }: Props) {
   const [dedupeBusy, setDedupeBusy] = useState(false);
   const [dedupeMsg, setDedupeMsg] = useState<string | null>(null);
 
+  // Section collapse state. Bulk-add and the directory both start collapsed
+  // so the tab loads quickly and isn't dominated by a 53-card grid.
+  const [bulkExpanded, setBulkExpanded] = useState(false);
+  const [directoryExpanded, setDirectoryExpanded] = useState(false);
+  const [directorySearch, setDirectorySearch] = useState('');
+  const [directoryRoleFilter, setDirectoryRoleFilter] = useState<'all' | 'judge' | 'organizer' | 'rews'>('all');
+
   const handleDedupe = async () => {
     if (!confirm(
       'Merge judge rows that share the same email (ignoring case)?\n\n' +
@@ -379,12 +386,27 @@ export function JudgesPanel({ teams }: Props) {
         </p>
       </div>
 
-      {/* ===== Bulk add (paste a list) ===== */}
+      {/* ===== Bulk add (paste a list) — collapsed by default ===== */}
       <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-5">
-        <h3 className="font-bold text-slate-100 mb-1">Bulk add (paste a list)</h3>
-        <p className="text-xs text-slate-400 mb-3">
-          Paste any list with one person per line. The parser picks up the email and the surrounding text as the name. Headers like "US - Judges" are ignored. Already-present emails are upserted (no duplicates).
-        </p>
+        <button
+          onClick={() => setBulkExpanded(!bulkExpanded)}
+          className="w-full flex items-center justify-between gap-2 text-left"
+        >
+          <div>
+            <h3 className="font-bold text-slate-100">📋 Bulk add (paste a list)</h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Paste names + emails, one per line. Headers like "US - Judges" are ignored. Already-present emails are upserted.
+            </p>
+          </div>
+          <svg
+            className={`w-4 h-4 text-slate-400 transition-transform shrink-0 ${bulkExpanded ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {bulkExpanded && (
+          <div className="mt-4 space-y-3">
         <textarea
           rows={6}
           placeholder={'Travis.Koenig@RealPage.com\nAmit Sareen amit.sareen@RealPage.com\nShashi Polasa <Shashi.Polasa@RealPage.com>;'}
@@ -439,6 +461,8 @@ export function JudgesPanel({ teams }: Props) {
           </button>
         </div>
         {dedupeMsg && <div className="text-sm text-lime-300 mt-2">{dedupeMsg}</div>}
+          </div>
+        )}
       </div>
 
       {err && (
@@ -447,19 +471,102 @@ export function JudgesPanel({ teams }: Props) {
         </div>
       )}
 
-      {/* ===== Judges directory ===== */}
+      {/* ===== People directory — collapsed by default with search + role filter ===== */}
       <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-5">
-        <h3 className="font-bold text-slate-100 mb-3">
-          Judges &amp; organizers
-          <span className="ml-2 text-slate-500 font-normal text-sm">({judges.length})</span>
-        </h3>
-        {judgesLoading ? (
-          <div className="text-slate-400 text-sm">Loading…</div>
-        ) : judges.length === 0 ? (
-          <p className="text-sm text-slate-400 italic">Nobody added yet.</p>
-        ) : (
+        <button
+          onClick={() => setDirectoryExpanded(!directoryExpanded)}
+          className="w-full flex items-center justify-between gap-2 text-left mb-1"
+        >
+          <div>
+            <h3 className="font-bold text-slate-100">
+              👥 People directory
+              <span className="ml-2 text-slate-500 font-normal text-sm">({judges.length})</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {judges.filter((j) => j.role === 'organizer').length} organizer{judges.filter((j) => j.role === 'organizer').length === 1 ? '' : 's'}
+              {' · '}
+              {judges.filter((j) => (j.role || 'judge') === 'judge').length} judge{judges.filter((j) => (j.role || 'judge') === 'judge').length === 1 ? '' : 's'}
+              {' · '}
+              {judges.filter((j) => j.role === 'rews').length} REWS
+            </p>
+          </div>
+          <svg
+            className={`w-4 h-4 text-slate-400 transition-transform shrink-0 ${directoryExpanded ? 'rotate-180' : ''}`}
+            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+        {directoryExpanded && (() => {
+          // Inline filter -- combine the search query (matches name or email,
+          // case-insensitive) with the role-pill filter. Computed inside the
+          // render branch so we don't pay the cost when collapsed.
+          const q = directorySearch.trim().toLowerCase();
+          const filtered = judges.filter((j) => {
+            if (directoryRoleFilter !== 'all') {
+              const role = (j.role || 'judge').toLowerCase();
+              if (role !== directoryRoleFilter) return false;
+            }
+            if (!q) return true;
+            return (
+              j.name.toLowerCase().includes(q) ||
+              (j.email || '').toLowerCase().includes(q)
+            );
+          });
+          return (
+            <div className="mt-3">
+              {/* Search + role pills */}
+              <div className="flex items-center gap-2 flex-wrap mb-3">
+                <input
+                  type="text"
+                  placeholder="Search by name or email…"
+                  value={directorySearch}
+                  onChange={(e) => setDirectorySearch(e.target.value)}
+                  className="flex-1 min-w-[200px] bg-ink-900 border border-slate-700/40 rounded px-3 py-2 text-sm focus:outline-none focus:border-sky-500/60"
+                />
+                {directorySearch && (
+                  <button
+                    onClick={() => setDirectorySearch('')}
+                    className="text-xs text-slate-400 hover:text-white px-2"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                {(['all', 'organizer', 'judge', 'rews'] as const).map((r) => {
+                  const active = directoryRoleFilter === r;
+                  const count = r === 'all' ? judges.length : judges.filter((j) => (j.role || 'judge').toLowerCase() === r).length;
+                  const label = r === 'rews' ? 'REWS' : r.charAt(0).toUpperCase() + r.slice(1);
+                  return (
+                    <button
+                      key={r}
+                      onClick={() => setDirectoryRoleFilter(r)}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition font-semibold ${
+                        active
+                          ? 'bg-rose-500/20 border-rose-500/60 text-rose-200'
+                          : 'bg-ink-900/40 border-slate-700/40 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      {label} ({count})
+                    </button>
+                  );
+                })}
+                <span className="text-xs text-slate-500 ml-2">
+                  Showing {filtered.length} of {judges.length}
+                </span>
+              </div>
+              {judgesLoading ? (
+                <div className="text-slate-400 text-sm">Loading…</div>
+              ) : filtered.length === 0 ? (
+                <p className="text-sm text-slate-400 italic">
+                  {judges.length === 0
+                    ? 'Nobody added yet.'
+                    : 'No one matches the current search / filter.'}
+                </p>
+              ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {judges.map((j) => {
+            {filtered.map((j) => {
               const protectedAcct = isProtected(j.email);
               return (
                 <div key={j.id} className="bg-ink-900/40 border border-slate-700/40 rounded-lg p-3 space-y-2">
@@ -522,7 +629,10 @@ export function JudgesPanel({ teams }: Props) {
               );
             })}
           </div>
-        )}
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* ===== Panels for this round ===== */}
