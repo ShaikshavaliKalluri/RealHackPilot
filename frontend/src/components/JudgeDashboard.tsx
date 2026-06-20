@@ -291,14 +291,12 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [axes.length]);
 
-  // Weighted total -- score (0-10) * weight (% of 100) / 10. Falls back to
-  // the unweighted average if the rubric endpoint didn't return weight_pct
-  // (e.g. an older bundle in browser cache during a roll-out).
-  const hasWeights = axes.some((a) => a.weight_pct != null);
-  const total = hasWeights
-    ? Math.round(axes.reduce((s, a) => s + (scores[a.key] || 0) * (a.weight_pct ?? 0), 0) / 10)
-    : axes.reduce((s, a) => s + (scores[a.key] || 0), 0);
-  const maxTotal = hasWeights ? 100 : axes.length * 10;
+  // Judges see a simple sum (raw scores added up) for their own sanity --
+  // weighting is applied only at the aggregate level on the leaderboard,
+  // not surfaced to individual judges. Backend still stores the weighted
+  // total for use in the leaderboard math.
+  const total = axes.reduce((s, a) => s + (scores[a.key] || 0), 0);
+  const maxTotal = axes.length * 10;
 
   const submit = async () => {
     setBusy(true);
@@ -363,7 +361,7 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
 
       <div className="space-y-3">
         <h4 className="text-xs uppercase tracking-wider text-slate-400">
-          Scorecard · each axis out of 10 · weighted total
+          Scorecard · each axis out of 10
         </h4>
         {axes.map((a) => {
           const v = scores[a.key] || 0;
@@ -371,14 +369,7 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
             <div key={a.key} className="bg-ink-900/50 rounded px-3 py-3">
               <div className="flex items-center justify-between mb-1">
                 <div className="min-w-0 flex-1">
-                  <label className="text-sm font-semibold text-slate-100 flex items-center gap-2 flex-wrap">
-                    {a.label}
-                    {a.weight_pct != null && (
-                      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-sky-500/40 bg-sky-500/10 text-sky-300 font-bold">
-                        {a.weight_pct}%
-                      </span>
-                    )}
-                  </label>
+                  <label className="text-sm font-semibold text-slate-100">{a.label}</label>
                   {a.description && (
                     <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{a.description}</p>
                   )}

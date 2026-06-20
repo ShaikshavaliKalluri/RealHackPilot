@@ -268,15 +268,10 @@ function ManualEntry({ teams, judges, axes, round, onRefreshJudges, onSaved }: M
       .catch(() => {});
   }, [teamId, judgeId, round, axes]);
 
-  // Weighted total when the rubric has weights; falls back to unweighted sum.
-  const hasWeights = useMemo(() => axes.some((a) => a.weight_pct != null), [axes]);
-  const total = useMemo(
-    () => hasWeights
-      ? Math.round(axes.reduce((s, a) => s + (scores[a.key] || 0) * (a.weight_pct ?? 0), 0) / 10)
-      : axes.reduce((s, a) => s + (scores[a.key] || 0), 0),
-    [axes, scores, hasWeights],
-  );
-  const maxTotal = hasWeights ? 100 : axes.length * 10;
+  // Simple sum -- weights are applied only on the leaderboard, not in the
+  // per-judge form (avoids confusing organizers entering scores on behalf).
+  const total = useMemo(() => axes.reduce((s, a) => s + (scores[a.key] || 0), 0), [axes, scores]);
+  const maxTotal = axes.length * 10;
 
   const submit = async () => {
     if (!judgeId || !teamId) { setErr('Pick a judge and a team first.'); return; }
