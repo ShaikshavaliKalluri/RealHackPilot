@@ -236,6 +236,17 @@ export function FloorWalkPanel({ teams }: Props) {
 
   return (
     <div className="space-y-4">
+      {/* Date banner — judging is on June 24-25, distinct from the coding
+          event which ran on June 18-19. Surfaces here so organizers landing
+          on the tab during the gap days see the relevant dates immediately. */}
+      <div className="bg-emerald-500/10 border border-emerald-500/40 rounded-xl px-4 py-2.5 text-sm flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-200 font-bold">
+          Judging
+        </span>
+        <span className="text-emerald-100 font-semibold">June 24-25, 2026</span>
+        <span className="text-slate-400">· Floor walk by judge groups · One organizer per floor</span>
+      </div>
+
       {/* Per-floor coverage tiles -- one tile per floor showing
           'visited / total' so floor leads can see their progress at a glance. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

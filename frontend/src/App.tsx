@@ -264,7 +264,7 @@ export default function App() {
     { key: 'scoring', label: 'Scoring', tone: 'bg-amber-500/15 text-amber-200 border-amber-500/30' },
     { key: 'comms', label: 'Comms', tone: 'bg-violet-500/15 text-violet-200 border-violet-500/30' },
     { key: 'analytics', label: 'Analytics', tone: 'bg-teal-500/15 text-teal-200 border-teal-500/30' },
-    { key: 'judges', label: 'Judges', tone: 'bg-rose-500/15 text-rose-200 border-rose-500/30' },
+    { key: 'judges', label: 'People', tone: 'bg-rose-500/15 text-rose-200 border-rose-500/30', title: 'Manage judges, organizers, and REWS volunteers + assign judges to panels per round' },
     { key: 'floor-walk', label: 'Floor walk', tone: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30', title: 'Track which judges visited which teams during the floor walk' },
     { key: 'swag', label: 'Swag', tone: 'bg-lime-500/15 text-lime-200 border-lime-500/30', title: 'Swag kit pickup tracker — search participants and mark collected' },
     { key: 'qr', label: 'Login QR', tone: 'bg-sky-500/15 text-sky-200 border-sky-500/30', title: 'Printable QR code for judges to scan and log in' },
@@ -383,20 +383,20 @@ export default function App() {
           {mode === 'scoring' && <>Scoring <span className="text-amber-300">&amp; Leaderboard</span></>}
           {mode === 'comms' && <>Teams <span className="text-violet-300">Channels &amp; Broadcast</span></>}
           {mode === 'analytics' && <>Analytics <span className="text-teal-300">&amp; Reporting</span></>}
-          {mode === 'judges' && <>Judges <span className="text-rose-300">&amp; Assignments</span></>}
+          {mode === 'judges' && <>People <span className="text-rose-300">&amp; Roles</span></>}
           {mode === 'qr' && <>Login <span className="text-sky-300">QR</span></>}
           {mode === 'swag' && <>Swag <span className="text-lime-300">Pickup</span></>}
           {mode === 'floor-walk' && <>Floor walk <span className="text-emerald-300">Visit tracker</span></>}
         </h1>
         <p className="text-slate-400 mt-2 text-sm">
           {mode === 'dashboard' && 'Upload the latest MS Forms export. Teams get scored on completeness, screened for duplicates and rule violations, and surfaced in one place.'}
-          {mode === 'scoring' && 'Live leaderboard aggregating judge scores per round, plus manual entry for organizers to log scores on behalf of a judge.'}
+          {mode === 'scoring' && 'Judging on June 24-25, 2026. Live leaderboard aggregating judge scores per round, plus manual entry for organizers to log scores on behalf of a judge.'}
           {mode === 'comms' && 'Create per-team Microsoft Teams channels and broadcast announcements to every team at once.'}
           {mode === 'analytics' && 'Location heat map, completeness distribution, AI score breakdown, top teams, flag analysis, and swag procurement summary.'}
-          {mode === 'judges' && 'Add judges, mark organizers, and assign which teams each judge sees on their mobile dashboard per round.'}
+          {mode === 'judges' && 'Manage everyone on the platform — judges, organizers, and REWS volunteers. Assign judges to panels + teams per round.'}
           {mode === 'qr' && 'Printable QR code for the judging room — judges scan with their phone camera and sign in via Azure AD.'}
           {mode === 'swag' && 'Event-day swag kit pickup tracker. Search by name or email, tap to mark collected. Multiple organizers can use this simultaneously from their phones — no more shared Excel.'}
-          {mode === 'floor-walk' && 'Tap to mark which judges visited each team during the floor walk. Teams with no visits surface at the top so the organizer can chase coverage.'}
+          {mode === 'floor-walk' && 'Judging walk on June 24-25, 2026. Tap to mark when judge groups visit each team and capture any feedback. Teams with no visits surface at the top so the organizer can chase coverage.'}
         </p>
       </header>
 
