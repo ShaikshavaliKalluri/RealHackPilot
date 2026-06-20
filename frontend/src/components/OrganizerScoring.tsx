@@ -122,14 +122,19 @@ interface LeaderboardProps {
   onToggleExpand: (teamId: number) => void;
 }
 
-// Short labels for the leaderboard table column headers -- the full labels
-// (Solution Design / MVP / Presentation...) wouldn't fit. Kept in sync with
-// JUDGE_RUBRIC_AXES on the backend.
+// Short labels for the leaderboard column headers -- iterated in declaration
+// order so the columns line up consistently with the backend rubric order.
+// Use a tuple (not a Record) so old legacy keys can still be looked up in
+// LEGACY_AXIS_LABELS for any back-compat displays without polluting the
+// active-rubric iteration.
+const ACTIVE_AXIS_COLUMNS: [string, string][] = [
+  ['solution_design', 'Design'],
+  ['mvp',             'MVP'],
+  ['presentation',    'Demo'],
+];
 const AXIS_LABELS: Record<string, string> = {
-  solution_design: 'Design',
-  mvp:             'MVP',
-  presentation:    'Demo',
-  // Back-compat with the old 5-axis rubric in case any legacy rows exist:
+  ...Object.fromEntries(ACTIVE_AXIS_COLUMNS),
+  // Legacy keys -- looked up by label only; not iterated.
   problem_clarity: 'Problem',
   solution_viability: 'Viability',
   industry_readiness: 'Readiness',
@@ -169,14 +174,14 @@ function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps)
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold truncate">{row.team_name}</div>
                   <div className="text-xs text-slate-400">
-                    {row.judge_count} judge{row.judge_count === 1 ? '' : 's'} · avg {row.avg_score}/50
+                    {row.judge_count} judge{row.judge_count === 1 ? '' : 's'} · avg {Number(row.avg_score).toFixed(3)}/100
                   </div>
                 </div>
                 <div className="flex gap-2 shrink-0">
-                  {Object.entries(AXIS_LABELS).map(([key, label]) => (
+                  {ACTIVE_AXIS_COLUMNS.map(([key, label]) => (
                     <div key={key} className="text-center" title={label}>
                       <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-                      <div className="text-sm font-bold text-slate-200">{(row.per_axis_avg[key] ?? 0).toFixed(1)}</div>
+                      <div className="text-sm font-bold text-slate-200">{(row.per_axis_avg[key] ?? 0).toFixed(3)}</div>
                     </div>
                   ))}
                 </div>

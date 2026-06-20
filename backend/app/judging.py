@@ -131,8 +131,11 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
             "team_name": t.name,
             "judge_count": len(rs),
             "total_sum": total_sum,
-            "avg_score": round(avg_score, 2),
-            "per_axis_avg": {k: round(v, 2) for k, v in axis_avg.items()},
+            # 3-decimal rounding -- gives organizers finer tie-breaking
+            # without going full float; matters at the top of the leaderboard
+            # where two teams may sit within ~0.5 points of each other.
+            "avg_score": round(avg_score, 3),
+            "per_axis_avg": {k: round(v, 3) for k, v in axis_avg.items()},
             "comments": comments,
         })
 
