@@ -114,6 +114,23 @@ export interface JudgeScoreRecord {
   submitted_at: string;
 }
 
+export interface LeaderboardAxisBreakdown {
+  key: string;
+  raw: number;
+  weight_pct: number;
+  contribution: number;
+}
+
+export interface LeaderboardPerJudge {
+  judge_id: number;
+  judge_name: string;
+  weighted_total: number;
+  axis_breakdown: LeaderboardAxisBreakdown[];
+  comment: string | null;
+  submitted_at: string | null;
+  entered_by_email: string | null;
+}
+
 export interface LeaderboardRow {
   team_id: number;
   team_name: string;
@@ -122,6 +139,7 @@ export interface LeaderboardRow {
   avg_score: number;
   per_axis_avg: Record<string, number>;
   comments: { judge_name: string; comment: string }[];
+  per_judge: LeaderboardPerJudge[];
 }
 
 export interface LeaderboardData {

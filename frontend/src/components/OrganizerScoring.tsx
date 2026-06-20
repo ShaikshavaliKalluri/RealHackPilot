@@ -172,37 +172,106 @@ function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps)
               >
                 <span className="text-xl font-extrabold text-slate-500 tabular-nums w-10 shrink-0">#{idx + 1}</span>
                 <div className="flex-1 min-w-0">
-                  <div className="font-semibold truncate">{row.team_name}</div>
+                  <div className="font-semibold truncate flex items-center gap-2">
+                    {row.team_name}
+                    <span className="text-[10px] text-slate-500">
+                      {expanded ? '▴ click to collapse' : '▾ click for per-judge breakdown'}
+                    </span>
+                  </div>
                   <div className="text-xs text-slate-400">
-                    {row.judge_count} judge{row.judge_count === 1 ? '' : 's'} · avg {Number(row.avg_score).toFixed(3)}/100
+                    {row.judge_count} judge{row.judge_count === 1 ? '' : 's'} scored
                   </div>
                 </div>
                 <div className="flex gap-2 shrink-0">
                   {ACTIVE_AXIS_COLUMNS.map(([key, label]) => (
-                    <div key={key} className="text-center" title={label}>
+                    <div key={key} className="text-center" title={`Average ${label} score across all judges`}>
                       <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
                       <div className="text-sm font-bold text-slate-200">{(row.per_axis_avg[key] ?? 0).toFixed(3)}</div>
                     </div>
                   ))}
                 </div>
                 <div className="text-right shrink-0 ml-2">
-                  <div className="text-xs uppercase tracking-wider text-slate-400">Total</div>
-                  <div className="text-2xl font-extrabold text-lime-300">{row.total_sum}</div>
+                  <div className="text-xs uppercase tracking-wider text-slate-400">Avg score</div>
+                  <div className="text-2xl font-extrabold text-lime-300">
+                    {Number(row.avg_score).toFixed(3)}
+                    <span className="text-base text-slate-500 font-normal">/100</span>
+                  </div>
                 </div>
               </button>
 
               {expanded && (
-                <div className="px-5 py-4 bg-ink-900/40 border-t border-slate-700/40 space-y-2">
-                  {row.comments.length === 0 ? (
-                    <p className="text-sm text-slate-500 italic">No comments from judges this round.</p>
-                  ) : (
-                    row.comments.map((c, i) => (
-                      <div key={i} className="bg-ink-800/50 rounded px-3 py-2 text-sm">
-                        <div className="text-xs uppercase tracking-wider text-slate-400">{c.judge_name}</div>
-                        <p className="text-slate-200 mt-0.5 whitespace-pre-wrap">{c.comment}</p>
+                <div className="px-5 py-4 bg-ink-900/40 border-t border-slate-700/40 space-y-4">
+                  {/* Per-judge breakdown -- one card per judge showing
+                      how their weighted total was computed. */}
+                  <div>
+                    <div className="text-xs uppercase tracking-wider text-slate-400 mb-2 font-semibold">
+                      Per-judge scoring (weighted breakdown)
+                    </div>
+                    {row.per_judge.length === 0 ? (
+                      <p className="text-sm text-slate-500 italic">No judge submissions yet.</p>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {row.per_judge.map((pj) => (
+                          <div key={pj.judge_id} className="bg-ink-800/60 border border-slate-700/40 rounded-lg p-3">
+                            <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                              <div className="font-semibold text-slate-100 text-sm">
+                                {pj.judge_name}
+                              </div>
+                              <div className="text-right">
+                                <span className="text-[10px] uppercase tracking-wider text-slate-500">Weighted total</span>
+                                <span className="ml-2 text-lg font-extrabold text-lime-300">{pj.weighted_total}<span className="text-xs text-slate-500 font-normal">/100</span></span>
+                              </div>
+                            </div>
+                            {/* Math row: raw × weight ÷ 10 = contribution */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                              {pj.axis_breakdown.map((a) => (
+                                <div key={a.key} className="bg-ink-900/50 rounded px-2.5 py-2">
+                                  <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-0.5">
+                                    {AXIS_LABELS[a.key] ?? a.key}
+                                  </div>
+                                  <div className="text-slate-200 font-mono">
+                                    <span className="text-sky-300 font-bold">{a.raw}</span>
+                                    <span className="text-slate-500"> × {a.weight_pct}% = </span>
+                                    <span className="text-lime-300 font-bold">{a.contribution}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {pj.comment && (
+                              <div className="mt-2 pt-2 border-t border-slate-700/40">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-500 mb-0.5">Comment</div>
+                                <p className="text-sm text-slate-300 italic whitespace-pre-wrap">{pj.comment}</p>
+                              </div>
+                            )}
+                            {(pj.submitted_at || pj.entered_by_email) && (
+                              <div className="mt-2 text-[10px] text-slate-500">
+                                {pj.submitted_at && <>Submitted {new Date(pj.submitted_at).toLocaleString()}</>}
+                                {pj.entered_by_email && <span> · entered by {pj.entered_by_email}</span>}
+                              </div>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ))
-                  )}
+                    )}
+                  </div>
+
+                  {/* Team-level aggregate summary */}
+                  <div className="bg-lime-500/5 border border-lime-500/30 rounded-lg p-3">
+                    <div className="text-xs uppercase tracking-wider text-lime-300/90 mb-2 font-semibold">
+                      Team average (this is what the leaderboard ranks on)
+                    </div>
+                    <div className="text-xs text-slate-300 font-mono">
+                      {row.per_judge.map((pj, i) => (
+                        <span key={pj.judge_id}>
+                          {i > 0 && <span className="text-slate-600"> + </span>}
+                          <span className="text-lime-300">{pj.weighted_total}</span>
+                        </span>
+                      ))}
+                      <span className="text-slate-500"> ÷ {row.judge_count} = </span>
+                      <span className="text-lime-300 font-bold text-base">{Number(row.avg_score).toFixed(3)}</span>
+                      <span className="text-slate-500">/100</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -607,7 +676,7 @@ function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: Advancement
                       ✓ Advanced
                     </span>
                   )}
-                  <span className="text-sm font-bold text-lime-300 tabular-nums w-12 text-right shrink-0">{row.total_sum}</span>
+                  <span className="text-sm font-bold text-lime-300 tabular-nums w-16 text-right shrink-0">{Number(row.avg_score).toFixed(3)}</span>
                 </label>
               );
             })}
@@ -725,7 +794,7 @@ function CrownWinnersModal({ rows, teamById, onClose, onSaved }: CrownWinnersMod
                   <option value="">— Not set —</option>
                   {rows.map((r) => (
                     <option key={r.team_id} value={r.team_id}>
-                      {r.team_name} ({r.total_sum})
+                      {r.team_name} ({Number(r.avg_score).toFixed(3)})
                     </option>
                   ))}
                 </select>

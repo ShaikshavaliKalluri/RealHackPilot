@@ -343,6 +343,11 @@ class LeaderboardRow(BaseModel):
     avg_score: float
     per_axis_avg: dict[str, float]
     comments: list[dict]  # [{judge_name, comment}]
+    # Per-judge audit trail -- one entry per JudgeScore row, with the raw
+    # axis scores and weighted contributions. Powers the expand-row view
+    # on the leaderboard so organizers can see exactly how the final
+    # number was computed.
+    per_judge: list[dict] = []
 
 
 class LeaderboardOut(BaseModel):

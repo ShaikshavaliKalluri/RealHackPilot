@@ -107,6 +107,7 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
                 "avg_score": 0.0,
                 "per_axis_avg": {k: 0.0 for k in JUDGE_RUBRIC_KEYS},
                 "comments": [],
+                "per_judge": [],
             })
             continue
 
@@ -118,13 +119,40 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
             axis_avg[key] = (sum(vals) / len(vals)) if vals else 0.0
 
         comments = []
+        # Per-judge breakdown -- one entry per JudgeScore row, with the
+        # raw axis scores and the contribution of each axis to the weighted
+        # total. The frontend renders this as an expandable audit-trail of
+        # 'how the final number was computed' for transparency.
+        per_judge: list[dict] = []
         for r in rs:
+            j = judges_by_id.get(r.judge_id)
+            judge_name = j.name if j else f"Judge #{r.judge_id}"
             if r.comment and r.comment.strip():
-                j = judges_by_id.get(r.judge_id)
-                comments.append({
-                    "judge_name": j.name if j else f"judge#{r.judge_id}",
-                    "comment": r.comment,
+                comments.append({"judge_name": judge_name, "comment": r.comment})
+            scores_dict = r.scores or {}
+            axis_breakdown = []
+            for key in JUDGE_RUBRIC_KEYS:
+                raw = int(scores_dict.get(key) or 0)
+                weight = JUDGE_RUBRIC_WEIGHTS.get(key, 0)
+                # contribution = raw * weight / 10 (matches submit_score
+                # total formula). Storing it explicitly so the UI can show
+                # the row 'raw × weight / 10 = contribution' without
+                # recomputing in JS.
+                axis_breakdown.append({
+                    "key": key,
+                    "raw": raw,
+                    "weight_pct": weight,
+                    "contribution": raw * weight // 10,
                 })
+            per_judge.append({
+                "judge_id": r.judge_id,
+                "judge_name": judge_name,
+                "weighted_total": r.total,
+                "axis_breakdown": axis_breakdown,
+                "comment": r.comment or None,
+                "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+                "entered_by_email": r.entered_by_email,
+            })
 
         out.append({
             "team_id": t.id,
@@ -137,9 +165,13 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
             "avg_score": round(avg_score, 3),
             "per_axis_avg": {k: round(v, 3) for k, v in axis_avg.items()},
             "comments": comments,
+            "per_judge": per_judge,
         })
 
-    out.sort(key=lambda r: (-r["total_sum"], -r["avg_score"], r["team_name"]))
+    # Rank by average weighted score, not by total_sum. Sorting on total_sum
+    # would unfairly advantage teams that happened to get more judges. Tie-
+    # break by total_sum (more judges = more confident signal), then team name.
+    out.sort(key=lambda r: (-r["avg_score"], -r["total_sum"], r["team_name"]))
     return out
 
 
