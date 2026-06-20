@@ -291,8 +291,14 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [axes.length]);
 
-  const total = axes.reduce((s, a) => s + (scores[a.key] || 0), 0);
-  const maxTotal = axes.length * 10;
+  // Weighted total -- score (0-10) * weight (% of 100) / 10. Falls back to
+  // the unweighted average if the rubric endpoint didn't return weight_pct
+  // (e.g. an older bundle in browser cache during a roll-out).
+  const hasWeights = axes.some((a) => a.weight_pct != null);
+  const total = hasWeights
+    ? Math.round(axes.reduce((s, a) => s + (scores[a.key] || 0) * (a.weight_pct ?? 0), 0) / 10)
+    : axes.reduce((s, a) => s + (scores[a.key] || 0), 0);
+  const maxTotal = hasWeights ? 100 : axes.length * 10;
 
   const submit = async () => {
     setBusy(true);
@@ -356,14 +362,28 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
       </details>
 
       <div className="space-y-3">
-        <h4 className="text-xs uppercase tracking-wider text-slate-400">Scorecard · each axis out of 10</h4>
+        <h4 className="text-xs uppercase tracking-wider text-slate-400">
+          Scorecard · each axis out of 10 · weighted total
+        </h4>
         {axes.map((a) => {
           const v = scores[a.key] || 0;
           return (
             <div key={a.key} className="bg-ink-900/50 rounded px-3 py-3">
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-sm font-semibold text-slate-100">{a.label}</label>
-                <div className="text-2xl font-extrabold text-sky-300 w-10 text-right">{v}</div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="min-w-0 flex-1">
+                  <label className="text-sm font-semibold text-slate-100 flex items-center gap-2 flex-wrap">
+                    {a.label}
+                    {a.weight_pct != null && (
+                      <span className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-full border border-sky-500/40 bg-sky-500/10 text-sky-300 font-bold">
+                        {a.weight_pct}%
+                      </span>
+                    )}
+                  </label>
+                  {a.description && (
+                    <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">{a.description}</p>
+                  )}
+                </div>
+                <div className="text-2xl font-extrabold text-sky-300 w-10 text-right shrink-0">{v}</div>
               </div>
               <input
                 type="range"
@@ -372,7 +392,7 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
                 step={1}
                 value={v}
                 onChange={(e) => setScores({ ...scores, [a.key]: parseInt(e.target.value) })}
-                className="w-full accent-sky-400"
+                className="w-full accent-sky-400 mt-2"
               />
               <div className="flex justify-between text-[10px] text-slate-500 mt-0.5 px-0.5">
                 {[0, 2, 4, 6, 8, 10].map((mark) => (

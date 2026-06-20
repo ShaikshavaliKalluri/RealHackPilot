@@ -60,16 +60,46 @@ class JudgeHumanRequest(BaseModel):
     repo_url: str | None = None
 
 
-# ---- New M4: live judge panel scoring ----
-
+# ---- Live judge panel scoring ----
+#
+# Three weighted axes (30 / 30 / 40 = 100 total). Judges score each axis on
+# 0-10; the per-axis score is multiplied by its weight (then divided by 10
+# so the weighted total fits on a 0-100 scale that reads as a percentage).
+#
+# Example: judge gives Solution Design=8, MVP=7, Presentation=9
+#   weighted total = 8*30/10 + 7*30/10 + 9*40/10
+#                  = 24 + 21 + 36 = 81 (out of 100)
 JUDGE_RUBRIC_AXES = (
-    ("problem_clarity",    "Problem clarity"),
-    ("solution_viability", "Solution viability"),
-    ("industry_readiness", "Industry readiness"),
-    ("roi",                "ROI / Business value"),
-    ("novelty",            "Novelty"),
+    ("solution_design", "Solution Design"),
+    ("mvp",             "MVP"),
+    ("presentation",    "Presentation / Demo / Q&A / Business Impact"),
 )
 JUDGE_RUBRIC_KEYS = tuple(k for k, _ in JUDGE_RUBRIC_AXES)
+
+# Weight in percent. Must sum to 100.
+JUDGE_RUBRIC_WEIGHTS: dict[str, int] = {
+    "solution_design": 30,
+    "mvp":             30,
+    "presentation":    40,
+}
+
+# Per-axis description shown to judges to guide scoring -- the organizer-
+# provided rubric definitions verbatim, so judges interpret each axis
+# the same way.
+JUDGE_RUBRIC_DESCRIPTIONS: dict[str, str] = {
+    "solution_design": (
+        "Scalable and adaptable solution that could be useful for future needs "
+        "in line with the expectations of the problem statement."
+    ),
+    "mvp": (
+        "If product-specific problem statement, it should be readily deployable. "
+        "For generic problem, the solution must be adaptable easily for the end consumer."
+    ),
+    "presentation": (
+        "Effective presentation of the solution or working demo of the solution. "
+        "Business value to RealPage and product-specific value."
+    ),
+}
 
 
 class JudgeOut(BaseModel):

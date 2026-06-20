@@ -13,7 +13,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from .models import Judge, JudgeScore, Team
-from .schemas import JUDGE_RUBRIC_KEYS
+from .schemas import JUDGE_RUBRIC_KEYS, JUDGE_RUBRIC_WEIGHTS
 
 
 def normalize_scores(scores: dict) -> dict[str, int]:
@@ -43,7 +43,12 @@ def submit_score(
         raise ValueError(f"round must be 1 or 2 (got {round_num})")
 
     normalized = normalize_scores(scores)
-    total = sum(normalized.values())
+    # Weighted total on a 0-100 scale. Each axis is 0-10; we multiply by its
+    # weight (% of total) and divide by 10. With weights 30/30/40 and max
+    # scores 10/10/10, the total tops out at 100. Stored as int -- truncation
+    # is fine because the per-axis raw scores stay in JudgeScore.scores for
+    # exact reproduction if we ever need to recompute.
+    total = sum(normalized[k] * JUDGE_RUBRIC_WEIGHTS.get(k, 0) for k in JUDGE_RUBRIC_KEYS) // 10
 
     existing = db.execute(
         select(JudgeScore).where(

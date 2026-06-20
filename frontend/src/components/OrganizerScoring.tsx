@@ -122,7 +122,14 @@ interface LeaderboardProps {
   onToggleExpand: (teamId: number) => void;
 }
 
+// Short labels for the leaderboard table column headers -- the full labels
+// (Solution Design / MVP / Presentation...) wouldn't fit. Kept in sync with
+// JUDGE_RUBRIC_AXES on the backend.
 const AXIS_LABELS: Record<string, string> = {
+  solution_design: 'Design',
+  mvp:             'MVP',
+  presentation:    'Demo',
+  // Back-compat with the old 5-axis rubric in case any legacy rows exist:
   problem_clarity: 'Problem',
   solution_viability: 'Viability',
   industry_readiness: 'Readiness',
@@ -261,8 +268,15 @@ function ManualEntry({ teams, judges, axes, round, onRefreshJudges, onSaved }: M
       .catch(() => {});
   }, [teamId, judgeId, round, axes]);
 
-  const total = useMemo(() => axes.reduce((s, a) => s + (scores[a.key] || 0), 0), [axes, scores]);
-  const maxTotal = axes.length * 10;
+  // Weighted total when the rubric has weights; falls back to unweighted sum.
+  const hasWeights = useMemo(() => axes.some((a) => a.weight_pct != null), [axes]);
+  const total = useMemo(
+    () => hasWeights
+      ? Math.round(axes.reduce((s, a) => s + (scores[a.key] || 0) * (a.weight_pct ?? 0), 0) / 10)
+      : axes.reduce((s, a) => s + (scores[a.key] || 0), 0),
+    [axes, scores, hasWeights],
+  );
+  const maxTotal = hasWeights ? 100 : axes.length * 10;
 
   const submit = async () => {
     if (!judgeId || !teamId) { setErr('Pick a judge and a team first.'); return; }

@@ -215,8 +215,12 @@ function Scorecard({ team, round, axes, judgeId, existing, onSubmitted, onBack }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [axes.length]);
 
-  const total = axes.reduce((s, a) => s + (scores[a.key] || 0), 0);
-  const maxTotal = axes.length * 10;
+  // Weighted total when the rubric has weights; falls back to unweighted sum.
+  const hasWeights = axes.some((a) => a.weight_pct != null);
+  const total = hasWeights
+    ? Math.round(axes.reduce((s, a) => s + (scores[a.key] || 0) * (a.weight_pct ?? 0), 0) / 10)
+    : axes.reduce((s, a) => s + (scores[a.key] || 0), 0);
+  const maxTotal = hasWeights ? 100 : axes.length * 10;
 
   const submit = async () => {
     setBusy(true);

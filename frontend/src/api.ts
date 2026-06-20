@@ -242,7 +242,11 @@ export async function judgeHuman(
 
 import type { Judge, RubricAxis, JudgeScoreRecord, LeaderboardData } from './types';
 
-export async function fetchRubric(): Promise<{ axes: RubricAxis[]; max_per_axis: number }> {
+export async function fetchRubric(): Promise<{
+  axes: RubricAxis[];
+  max_per_axis: number;
+  max_total?: number;
+}> {
   const r = await authFetch(`${BASE}/judging/rubric`);
   if (!r.ok) throw new Error(`Rubric fetch failed: ${r.status}`);
   return r.json();

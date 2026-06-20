@@ -1147,7 +1147,20 @@ def judge_human_endpoint(team_id: int, req: JudgeHumanRequest, db: Session = Dep
 
 @app.get("/api/judging/rubric")
 def judging_rubric() -> dict:
-    return {"axes": [{"key": k, "label": v} for k, v in JUDGE_RUBRIC_AXES], "max_per_axis": 10}
+    from .schemas import JUDGE_RUBRIC_WEIGHTS, JUDGE_RUBRIC_DESCRIPTIONS
+    return {
+        "axes": [
+            {
+                "key": k,
+                "label": v,
+                "weight_pct": JUDGE_RUBRIC_WEIGHTS.get(k, 0),
+                "description": JUDGE_RUBRIC_DESCRIPTIONS.get(k, ""),
+            }
+            for k, v in JUDGE_RUBRIC_AXES
+        ],
+        "max_per_axis": 10,
+        "max_total": 100,
+    }
 
 
 # ===== Judge floor-walk visits =====

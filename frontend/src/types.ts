@@ -95,6 +95,11 @@ export interface Judge {
 export interface RubricAxis {
   key: string;
   label: string;
+  /** Weight as a percentage of the total score (e.g. 30 for 30%). Sum of
+   *  all axes' weight_pct = 100. */
+  weight_pct?: number;
+  /** Long-form definition shown to judges to anchor their scoring. */
+  description?: string;
 }
 
 export interface JudgeScoreRecord {
