@@ -620,14 +620,14 @@ export function JudgesPanel({ teams }: Props) {
                         <button
                           onClick={() => handleOpenInviteWorkspace(p, 1)}
                           className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Open the Day 1 (June 18) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
+                          title="Open the Day 1 (June 24) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
                         >
                           📅 Day 1 invite
                         </button>
                         <button
                           onClick={() => handleOpenInviteWorkspace(p, 2)}
                           className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Open the Day 2 (June 19) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
+                          title="Open the Day 2 (June 25) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
                         >
                           📅 Day 2 invite
                         </button>
@@ -1069,7 +1069,9 @@ function InvitePrepModal({ panelId, panelName, day, meta, onRefresh, onClose }: 
     }
   };
 
-  const dayLabel = day === 1 ? 'June 18' : 'June 19';
+  // Use the backend-provided day_label (e.g. '24th June') so date changes
+  // only need to update scheduling.EVENT_DATES, not this component.
+  const dayLabel = meta.day_label || (day === 1 ? 'June 24' : 'June 25');
   const copyLabel = (target: CopyTarget, defaultText: string) =>
     lastCopied === target ? '✓ Copied' : defaultText;
 

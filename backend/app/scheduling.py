@@ -29,10 +29,14 @@ from . import models
 
 # ---- Event constants ----
 
-# RealHack 2026: June 18 (Thu) and June 19 (Fri).
+# RealHack 2026 schedule:
+#   Coding event: June 18-19, 2026 (Thu/Fri)
+#   Judging walk: June 24-25, 2026 (Wed/Thu)
+# Panel invites + Outlook calendar events use the JUDGING dates, not the
+# coding dates -- the panel sessions happen during judging.
 EVENT_DATES = {
-    1: (2026, 6, 18),
-    2: (2026, 6, 19),
+    1: (2026, 6, 24),
+    2: (2026, 6, 25),
 }
 
 # Calendar event window — what shows on the Outlook meeting itself.
