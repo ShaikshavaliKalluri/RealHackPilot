@@ -134,6 +134,8 @@ export interface LeaderboardPerJudge {
 export interface LeaderboardRow {
   team_id: number;
   team_name: string;
+  panel_id: number | null;
+  panel_name: string | null;
   judge_count: number;
   total_sum: number;
   avg_score: number;

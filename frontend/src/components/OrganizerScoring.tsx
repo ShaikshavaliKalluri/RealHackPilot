@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { Team, Judge, RubricAxis, LeaderboardData } from '../types';
+import type { Team, Judge, RubricAxis, LeaderboardData, LeaderboardRow } from '../types';
 import { fetchRubric, fetchJudges, createJudge, submitJudgeScore, fetchLeaderboard, fetchJudgeScores, advanceTeams, resetRoundAdvancements, setWinners } from '../api';
 
 interface Props {
@@ -142,27 +142,31 @@ const AXIS_LABELS: Record<string, string> = {
   novelty: 'Novelty',
 };
 
-function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps) {
-  const rowsWithScores = data.rows.filter((r) => r.judge_count > 0);
-  const rowsZero = data.rows.filter((r) => r.judge_count === 0);
+// Format helpers: backend stores avg_score and per-judge weighted totals on
+// a 0-100 scale (axis 0-10 * weight % / 10). Organizer prefers a 0-10
+// display ("6.967/10" reads cleaner than "69.667/100"), so we divide all
+// weighted numbers by 10 at render time.
+function fmt10(v: number, decimals = 3): string {
+  return (v / 10).toFixed(decimals);
+}
 
+interface LeaderboardSectionProps {
+  panelTitle: string;
+  rows: LeaderboardRow[];
+  expandedTeamId: number | null;
+  onToggleExpand: (id: number) => void;
+}
+
+function LeaderboardSection({ panelTitle, rows, expandedTeamId, onToggleExpand }: LeaderboardSectionProps) {
+  if (rows.length === 0) return null;
   return (
     <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-700/40 flex items-center justify-between">
-        <h3 className="font-bold">Round {data.round} leaderboard</h3>
-        <span className="text-xs text-slate-400">
-          {rowsWithScores.length} scored · {rowsZero.length} pending
-        </span>
+      <div className="px-5 py-3 border-b border-slate-700/40 flex items-center justify-between bg-ink-900/40">
+        <h3 className="font-bold text-slate-100">{panelTitle}</h3>
+        <span className="text-xs text-slate-400">{rows.length} team{rows.length === 1 ? '' : 's'} scored</span>
       </div>
-
-      {rowsWithScores.length === 0 && (
-        <div className="p-10 text-center text-slate-400">
-          No scores submitted for Round {data.round} yet.
-        </div>
-      )}
-
       <div className="divide-y divide-slate-700/40">
-        {rowsWithScores.map((row, idx) => {
+        {rows.map((row, idx) => {
           const expanded = expandedTeamId === row.team_id;
           return (
             <div key={row.team_id}>
@@ -184,25 +188,23 @@ function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps)
                 </div>
                 <div className="flex gap-2 shrink-0">
                   {ACTIVE_AXIS_COLUMNS.map(([key, label]) => (
-                    <div key={key} className="text-center" title={`Average ${label} score across all judges`}>
+                    <div key={key} className="text-center" title={`Average ${label} score across all judges (axis is 0-10)`}>
                       <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
                       <div className="text-sm font-bold text-slate-200">{(row.per_axis_avg[key] ?? 0).toFixed(3)}</div>
                     </div>
                   ))}
                 </div>
                 <div className="text-right shrink-0 ml-2">
-                  <div className="text-xs uppercase tracking-wider text-slate-400">Avg score</div>
+                  <div className="text-[10px] uppercase tracking-wider text-slate-400">Avg score</div>
                   <div className="text-2xl font-extrabold text-lime-300">
-                    {Number(row.avg_score).toFixed(3)}
-                    <span className="text-base text-slate-500 font-normal">/100</span>
+                    {fmt10(row.avg_score)}
+                    <span className="text-base text-slate-500 font-normal">/10</span>
                   </div>
                 </div>
               </button>
 
               {expanded && (
                 <div className="px-5 py-4 bg-ink-900/40 border-t border-slate-700/40 space-y-4">
-                  {/* Per-judge breakdown -- one card per judge showing
-                      how their weighted total was computed. */}
                   <div>
                     <div className="text-xs uppercase tracking-wider text-slate-400 mb-2 font-semibold">
                       Per-judge scoring (weighted breakdown)
@@ -214,15 +216,17 @@ function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps)
                         {row.per_judge.map((pj) => (
                           <div key={pj.judge_id} className="bg-ink-800/60 border border-slate-700/40 rounded-lg p-3">
                             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                              <div className="font-semibold text-slate-100 text-sm">
-                                {pj.judge_name}
-                              </div>
+                              <div className="font-semibold text-slate-100 text-sm">{pj.judge_name}</div>
                               <div className="text-right">
                                 <span className="text-[10px] uppercase tracking-wider text-slate-500">Weighted total</span>
-                                <span className="ml-2 text-lg font-extrabold text-lime-300">{pj.weighted_total}<span className="text-xs text-slate-500 font-normal">/100</span></span>
+                                <span className="ml-2 text-lg font-extrabold text-lime-300">
+                                  {fmt10(pj.weighted_total, 1)}<span className="text-xs text-slate-500 font-normal">/10</span>
+                                </span>
                               </div>
                             </div>
-                            {/* Math row: raw × weight ÷ 10 = contribution */}
+                            {/* Math row: raw * weight% = contribution (all
+                                displayed on the 0-10 scale to match the
+                                top-line total). */}
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                               {pj.axis_breakdown.map((a) => (
                                 <div key={a.key} className="bg-ink-900/50 rounded px-2.5 py-2">
@@ -232,7 +236,7 @@ function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps)
                                   <div className="text-slate-200 font-mono">
                                     <span className="text-sky-300 font-bold">{a.raw}</span>
                                     <span className="text-slate-500"> × {a.weight_pct}% = </span>
-                                    <span className="text-lime-300 font-bold">{a.contribution}</span>
+                                    <span className="text-lime-300 font-bold">{fmt10(a.contribution, 1)}</span>
                                   </div>
                                 </div>
                               ))}
@@ -255,21 +259,20 @@ function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps)
                     )}
                   </div>
 
-                  {/* Team-level aggregate summary */}
                   <div className="bg-lime-500/5 border border-lime-500/30 rounded-lg p-3">
                     <div className="text-xs uppercase tracking-wider text-lime-300/90 mb-2 font-semibold">
-                      Team average (this is what the leaderboard ranks on)
+                      Team average (this is what the panel leaderboard ranks on)
                     </div>
                     <div className="text-xs text-slate-300 font-mono">
                       {row.per_judge.map((pj, i) => (
                         <span key={pj.judge_id}>
                           {i > 0 && <span className="text-slate-600"> + </span>}
-                          <span className="text-lime-300">{pj.weighted_total}</span>
+                          <span className="text-lime-300">{fmt10(pj.weighted_total, 1)}</span>
                         </span>
                       ))}
                       <span className="text-slate-500"> ÷ {row.judge_count} = </span>
-                      <span className="text-lime-300 font-bold text-base">{Number(row.avg_score).toFixed(3)}</span>
-                      <span className="text-slate-500">/100</span>
+                      <span className="text-lime-300 font-bold text-base">{fmt10(row.avg_score)}</span>
+                      <span className="text-slate-500">/10</span>
                     </div>
                   </div>
                 </div>
@@ -278,16 +281,82 @@ function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps)
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps) {
+  const rowsWithScores = data.rows.filter((r) => r.judge_count > 0);
+  const rowsZero = data.rows.filter((r) => r.judge_count === 0);
+
+  // Group scored rows by panel so each panel ranks independently. Panel
+  // calibration drift (one panel's '8' is another's '10') makes a flat
+  // cross-panel ranking unfair -- splitting lets organizers advance the
+  // top teams from each panel separately.
+  const byPanel = new Map<number, { name: string; rows: LeaderboardRow[] }>();
+  const unassigned: LeaderboardRow[] = [];
+  for (const r of rowsWithScores) {
+    if (r.panel_id == null) {
+      unassigned.push(r);
+      continue;
+    }
+    const existing = byPanel.get(r.panel_id);
+    if (existing) {
+      existing.rows.push(r);
+    } else {
+      byPanel.set(r.panel_id, { name: r.panel_name || `Panel ${r.panel_id}`, rows: [r] });
+    }
+  }
+  // Stable order by panel_id ascending.
+  const panelGroups = Array.from(byPanel.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([panelId, group]) => ({ panelId, ...group }));
+
+  return (
+    <div className="space-y-4">
+      <div className="px-1 flex items-center justify-between flex-wrap gap-2">
+        <h3 className="font-bold text-slate-100">Round {data.round} leaderboard</h3>
+        <span className="text-xs text-slate-400">
+          {rowsWithScores.length} scored · {rowsZero.length} pending · split by panel
+        </span>
+      </div>
+
+      {rowsWithScores.length === 0 && (
+        <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-10 text-center text-slate-400">
+          No scores submitted for Round {data.round} yet.
+        </div>
+      )}
+
+      {panelGroups.map((g) => (
+        <LeaderboardSection
+          key={g.panelId}
+          panelTitle={`${g.name} — Round ${data.round}`}
+          rows={g.rows}
+          expandedTeamId={expandedTeamId}
+          onToggleExpand={onToggleExpand}
+        />
+      ))}
+
+      {unassigned.length > 0 && (
+        <LeaderboardSection
+          panelTitle="Not assigned to a panel"
+          rows={unassigned}
+          expandedTeamId={expandedTeamId}
+          onToggleExpand={onToggleExpand}
+        />
+      )}
 
       {rowsZero.length > 0 && (
-        <details className="border-t border-slate-700/40">
-          <summary className="px-5 py-3 cursor-pointer text-sm text-slate-400 hover:text-white">
-            {rowsZero.length} team{rowsZero.length === 1 ? '' : 's'} not yet scored in Round {data.round}
-          </summary>
-          <ul className="px-5 pb-3 text-sm text-slate-400 space-y-1">
-            {rowsZero.map((r) => <li key={r.team_id}>· {r.team_name}</li>)}
-          </ul>
-        </details>
+        <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl overflow-hidden">
+          <details className="border-slate-700/40">
+            <summary className="px-5 py-3 cursor-pointer text-sm text-slate-400 hover:text-white">
+              {rowsZero.length} team{rowsZero.length === 1 ? '' : 's'} not yet scored in Round {data.round}
+            </summary>
+            <ul className="px-5 pb-3 text-sm text-slate-400 space-y-1">
+              {rowsZero.map((r) => <li key={r.team_id}>· {r.team_name}{r.panel_name && <span className="text-slate-600"> ({r.panel_name})</span>}</li>)}
+            </ul>
+          </details>
+        </div>
       )}
     </div>
   );
@@ -649,40 +718,70 @@ function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: Advancement
 
       {err && <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded p-2 text-xs">{err}</div>}
 
-      {rankedRows.length > 0 && (
-        <div className="border-t border-slate-700/40 pt-3">
-          <div className="max-h-72 overflow-y-auto pr-1 space-y-1">
-            {rankedRows.map((row, idx) => {
-              const team = teamById.get(row.team_id);
-              const alreadyAdvanced = team && (team.advanced_to_round ?? 1) >= nextRound;
-              const checked = selected.has(row.team_id);
-              return (
-                <label
-                  key={row.team_id}
-                  className={`flex items-center gap-3 px-3 py-1.5 rounded cursor-pointer transition ${
-                    checked ? 'bg-sky-500/10 border border-sky-500/40' : 'bg-ink-900/40 border border-transparent hover:bg-ink-900/70'
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggle(row.team_id)}
-                    className="w-4 h-4 accent-sky-400"
-                  />
-                  <span className="text-sm font-bold text-slate-500 w-7 tabular-nums shrink-0">#{idx + 1}</span>
-                  <span className="flex-1 text-sm text-slate-100 truncate">{row.team_name}</span>
-                  {alreadyAdvanced && (
-                    <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-lime-500/15 text-lime-300 border border-lime-500/40">
-                      ✓ Advanced
-                    </span>
-                  )}
-                  <span className="text-sm font-bold text-lime-300 tabular-nums w-16 text-right shrink-0">{Number(row.avg_score).toFixed(3)}</span>
-                </label>
-              );
-            })}
+      {rankedRows.length > 0 && (() => {
+        // Group ranked rows by panel so organizers see Panel 1 and Panel 2
+        // rankings independently and pick top teams from each. Mirrors the
+        // panel split on the main leaderboard.
+        const groups = new Map<number, { name: string; rows: LeaderboardRow[] }>();
+        const unassigned: LeaderboardRow[] = [];
+        for (const r of rankedRows) {
+          if (r.panel_id == null) { unassigned.push(r); continue; }
+          const g = groups.get(r.panel_id);
+          if (g) g.rows.push(r);
+          else groups.set(r.panel_id, { name: r.panel_name || `Panel ${r.panel_id}`, rows: [r] });
+        }
+        const groupList: { panelId: number | null; name: string; rows: LeaderboardRow[] }[] =
+          Array.from(groups.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([panelId, g]) => ({ panelId, ...g }));
+        if (unassigned.length > 0) {
+          groupList.push({ panelId: null, name: 'Not assigned to a panel', rows: unassigned });
+        }
+
+        return (
+          <div className="border-t border-slate-700/40 pt-3 space-y-3">
+            {groupList.map((g) => (
+              <div key={g.panelId ?? 'unassigned'}>
+                <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 px-1">
+                  {g.name} <span className="text-slate-600 font-normal">· {g.rows.length} team{g.rows.length === 1 ? '' : 's'}</span>
+                </div>
+                <div className="max-h-72 overflow-y-auto pr-1 space-y-1">
+                  {g.rows.map((row, idx) => {
+                    const team = teamById.get(row.team_id);
+                    const alreadyAdvanced = team && (team.advanced_to_round ?? 1) >= nextRound;
+                    const checked = selected.has(row.team_id);
+                    return (
+                      <label
+                        key={row.team_id}
+                        className={`flex items-center gap-3 px-3 py-1.5 rounded cursor-pointer transition ${
+                          checked ? 'bg-sky-500/10 border border-sky-500/40' : 'bg-ink-900/40 border border-transparent hover:bg-ink-900/70'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggle(row.team_id)}
+                          className="w-4 h-4 accent-sky-400"
+                        />
+                        <span className="text-sm font-bold text-slate-500 w-7 tabular-nums shrink-0">#{idx + 1}</span>
+                        <span className="flex-1 text-sm text-slate-100 truncate">{row.team_name}</span>
+                        {alreadyAdvanced && (
+                          <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-lime-500/15 text-lime-300 border border-lime-500/40">
+                            ✓ Advanced
+                          </span>
+                        )}
+                        <span className="text-sm font-bold text-lime-300 tabular-nums w-16 text-right shrink-0">
+                          {fmt10(row.avg_score)}<span className="text-[10px] text-slate-500">/10</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -794,7 +893,7 @@ function CrownWinnersModal({ rows, teamById, onClose, onSaved }: CrownWinnersMod
                   <option value="">— Not set —</option>
                   {rows.map((r) => (
                     <option key={r.team_id} value={r.team_id}>
-                      {r.team_name} ({Number(r.avg_score).toFixed(3)})
+                      {r.team_name} ({fmt10(r.avg_score)}/10)
                     </option>
                   ))}
                 </select>

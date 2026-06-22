@@ -257,11 +257,25 @@ export default function App() {
     );
   }
 
+  // Scoring tab is restricted to the protected admin accounts (Shaik,
+  // Suneel, Bhaskar) -- they're the only ones who advance teams between
+  // rounds + set final winners. Other organizers see judge submissions
+  // via the Analytics tab but can't change progression.
+  const SCORING_ADMIN_EMAILS = new Set([
+    'shaikshavali.kalluri@realpage.com',
+    'suneel.nallu@realpage.com',
+    'bhaskar.jaddu@realpage.com',
+  ]);
+  const isScoringAdmin = SCORING_ADMIN_EMAILS.has((role.email || '').toLowerCase());
+
   // Tab definitions — single source of truth for both desktop horizontal nav
-  // and the mobile hamburger dropdown. Order = display order.
+  // and the mobile hamburger dropdown. Order = display order. Scoring is
+  // conditionally included based on isScoringAdmin above.
   const TABS: { key: Mode; label: string; tone: string; title?: string }[] = [
     { key: 'dashboard', label: 'Dashboard', tone: 'bg-lime-500/15 text-lime-200 border-lime-500/30' },
-    { key: 'scoring', label: 'Scoring', tone: 'bg-amber-500/15 text-amber-200 border-amber-500/30' },
+    ...(isScoringAdmin
+      ? [{ key: 'scoring' as Mode, label: 'Scoring', tone: 'bg-amber-500/15 text-amber-200 border-amber-500/30' }]
+      : []),
     { key: 'comms', label: 'Comms', tone: 'bg-violet-500/15 text-violet-200 border-violet-500/30' },
     { key: 'analytics', label: 'Analytics', tone: 'bg-teal-500/15 text-teal-200 border-teal-500/30' },
     { key: 'judges', label: 'People', tone: 'bg-rose-500/15 text-rose-200 border-rose-500/30', title: 'Manage judges, organizers, and REWS volunteers + assign judges to panels per round' },
@@ -649,7 +663,16 @@ export default function App() {
       </>
       )}
 
-      {mode === 'scoring' && <OrganizerScoring teams={teams} onReload={reload} />}
+      {mode === 'scoring' && isScoringAdmin && <OrganizerScoring teams={teams} onReload={reload} />}
+      {mode === 'scoring' && !isScoringAdmin && (
+        <div className="bg-rose-500/10 border border-rose-500/40 rounded-xl p-6 text-center">
+          <h3 className="font-bold text-rose-200 mb-1">Not authorized</h3>
+          <p className="text-sm text-rose-100/80">
+            Scoring + leaderboard access is restricted to the core organizing leads.
+            Use the Analytics tab for judge submission data.
+          </p>
+        </div>
+      )}
 
       {mode === 'analytics' && stats && (
         <Analytics teams={teams} stats={stats} onJumpToTeam={(id) => { setMode('dashboard'); setTimeout(() => jumpToTeam(id), 50); }} />

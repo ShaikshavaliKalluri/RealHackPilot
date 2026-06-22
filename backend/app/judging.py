@@ -81,7 +81,13 @@ def submit_score(
 
 
 def leaderboard(db: Session, round_num: int) -> list[dict]:
-    """Aggregate scores by team for a given round."""
+    """Aggregate scores by team for a given round. Each row carries
+    panel_id + panel_name so the frontend can split the leaderboard per
+    panel (Panel 1 / Panel 2) -- panel calibration differs (one panel's
+    'best' might be an 8, another's a 10), so comparing teams across
+    panels is unfair. Split-view lets organizers advance from each panel
+    independently."""
+    from . import models as _m  # local to keep the top of file clean
     teams = db.query(Team).all()
     judges_by_id = {j.id: j for j in db.query(Judge).all()}
 
@@ -95,13 +101,32 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
     for r in rows_q:
         by_team[r.team_id].append(r)
 
+    # Build team_id -> (panel_id, panel_name) lookup limited to this round.
+    # If a team is in multiple panels (shouldn't happen in practice), the
+    # first match wins -- ordered by panel id for determinism.
+    panel_lookup: dict[int, tuple[int, str]] = {}
+    panel_rows = (
+        db.query(_m.PanelTeam, _m.Panel)
+          .join(_m.Panel, _m.Panel.id == _m.PanelTeam.panel_id)
+          .filter(_m.Panel.round == round_num)
+          .order_by(_m.Panel.id.asc())
+          .all()
+    )
+    for pt, panel in panel_rows:
+        if pt.team_id not in panel_lookup:
+            panel_lookup[pt.team_id] = (panel.id, panel.name)
+
     out: list[dict] = []
     for t in teams:
+        panel_info = panel_lookup.get(t.id)
+        panel_id, panel_name = (panel_info if panel_info else (None, None))
         rs = by_team.get(t.id, [])
         if not rs:
             out.append({
                 "team_id": t.id,
                 "team_name": t.name,
+                "panel_id": panel_id,
+                "panel_name": panel_name,
                 "judge_count": 0,
                 "total_sum": 0,
                 "avg_score": 0.0,
@@ -157,6 +182,8 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
         out.append({
             "team_id": t.id,
             "team_name": t.name,
+            "panel_id": panel_id,
+            "panel_name": panel_name,
             "judge_count": len(rs),
             "total_sum": total_sum,
             # 3-decimal rounding -- gives organizers finer tie-breaking

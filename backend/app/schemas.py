@@ -338,6 +338,11 @@ class JudgeScoreOut(BaseModel):
 class LeaderboardRow(BaseModel):
     team_id: int
     team_name: str
+    # Panel membership for this team in this round. Used by the frontend
+    # to split the leaderboard into per-panel boards so calibration drift
+    # between panels doesn't pollute the cross-panel ranking.
+    panel_id: int | None = None
+    panel_name: str | None = None
     judge_count: int
     total_sum: int
     avg_score: float
