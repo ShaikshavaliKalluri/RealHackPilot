@@ -80,9 +80,18 @@ export function OrganizerScoring({ teams, onReload }: Props) {
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs px-3 py-1.5 rounded bg-ink-900 border border-slate-700/40 text-slate-200 hover:border-amber-500/40 hover:text-amber-300 transition"
-            title="Open the printable paper-fallback scorecards for this round (one sheet per panel)"
+            title="Open the printable paper-fallback scorecards for this round (one sheet per panel, panel + team names pre-filled)"
           >
-            🖨️ Print scorecards
+            🖨️ Print (pre-filled)
+          </a>
+          <a
+            href={`/scorecards?blank=true&rows=24`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs px-3 py-1.5 rounded bg-ink-900 border border-slate-700/40 text-slate-200 hover:border-amber-500/40 hover:text-amber-300 transition"
+            title="Open the printable scorecard with blank panel + team fields for manual fill-in"
+          >
+            🖨️ Print (blank)
           </a>
           <button onClick={() => reloadLeaderboard()} disabled={busy} className="text-xs px-3 py-1.5 rounded bg-ink-900 border border-slate-700/40 text-slate-200 hover:border-lime-500/40 transition">
             {busy ? 'Refreshing…' : 'Refresh'}
