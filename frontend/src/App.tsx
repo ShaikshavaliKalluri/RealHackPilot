@@ -268,6 +268,15 @@ export default function App() {
   ]);
   const isScoringAdmin = SCORING_ADMIN_EMAILS.has((role.email || '').toLowerCase());
 
+  // Silent redirect: if a non-admin somehow lands on the scoring mode
+  // (deep-link, stale browser state, etc.), bump them back to the dashboard
+  // without showing any 'not authorized' messaging.
+  useEffect(() => {
+    if (mode === 'scoring' && !isScoringAdmin) {
+      setMode('dashboard');
+    }
+  }, [mode, isScoringAdmin]);
+
   // Tab definitions — single source of truth for both desktop horizontal nav
   // and the mobile hamburger dropdown. Order = display order. Scoring is
   // conditionally included based on isScoringAdmin above.
@@ -664,15 +673,6 @@ export default function App() {
       )}
 
       {mode === 'scoring' && isScoringAdmin && <OrganizerScoring teams={teams} onReload={reload} />}
-      {mode === 'scoring' && !isScoringAdmin && (
-        <div className="bg-rose-500/10 border border-rose-500/40 rounded-xl p-6 text-center">
-          <h3 className="font-bold text-rose-200 mb-1">Not authorized</h3>
-          <p className="text-sm text-rose-100/80">
-            Scoring + leaderboard access is restricted to the core organizing leads.
-            Use the Analytics tab for judge submission data.
-          </p>
-        </div>
-      )}
 
       {mode === 'analytics' && stats && (
         <Analytics teams={teams} stats={stats} onJumpToTeam={(id) => { setMode('dashboard'); setTimeout(() => jumpToTeam(id), 50); }} />
@@ -708,7 +708,10 @@ export default function App() {
         />
       )}
 
-      <ChatPanel teams={teams} onJumpToTeam={jumpToTeam} />
+      {/* ChatPanel disabled -- it routes through Shaik's personal Claude
+          API key which would burn through credits during the event.
+          Re-enable by uncommenting once a shared key is provisioned. */}
+      {/* <ChatPanel teams={teams} onJumpToTeam={jumpToTeam} /> */}
     </div>
   );
 }

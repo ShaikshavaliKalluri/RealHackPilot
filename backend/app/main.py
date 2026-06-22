@@ -908,12 +908,20 @@ def round_summary(db: Session = Depends(get_db)) -> list[RoundSummary]:
 def chat_endpoint(req: ChatRequest, db: Session = Depends(get_db)) -> ChatResponse:
     """Organizer Q&A chatbot over the team dataset.
 
-    Accepts a list of messages (full conversation context) and returns the
-    assistant's next reply plus any team IDs the answer references.
+    Currently disabled -- the underlying LLM call uses Shaik's personal
+    Claude API key which would burn through credits during the event.
+    Re-enable by removing this raise once a shared key is provisioned
+    (or wire a tenant-level OpenAI fallback). The body below is kept
+    intact for that flip-of-a-switch revival.
     """
-    messages = [{"role": m.role, "content": m.content} for m in req.messages]
-    result = chat_service.chat(db, messages)
-    return ChatResponse(**result)
+    raise HTTPException(
+        status_code=503,
+        detail="Ask-the-bot is temporarily disabled. Reach out to the RealHack organizing team for analytics questions.",
+    )
+    # Original implementation (kept for easy re-enable):
+    # messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    # result = chat_service.chat(db, messages)
+    # return ChatResponse(**result)
 
 
 @app.post("/api/ai-screen/{team_id}", response_model=dict)
