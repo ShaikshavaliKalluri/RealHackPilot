@@ -6,6 +6,7 @@ import { msalInstance } from './auth';
 import { PublicTeamPage } from './components/PublicTeamPage';
 import { JudgingCardsPrint } from './components/JudgingCardsPrint';
 import { SLTBookletPrint } from './components/SLTBookletPrint';
+import { PrintableScorecards } from './components/PrintableScorecards';
 import './index.css';
 
 /**
@@ -60,11 +61,19 @@ async function bootstrap() {
   // /judging-cards is auth-required (organizers print + distribute) but
   // it's a fully separate page, not part of the main App. Render inside
   // MsalProvider so the auth wrapper inside JudgingCardsPrint works.
+  // /scorecards same shape -- printable paper-fallback scorecards split
+  // by panel, used if the app is down on judging day.
   const isJudgingCardsPath = pathname === '/judging-cards' || pathname === '/judging-cards/';
+  const isScorecardsPath = pathname === '/scorecards' || pathname === '/scorecards/';
+  const printable = isJudgingCardsPath
+    ? <JudgingCardsPrint />
+    : isScorecardsPath
+      ? <PrintableScorecards />
+      : <App />;
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
       <MsalProvider instance={msalInstance}>
-        {isJudgingCardsPath ? <JudgingCardsPrint /> : <App />}
+        {printable}
       </MsalProvider>
     </StrictMode>,
   );

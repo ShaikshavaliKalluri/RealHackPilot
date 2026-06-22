@@ -75,6 +75,15 @@ export function OrganizerScoring({ teams, onReload }: Props) {
               ))}
             </div>
           </div>
+          <a
+            href={`/scorecards?round=${round}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs px-3 py-1.5 rounded bg-ink-900 border border-slate-700/40 text-slate-200 hover:border-amber-500/40 hover:text-amber-300 transition"
+            title="Open the printable paper-fallback scorecards for this round (one sheet per panel)"
+          >
+            🖨️ Print scorecards
+          </a>
           <button onClick={() => reloadLeaderboard()} disabled={busy} className="text-xs px-3 py-1.5 rounded bg-ink-900 border border-slate-700/40 text-slate-200 hover:border-lime-500/40 transition">
             {busy ? 'Refreshing…' : 'Refresh'}
           </button>
