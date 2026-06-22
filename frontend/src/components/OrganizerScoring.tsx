@@ -327,24 +327,30 @@ function Leaderboard({ data, expandedTeamId, onToggleExpand }: LeaderboardProps)
         </div>
       )}
 
-      {panelGroups.map((g) => (
-        <LeaderboardSection
-          key={g.panelId}
-          panelTitle={`${g.name} — Round ${data.round}`}
-          rows={g.rows}
-          expandedTeamId={expandedTeamId}
-          onToggleExpand={onToggleExpand}
-        />
-      ))}
+      {/* Side-by-side panel layout on screens >= xl (1280px+). Stack on
+          smaller widths where two columns would crush the per-axis
+          numbers + the expand affordance. Each panel card stretches to
+          fill its grid cell so the heights match visually. */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+        {panelGroups.map((g) => (
+          <LeaderboardSection
+            key={g.panelId}
+            panelTitle={`${g.name} — Round ${data.round}`}
+            rows={g.rows}
+            expandedTeamId={expandedTeamId}
+            onToggleExpand={onToggleExpand}
+          />
+        ))}
 
-      {unassigned.length > 0 && (
-        <LeaderboardSection
-          panelTitle="Not assigned to a panel"
-          rows={unassigned}
-          expandedTeamId={expandedTeamId}
-          onToggleExpand={onToggleExpand}
-        />
-      )}
+        {unassigned.length > 0 && (
+          <LeaderboardSection
+            panelTitle="Not assigned to a panel"
+            rows={unassigned}
+            expandedTeamId={expandedTeamId}
+            onToggleExpand={onToggleExpand}
+          />
+        )}
+      </div>
 
       {rowsZero.length > 0 && (
         <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl overflow-hidden">
@@ -739,7 +745,7 @@ function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: Advancement
         }
 
         return (
-          <div className="border-t border-slate-700/40 pt-3 space-y-3">
+          <div className="border-t border-slate-700/40 pt-3 grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
             {groupList.map((g) => (
               <div key={g.panelId ?? 'unassigned'}>
                 <div className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold mb-1.5 px-1">
