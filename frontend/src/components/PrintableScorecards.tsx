@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { fetchPanels, fetchTeams, fetchJudges, type Panel } from '../api';
 import type { Team, Judge } from '../types';
 
@@ -47,6 +48,18 @@ export function PrintableScorecards({ round: roundProp }: Props = {}) {
   const round = roundProp ?? getRoundFromUrl();
   const blankMode = getBlankFromUrl();
   const blankRowCount = getBlankCountFromUrl();
+  const isAuthenticated = useIsAuthenticated();
+  const { instance, inProgress } = useMsal();
+
+  // If MSAL has settled and the user isn't signed in, kick off the
+  // standard redirect flow. The /scorecards route is organizer-only
+  // (calls authenticated /api/panels + /api/judges) so there's no
+  // sensible no-auth fallback like /team/<id> has.
+  useEffect(() => {
+    if (inProgress === 'none' && !isAuthenticated) {
+      instance.loginRedirect().catch((e) => console.error('loginRedirect failed:', e));
+    }
+  }, [inProgress, isAuthenticated, instance]);
   const [panels, setPanels] = useState<Panel[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [judges, setJudges] = useState<Judge[]>([]);
@@ -54,6 +67,9 @@ export function PrintableScorecards({ round: roundProp }: Props = {}) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Wait until MSAL has finished its auth handshake; otherwise the
+    // authFetch calls hit /api/panels with no bearer token and 401.
+    if (!isAuthenticated) return;
     Promise.all([fetchPanels(round), fetchTeams(), fetchJudges()])
       .then(([p, t, j]) => {
         setPanels(p);
@@ -62,11 +78,21 @@ export function PrintableScorecards({ round: roundProp }: Props = {}) {
       })
       .catch((e: any) => setError(e.message || String(e)))
       .finally(() => setLoading(false));
-  }, [round]);
+  }, [round, isAuthenticated]);
 
   const teamsById = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
   const judgesById = useMemo(() => new Map(judges.map((j) => [j.id, j])), [judges]);
 
+  // Auth gate: pre-filled mode needs to call /api/panels which requires a
+  // bearer token. While MSAL is initializing or redirecting, show a
+  // friendly spinner instead of letting the fetch 401.
+  if (!blankMode && !isAuthenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-slate-500 p-8 text-center">
+        {inProgress !== 'none' ? 'Signing in…' : 'Redirecting to sign-in…'}
+      </div>
+    );
+  }
   if (loading && !blankMode) {
     return <div className="min-h-screen flex items-center justify-center text-slate-500">Loading panels…</div>;
   }
