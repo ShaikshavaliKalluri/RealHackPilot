@@ -93,6 +93,24 @@ export default function App() {
     llmHealth().then(setLlm).catch((e) => console.error(e));
   }, [isAuthenticated]);
 
+  // Silent redirect: if a non-admin lands on mode='scoring' (deep-link,
+  // stale state, etc.), bump them back to the dashboard. MUST live above
+  // the early-return guards below -- React requires every render to call
+  // hooks in the same order, and an early-return that runs before this
+  // useEffect would change the count between renders (error #310).
+  // Inline the role-derived check here so we don't depend on a later
+  // 'isScoringAdmin' const that's declared after the early returns.
+  useEffect(() => {
+    if (!role) return;
+    const email = (role.email || '').toLowerCase();
+    const isAdmin = email === 'shaikshavali.kalluri@realpage.com'
+                 || email === 'suneel.nallu@realpage.com'
+                 || email === 'bhaskar.jaddu@realpage.com';
+    if (mode === 'scoring' && !isAdmin) {
+      setMode('dashboard');
+    }
+  }, [mode, role]);
+
   const handleRunAIScreen = async (force = false) => {
     setAiBusy(true);
     setAiSummary('Starting AI screening...');
@@ -268,14 +286,10 @@ export default function App() {
   ]);
   const isScoringAdmin = SCORING_ADMIN_EMAILS.has((role.email || '').toLowerCase());
 
-  // Silent redirect: if a non-admin somehow lands on the scoring mode
-  // (deep-link, stale browser state, etc.), bump them back to the dashboard
-  // without showing any 'not authorized' messaging.
-  useEffect(() => {
-    if (mode === 'scoring' && !isScoringAdmin) {
-      setMode('dashboard');
-    }
-  }, [mode, isScoringAdmin]);
+  // (Note: the silent-redirect useEffect for non-admins landing on
+  // mode='scoring' lives near the top of the component -- it must run
+  // before the early returns above, or hook order would change between
+  // renders and trigger React error #310.)
 
   // Tab definitions — single source of truth for both desktop horizontal nav
   // and the mobile hamburger dropdown. Order = display order. Scoring is
