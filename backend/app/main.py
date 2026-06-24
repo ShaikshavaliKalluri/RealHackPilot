@@ -46,6 +46,7 @@ from .schemas import (
     JudgeOut, JudgeCreate, JudgeUpdate, JudgeScoreSubmit, JudgeScoreOut,
     JudgeBulkRequest, JudgeBulkResult,
     TeamSeatRequest,
+    TeamDemoStatusRequest,
     SwagExtraOut, SwagExtraImportResult,
     JudgeVisitMarkRequest, JudgeVisitOut, JudgeVisitsByTeam, JudgeVisitsStats,
     VisitNotesUpdate,
@@ -3671,6 +3672,37 @@ def backup_restore(filename: str) -> dict:
     if not filename.startswith("realhack_pilot_") or not filename.endswith(".db") or "/" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="invalid filename")
     return backup_service.restore(filename, make_pre_restore_backup=True)
+
+
+@app.post("/api/teams/{team_id}/demo-status", response_model=TeamOut)
+def update_demo_status(
+    team_id: int,
+    req: TeamDemoStatusRequest,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> models.Team:
+    """Mark a team's demo presentation state during judging.
+
+    Restricted to organizers (the role gate -- judges + REWS are blocked).
+    Three valid states: 'pending' (default), 'done' (team presented),
+    'no_show' (didn't show up). Resets timestamp + actor on every change
+    so the audit trail is honest about who flipped it last."""
+    actor_email = _require_organizer_role(claims, db)
+    new_status = (req.status or '').strip().lower()
+    if new_status not in ('pending', 'done', 'no_show'):
+        raise HTTPException(
+            status_code=400,
+            detail="status must be 'pending', 'done', or 'no_show'",
+        )
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+    team.demo_status = new_status
+    team.demo_status_at = datetime.utcnow()
+    team.demo_status_by = actor_email
+    db.commit()
+    db.refresh(team)
+    return team
 
 
 @app.patch("/api/teams/{team_id}/readiness", response_model=TeamOut)

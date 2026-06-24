@@ -93,20 +93,24 @@ export default function App() {
     llmHealth().then(setLlm).catch((e) => console.error(e));
   }, [isAuthenticated]);
 
-  // Silent redirect: if a non-admin lands on mode='scoring' (deep-link,
-  // stale state, etc.), bump them back to the dashboard. MUST live above
-  // the early-return guards below -- React requires every render to call
-  // hooks in the same order, and an early-return that runs before this
-  // useEffect would change the count between renders (error #310).
-  // Inline the role-derived check here so we don't depend on a later
-  // 'isScoringAdmin' const that's declared after the early returns.
+  // Silent redirect: bump non-admins / non-organizers off restricted modes.
+  // Must live above the early-return guards below -- React requires every
+  // render to call hooks in the same order, so a useEffect after the
+  // 'if (role === null) return Loading' branch would shift the hook count
+  // between renders (error #310). Inline the role checks here instead of
+  // depending on isScoringAdmin/isOrganizer consts that are declared after
+  // the early returns.
   useEffect(() => {
     if (!role) return;
     const email = (role.email || '').toLowerCase();
     const isAdmin = email === 'shaikshavali.kalluri@realpage.com'
                  || email === 'suneel.nallu@realpage.com'
                  || email === 'bhaskar.jaddu@realpage.com';
+    const isOrg = role.role === 'organizer' || isAdmin;
     if (mode === 'scoring' && !isAdmin) {
+      setMode('dashboard');
+    }
+    if (mode === 'floor-walk' && !isOrg) {
       setMode('dashboard');
     }
   }, [mode, role]);
@@ -285,6 +289,10 @@ export default function App() {
     'bhaskar.jaddu@realpage.com',
   ]);
   const isScoringAdmin = SCORING_ADMIN_EMAILS.has((role.email || '').toLowerCase());
+  // The Floor walk tab (with the new demo-status tracker) is organizer-only.
+  // Sandbox admins always count as organizers so Shaik can demo in Test Mode
+  // before the sandbox DB has the judges-table seed.
+  const isOrganizer = role.role === 'organizer' || isScoringAdmin;
 
   // (Note: the silent-redirect useEffect for non-admins landing on
   // mode='scoring' lives near the top of the component -- it must run
@@ -302,7 +310,9 @@ export default function App() {
     { key: 'comms', label: 'Comms', tone: 'bg-violet-500/15 text-violet-200 border-violet-500/30' },
     { key: 'analytics', label: 'Analytics', tone: 'bg-teal-500/15 text-teal-200 border-teal-500/30' },
     { key: 'judges', label: 'People', tone: 'bg-rose-500/15 text-rose-200 border-rose-500/30', title: 'Manage judges, organizers, and REWS volunteers + assign judges to panels per round' },
-    { key: 'floor-walk', label: 'Floor walk', tone: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30', title: 'Track which judges visited which teams during the floor walk' },
+    ...(isOrganizer
+      ? [{ key: 'floor-walk' as Mode, label: 'Floor walk', tone: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30', title: 'Track judge group visits + demo status during the floor walk (organizer-only)' }]
+      : []),
     { key: 'swag', label: 'Swag', tone: 'bg-lime-500/15 text-lime-200 border-lime-500/30', title: 'Swag kit pickup tracker — search participants and mark collected' },
     { key: 'qr', label: 'Login QR', tone: 'bg-sky-500/15 text-sky-200 border-sky-500/30', title: 'Printable QR code for judges to scan and log in' },
   ];
@@ -706,7 +716,7 @@ export default function App() {
 
       {mode === 'swag' && <SwagPanel />}
 
-      {mode === 'floor-walk' && <FloorWalkPanel teams={teams} />}
+      {mode === 'floor-walk' && isOrganizer && <FloorWalkPanel teams={teams} onReload={reload} />}
 
       <EmailComposer
         open={composerOpen}

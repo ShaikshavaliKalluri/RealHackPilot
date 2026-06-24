@@ -7,6 +7,7 @@ import {
   markVisit,
   unmarkVisit,
   updateVisitNotes,
+  updateTeamDemoStatus,
   type JudgeVisit,
   type JudgeVisitsStats,
 } from '../api';
@@ -38,12 +39,46 @@ import {
 
 interface Props {
   teams: Team[];
+  /** Reload the parent's team list so the demo_status updates we make
+   *  here propagate back into the global state (Dashboard team cards,
+   *  Analytics, etc.). */
+  onReload?: () => void;
 }
 
 const FLOORS = ['5th', '9th', '10th'] as const;
 type FloorFilter = 'all' | typeof FLOORS[number] | 'unset';
 
-export function FloorWalkPanel({ teams }: Props) {
+export function FloorWalkPanel({ teams, onReload }: Props) {
+  // Local mirror of teams' demo_status -- optimistic updates land here so
+  // tapping a status button updates the chip instantly without waiting for
+  // a parent reload. Reconciled to the server response after each call.
+  const [demoStatusLocal, setDemoStatusLocal] = useState<Record<number, 'pending' | 'done' | 'no_show'>>({});
+  const [demoBusy, setDemoBusy] = useState<Set<number>>(new Set());
+
+  const getDemoStatus = (t: Team): 'pending' | 'done' | 'no_show' => {
+    return demoStatusLocal[t.id] ?? (t.demo_status as any) ?? 'pending';
+  };
+
+  const handleDemoStatus = async (t: Team, next: 'pending' | 'done' | 'no_show') => {
+    setDemoBusy((s) => new Set(s).add(t.id));
+    const prev = getDemoStatus(t);
+    setDemoStatusLocal((s) => ({ ...s, [t.id]: next }));
+    try {
+      await updateTeamDemoStatus(t.id, next);
+      onReload?.();
+    } catch (e: any) {
+      // Roll back on failure
+      setDemoStatusLocal((s) => ({ ...s, [t.id]: prev }));
+      setErr(e.message || String(e));
+    } finally {
+      setDemoBusy((s) => {
+        const x = new Set(s);
+        x.delete(t.id);
+        return x;
+      });
+    }
+  };
+
   const [visitsByTeam, setVisitsByTeam] = useState<Record<number, JudgeVisit[]>>({});
   const [stats, setStats] = useState<JudgeVisitsStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -292,6 +327,59 @@ export function FloorWalkPanel({ teams }: Props) {
         )}
       </div>
 
+      {/* Demo coverage stats -- counts of done / no-show / pending across
+          all visible (filtered) teams. Updates live as buttons are tapped. */}
+      {(() => {
+        const list = floor === 'all'
+          ? teams
+          : teams.filter((t) => (t.seat_floor ?? 'unset') === floor);
+        let done = 0;
+        let noShow = 0;
+        let pending = 0;
+        for (const t of list) {
+          const ds = getDemoStatus(t);
+          if (ds === 'done') done++;
+          else if (ds === 'no_show') noShow++;
+          else pending++;
+        }
+        const total = list.length;
+        const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        return (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-ink-900/60 rounded-xl p-3 sm:p-4">
+              <div className="text-xl sm:text-2xl font-extrabold text-emerald-300">
+                {done}<span className="text-slate-500 text-base font-normal"> / {total}</span>
+              </div>
+              <div className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400">
+                ✓ Demos done · {pct}%
+              </div>
+            </div>
+            <div className="bg-ink-900/60 rounded-xl p-3 sm:p-4">
+              <div className={`text-xl sm:text-2xl font-extrabold ${noShow > 0 ? 'text-rose-300' : 'text-slate-300'}`}>
+                {noShow}
+              </div>
+              <div className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400">
+                × No-shows
+              </div>
+            </div>
+            <div className="bg-ink-900/60 rounded-xl p-3 sm:p-4">
+              <div className={`text-xl sm:text-2xl font-extrabold ${pending > 0 ? 'text-amber-300' : 'text-slate-300'}`}>
+                {pending}
+              </div>
+              <div className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400">
+                Pending demo
+              </div>
+            </div>
+            <div className="bg-ink-900/60 rounded-xl p-3 sm:p-4">
+              <div className="text-xl sm:text-2xl font-extrabold text-slate-100">{total}</div>
+              <div className="text-[10px] sm:text-xs uppercase tracking-wider text-slate-400">
+                Total ({floor === 'all' ? 'all floors' : `${floor} floor`})
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Active filter pill row + clear */}
       <div className="flex items-center gap-2 flex-wrap text-xs">
         <span className="text-slate-500">Floor:</span>
@@ -391,6 +479,24 @@ export function FloorWalkPanel({ teams }: Props) {
                     >
                       {count} visit{count === 1 ? '' : 's'} {count > 0 && (isExpanded ? '▴' : '▾')}
                     </button>
+                    {/* Demo status chip -- the actual state ('done' /
+                        'no_show' / 'pending'). Action buttons live in the
+                        right-side cluster of the card. */}
+                    {(() => {
+                      const ds = getDemoStatus(t);
+                      const styles =
+                        ds === 'done'
+                          ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-200'
+                          : ds === 'no_show'
+                            ? 'border-rose-500/50 bg-rose-500/15 text-rose-200'
+                            : 'border-slate-500/40 bg-slate-500/15 text-slate-300';
+                      const label = ds === 'no_show' ? 'No-show' : ds.charAt(0).toUpperCase() + ds.slice(1);
+                      return (
+                        <span className={`text-[11px] px-2 py-0.5 rounded font-bold uppercase tracking-wider border ${styles}`}>
+                          🎤 {label}
+                        </span>
+                      );
+                    })()}
                   </div>
                   {t.mentor_name && (
                     <div className="text-xs text-slate-500 mt-0.5">Mentor: {t.mentor_name}</div>
@@ -420,6 +526,54 @@ export function FloorWalkPanel({ teams }: Props) {
                   </button>
                 </div>
               </div>
+
+              {/* Demo status action row -- inline so the buttons are
+                  always visible without expanding the card. Shows the
+                  two "other" statuses + a reset to pending when not. */}
+              {(() => {
+                const ds = getDemoStatus(t);
+                const busy = demoBusy.has(t.id);
+                return (
+                  <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                    <span className="text-[10px] uppercase tracking-wider text-slate-500 mr-1">Demo:</span>
+                    <button
+                      onClick={() => handleDemoStatus(t, 'done')}
+                      disabled={busy || ds === 'done'}
+                      className={`text-xs px-3 py-1 rounded font-semibold border transition ${
+                        ds === 'done'
+                          ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-200 cursor-default'
+                          : 'border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10'
+                      } disabled:opacity-60`}
+                    >
+                      ✓ Mark done
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (!confirm(`Mark ${t.name} as a no-show?\n\nThe team won't be ranked for this round.`)) return;
+                        handleDemoStatus(t, 'no_show');
+                      }}
+                      disabled={busy || ds === 'no_show'}
+                      className={`text-xs px-3 py-1 rounded font-semibold border transition ${
+                        ds === 'no_show'
+                          ? 'bg-rose-500/20 border-rose-500/60 text-rose-200 cursor-default'
+                          : 'border-rose-500/40 text-rose-300 hover:bg-rose-500/10'
+                      } disabled:opacity-60`}
+                    >
+                      × No-show
+                    </button>
+                    {ds !== 'pending' && (
+                      <button
+                        onClick={() => handleDemoStatus(t, 'pending')}
+                        disabled={busy}
+                        className="text-[11px] px-2 py-1 rounded text-slate-400 hover:text-slate-200 transition disabled:opacity-40"
+                        title="Reset to pending (e.g. marked the wrong team)"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Audit log -- newest first, with edit / remove + comments */}
               {isExpanded && count > 0 && (

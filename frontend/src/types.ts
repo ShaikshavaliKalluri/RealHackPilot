@@ -197,6 +197,10 @@ export interface Team {
   seat_landmark: string | null;
   seat_updated_at: string | null;
   seat_updated_by: string | null;
+  /** Demo presentation status (organizer-marked on Floor walk). */
+  demo_status?: 'pending' | 'done' | 'no_show';
+  demo_status_at?: string | null;
+  demo_status_by?: string | null;
 }
 
 export interface DashboardStats {

@@ -129,6 +129,13 @@ def lightweight_migrate(target_engine: Engine | None = None) -> None:
         additions.append(f"ALTER TABLE teams ADD COLUMN seat_updated_at {ts_type}")
     if "seat_updated_by" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN seat_updated_by VARCHAR(255)")
+    # Demo status tracker for judging day (pending / done / no_show).
+    if "demo_status" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN demo_status VARCHAR(16) DEFAULT 'pending'")
+    if "demo_status_at" not in existing:
+        additions.append(f"ALTER TABLE teams ADD COLUMN demo_status_at {ts_type}")
+    if "demo_status_by" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN demo_status_by VARCHAR(255)")
 
     # Drop the (judge_id, team_id) unique constraint on judge_visits if it
     # exists -- earlier model had it for "one visit per pair" semantics, then

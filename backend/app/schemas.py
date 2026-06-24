@@ -48,6 +48,17 @@ class TeamOut(BaseModel):
     seat_landmark: str | None = None
     seat_updated_at: datetime | None = None
     seat_updated_by: str | None = None
+    # Demo presentation status (organizer-marked on Floor walk tab).
+    demo_status: str = 'pending'  # 'pending' | 'done' | 'no_show'
+    demo_status_at: datetime | None = None
+    demo_status_by: str | None = None
+
+
+class TeamDemoStatusRequest(BaseModel):
+    """POST body for /api/teams/{id}/demo-status. Status must be one of the
+    three valid values; anything else is rejected so the column doesn't
+    accumulate junk."""
+    status: str  # 'pending' | 'done' | 'no_show'
 
 
 class JudgeAIRequest(BaseModel):

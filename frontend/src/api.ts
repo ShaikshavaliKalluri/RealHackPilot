@@ -577,6 +577,22 @@ export async function unmarkVisit(visitId: number): Promise<void> {
   }
 }
 
+export async function updateTeamDemoStatus(
+  teamId: number,
+  status: 'pending' | 'done' | 'no_show',
+): Promise<Team> {
+  const r = await authFetch(`${BASE}/teams/${teamId}/demo-status`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Update demo status failed: ${r.status} — ${t}`);
+  }
+  return r.json();
+}
+
 export async function updateVisitNotes(visitId: number, notes: string | null): Promise<JudgeVisit> {
   const r = await authFetch(`${BASE}/visits/${visitId}`, {
     method: 'PATCH',

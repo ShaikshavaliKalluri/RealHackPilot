@@ -62,6 +62,15 @@ class Team(Base):
     seat_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     seat_updated_by: Mapped[str | None] = mapped_column(String(255))
 
+    # Demo presentation status, marked by organizers on the Floor walk tab
+    # during judging. Values: 'pending' (default, before the team is called),
+    # 'done' (team finished presenting), 'no_show' (team didn't show up).
+    # Distinct from judge_visits -- judge visits track who came to the desk,
+    # demo_status tracks whether the team actually presented at all.
+    demo_status: Mapped[str] = mapped_column(String(16), default='pending')
+    demo_status_at: Mapped[datetime | None] = mapped_column(DateTime)
+    demo_status_by: Mapped[str | None] = mapped_column(String(255))
+
     members: Mapped[list["Member"]] = relationship(back_populates="team", cascade="all, delete-orphan")
 
 
