@@ -86,9 +86,22 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
     panel (Panel 1 / Panel 2) -- panel calibration differs (one panel's
     'best' might be an 8, another's a 10), so comparing teams across
     panels is unfair. Split-view lets organizers advance from each panel
-    independently."""
+    independently.
+
+    Round-eligibility filter: a team only appears on the round_num
+    leaderboard if it has been ADVANCED to that round (or higher).
+    R1: every team is eligible (advanced_to_round defaults to 1).
+    R2: only teams the organizer advanced from R1.
+    R3 (winners): only teams advanced from R2.
+    Otherwise the R2 leaderboard would show all 95 teams as 'pending'
+    instead of just the 20 that actually made it through.
+    """
     from . import models as _m  # local to keep the top of file clean
-    teams = db.query(Team).all()
+    teams = (
+        db.query(Team)
+          .filter((Team.advanced_to_round.is_(None)) | (Team.advanced_to_round >= round_num))
+          .all()
+    )
     judges_by_id = {j.id: j for j in db.query(Judge).all()}
 
     rows_q = (
