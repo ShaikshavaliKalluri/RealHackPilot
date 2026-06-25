@@ -629,9 +629,27 @@ function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: Advancement
   );
 
   useEffect(() => {
+    // Preselect strategy:
+    //   1. If any teams are ALREADY advanced past this round (DB state),
+    //      mirror that selection. The checkboxes then visually match the
+    //      'ADVANCED' badges so organizers aren't second-guessing what's
+    //      actually in the system.
+    //   2. Otherwise (first-time advance for this round), pre-tick the
+    //      top N teams by combined score as a starting suggestion -- the
+    //      organizer can then untick / tick to finalize per panel.
+    const next = round + 1;
+    const advancedIds = new Set(
+      teams
+        .filter((t) => (t.advanced_to_round ?? 1) >= next)
+        .map((t) => t.id),
+    );
+    if (advancedIds.size > 0) {
+      setSelected(advancedIds);
+      return;
+    }
     const defaultN = DEFAULT_ADVANCE_COUNT[round] ?? 0;
     setSelected(new Set(rankedRows.slice(0, defaultN).map((r) => r.team_id)));
-  }, [round, rankedRows]);
+  }, [round, rankedRows, teams]);
 
   const alreadyAdvancedCount = useMemo(() => {
     const next = round + 1;
