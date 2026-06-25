@@ -981,12 +981,20 @@ export async function setJudgeAssignments(judgeId: number, round: number, teamId
 
 // ===== Panels =====
 
+export interface R2Invite {
+  label: string | null;
+  start_at: string;  // ISO 8601, IST naive (e.g. "2026-06-25T10:00:00")
+  slot_minutes: number;
+  team_ids: number[];
+}
+
 export interface Panel {
   id: number;
   name: string;
   round: number;
   team_ids: number[];
   judge_ids: number[];
+  r2_invites: R2Invite[];
 }
 
 export async function fetchPanels(round?: number): Promise<Panel[]> {
@@ -1019,6 +1027,48 @@ export async function renamePanel(panelId: number, name: string): Promise<Panel>
 export async function deletePanel(panelId: number): Promise<{ deleted: boolean }> {
   const r = await authFetch(`${BASE}/panels/${panelId}`, { method: 'DELETE' });
   if (!r.ok) throw new Error(`Delete panel failed: ${r.status}`);
+  return r.json();
+}
+
+export interface R2InvitePayload {
+  label: string | null;
+  start_at: string;
+  slot_minutes: number;
+  team_ids: number[];
+}
+
+export async function createPanelR2Invite(panelId: number, payload: R2InvitePayload): Promise<Panel> {
+  const r = await authFetch(`${BASE}/panels/${panelId}/r2-invites`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Create invite failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+export async function updatePanelR2Invite(panelId: number, inviteIndex: number, payload: R2InvitePayload): Promise<Panel> {
+  const r = await authFetch(`${BASE}/panels/${panelId}/r2-invites/${inviteIndex}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Update invite failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+export async function deletePanelR2Invite(panelId: number, inviteIndex: number): Promise<Panel> {
+  const r = await authFetch(`${BASE}/panels/${panelId}/r2-invites/${inviteIndex}`, { method: 'DELETE' });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Delete invite failed: ${r.status} ${t}`);
+  }
   return r.json();
 }
 
@@ -1106,8 +1156,8 @@ export async function swapPanelTeamDays(panelId: number, teamAId: number, teamBI
   }
 }
 
-export async function fetchPanelInviteMeta(panelId: number, day: 1 | 2): Promise<PanelInviteMeta> {
-  const r = await authFetch(`${BASE}/panels/${panelId}/invite-meta?day=${day}`);
+export async function fetchPanelInviteMeta(panelId: number, day: 1 | 2, inviteIndex: number = 0): Promise<PanelInviteMeta> {
+  const r = await authFetch(`${BASE}/panels/${panelId}/invite-meta?day=${day}&invite_index=${inviteIndex}`);
   if (!r.ok) {
     let msg = `Invite meta failed: ${r.status}`;
     try {

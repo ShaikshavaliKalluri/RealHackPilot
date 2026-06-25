@@ -16,7 +16,11 @@ import {
   setPanelJudges,
   fetchPanelInviteMeta,
   swapPanelTeamDays,
+  createPanelR2Invite,
+  updatePanelR2Invite,
+  deletePanelR2Invite,
   type Panel,
+  type R2Invite,
   type PanelInviteMeta,
   type ScheduleRow,
   type JudgeBulkResult,
@@ -99,7 +103,22 @@ export function JudgesPanel({ teams }: Props) {
   // Outlook new-meeting compose dialog. panelId enables in-modal actions
   // like cross-day team swaps that need a server roundtrip.
   const [inviteMeta, setInviteMeta] = useState<
-    | { meta: PanelInviteMeta; panelName: string; panelId: number; panelRound: number; day: 1 | 2 }
+    | {
+        meta: PanelInviteMeta;
+        panelName: string;
+        panelId: number;
+        panelRound: number;
+        day: 1 | 2;
+        /** R2 only: which invite block this workspace is for. */
+        inviteIndex: number;
+        /** R2 only: label of that invite block for the modal heading. */
+        inviteLabel: string | null;
+      }
+    | null
+  >(null);
+  // R2 invite builder (add / edit). When set, opens the R2InviteBuilderModal.
+  const [r2BuilderState, setR2BuilderState] = useState<
+    | { panel: Panel; inviteIndex: number | null }  // null = creating new
     | null
   >(null);
 
@@ -253,28 +272,61 @@ export function JudgesPanel({ teams }: Props) {
     }
   };
 
-  const handleOpenInviteWorkspace = async (panel: Panel, day: 1 | 2) => {
+  const handleOpenInviteWorkspace = async (
+    panel: Panel,
+    day: 1 | 2,
+    inviteIndex: number = 0,
+  ) => {
     try {
-      const meta = await fetchPanelInviteMeta(panel.id, day);
+      const meta = await fetchPanelInviteMeta(panel.id, day, inviteIndex);
+      const inviteLabel = panel.round === 2 ? (panel.r2_invites[inviteIndex]?.label ?? null) : null;
       setInviteMeta({
         meta,
         panelName: panel.name,
         panelId: panel.id,
         panelRound: panel.round,
         day,
+        inviteIndex,
+        inviteLabel,
       });
     } catch (e: any) {
-      alert(`Day ${day} invite failed: ${e?.message ?? e}`);
+      alert(`Invite failed: ${e?.message ?? e}`);
     }
   };
 
   const refreshInviteMeta = async () => {
     if (!inviteMeta) return;
     try {
-      const meta = await fetchPanelInviteMeta(inviteMeta.panelId, inviteMeta.day);
-      setInviteMeta({ ...inviteMeta, meta });
+      const [meta, panelsNow] = await Promise.all([
+        fetchPanelInviteMeta(inviteMeta.panelId, inviteMeta.day, inviteMeta.inviteIndex),
+        fetchPanels(round),
+      ]);
+      setPanels(panelsNow);
+      const fresh = panelsNow.find((p) => p.id === inviteMeta.panelId);
+      const inviteLabel = fresh?.round === 2
+        ? (fresh.r2_invites[inviteMeta.inviteIndex]?.label ?? null)
+        : inviteMeta.inviteLabel;
+      setInviteMeta({
+        ...inviteMeta,
+        meta,
+        inviteLabel,
+      });
     } catch (e: any) {
       alert(`Refresh failed: ${e?.message ?? e}`);
+    }
+  };
+
+  // R2 invite delete from the panel card. Confirms first; reloads panels.
+  const handleDeleteR2Invite = async (panel: Panel, inviteIndex: number) => {
+    const inv = panel.r2_invites[inviteIndex];
+    if (!inv) return;
+    const labelPart = inv.label ? ` "${inv.label}"` : '';
+    if (!confirm(`Delete Round 2 invite${labelPart}? This only removes the invite config -- teams stay in the panel.`)) return;
+    try {
+      await deletePanelR2Invite(panel.id, inviteIndex);
+      await reloadPanels();
+    } catch (e: any) {
+      alert(`Delete failed: ${e?.message ?? e}`);
     }
   };
 
@@ -731,36 +783,32 @@ export function JudgesPanel({ teams }: Props) {
                         🖨 Print sheet
                       </button>
                     )}
-                    {p.team_ids.length > 0 && (
-                      p.round === 2 ? (
-                        // Round 2 has the smaller finalist set (~20 teams)
-                        // and fits on a single day, so one invite is
-                        // enough -- no day-split.
+                    {p.team_ids.length > 0 && p.round !== 2 && (
+                      <>
                         <button
                           onClick={() => handleOpenInviteWorkspace(p, 1)}
                           className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Open the Round 2 invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
+                          title="Open the Day 1 (June 24) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
                         >
-                          📅 Round 2 invite
+                          📅 Day 1 invite
                         </button>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => handleOpenInviteWorkspace(p, 1)}
-                            className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                            title="Open the Day 1 (June 24) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
-                          >
-                            📅 Day 1 invite
-                          </button>
-                          <button
-                            onClick={() => handleOpenInviteWorkspace(p, 2)}
-                            className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                            title="Open the Day 2 (June 25) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
-                          >
-                            📅 Day 2 invite
-                          </button>
-                        </>
-                      )
+                        <button
+                          onClick={() => handleOpenInviteWorkspace(p, 2)}
+                          className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
+                          title="Open the Day 2 (June 25) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
+                        >
+                          📅 Day 2 invite
+                        </button>
+                      </>
+                    )}
+                    {p.team_ids.length > 0 && p.round === 2 && (
+                      <button
+                        onClick={() => setR2BuilderState({ panel: p, inviteIndex: null })}
+                        className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
+                        title="Configure a new Round 2 Outlook invite -- pick teams, start time, and slot duration"
+                      >
+                        ➕ Add R2 invite
+                      </button>
                     )}
                     <button
                       onClick={() => openEditor(p, 'judges')}
@@ -820,6 +868,53 @@ export function JudgesPanel({ teams }: Props) {
                     )}
                   </div>
                 </div>
+
+                {/* R2 invites list -- only shown for round-2 panels */}
+                {p.round === 2 && p.r2_invites.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-slate-700/40">
+                    <div className="uppercase tracking-wider text-slate-500 font-semibold mb-2 text-xs">
+                      Round 2 invites ({p.r2_invites.length})
+                    </div>
+                    <div className="space-y-2">
+                      {p.r2_invites.map((inv, idx) => (
+                        <div
+                          key={`r2inv-${p.id}-${idx}`}
+                          className="bg-ink-900/60 border border-amber-500/30 rounded-lg p-3 flex items-start justify-between gap-3 flex-wrap"
+                        >
+                          <div className="text-sm">
+                            <div className="font-semibold text-amber-200">
+                              {inv.label || `Invite #${idx + 1}`}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              {formatR2InviteSummary(inv)}
+                            </div>
+                          </div>
+                          <div className="flex gap-2 flex-wrap">
+                            <button
+                              onClick={() => handleOpenInviteWorkspace(p, 1, idx)}
+                              className="text-xs px-2.5 py-1 rounded border border-amber-500/40 hover:border-amber-500/70 hover:bg-amber-500/10 text-amber-200 transition"
+                              title="Open this invite's workspace -- copy subject, body, attendees"
+                            >
+                              📅 Open invite
+                            </button>
+                            <button
+                              onClick={() => setR2BuilderState({ panel: p, inviteIndex: idx })}
+                              className="text-xs px-2.5 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                            >
+                              ✏️ Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteR2Invite(p, idx)}
+                              className="text-xs px-2.5 py-1 rounded border border-rose-500/30 hover:border-rose-500/60 text-rose-300 hover:text-rose-200 transition"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Inline editor */}
                 {editingPanelId === p.id && (
@@ -1008,8 +1103,23 @@ export function JudgesPanel({ teams }: Props) {
           panelRound={inviteMeta.panelRound}
           day={inviteMeta.day}
           meta={inviteMeta.meta}
+          inviteIndex={inviteMeta.inviteIndex}
+          inviteLabel={inviteMeta.inviteLabel}
           onRefresh={refreshInviteMeta}
           onClose={() => setInviteMeta(null)}
+        />
+      )}
+
+      {r2BuilderState !== null && (
+        <R2InviteBuilderModal
+          panel={r2BuilderState.panel}
+          inviteIndex={r2BuilderState.inviteIndex}
+          teams={teams}
+          onClose={() => setR2BuilderState(null)}
+          onSaved={async () => {
+            setR2BuilderState(null);
+            await reloadPanels();
+          }}
         />
       )}
     </div>
@@ -1034,6 +1144,10 @@ interface InvitePrepModalProps {
   panelRound: number;
   day: 1 | 2;
   meta: PanelInviteMeta;
+  /** Round 2 only: which invite block is being viewed. R1 always 0. */
+  inviteIndex: number;
+  /** Round 2 only: label of that invite block, surfaced in the heading. */
+  inviteLabel: string | null;
   onRefresh: () => Promise<void>;
   onClose: () => void;
 }
@@ -1102,10 +1216,306 @@ function regenerateBodyHtml(originalBodyHtml: string, scheduleRows: ScheduleRow[
   return originalBodyHtml.replace(tbodyRegex, `$1${newRows}$3`);
 }
 
-function InvitePrepModal({ panelId, panelName, panelRound, day, meta, onRefresh, onClose }: InvitePrepModalProps) {
-  // Round 2 runs as a single block; no day-split phrasing.
+// Parse '2026-06-25T10:00:00' or '...T10:00' as a naive IST clock value.
+// We never apply the browser timezone -- the backend already stores the
+// value as IST naive, and the display should match that wall-clock time.
+function parseNaiveIso(iso: string): { y: number; mo: number; d: number; h: number; mi: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(iso);
+  if (!m) return null;
+  return { y: +m[1], mo: +m[2], d: +m[3], h: +m[4], mi: +m[5] };
+}
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatR2Range(startIso: string, slotMinutes: number, teamCount: number): string {
+  const p = parseNaiveIso(startIso);
+  if (!p) return startIso;
+  const totalMinutes = slotMinutes * Math.max(teamCount, 1);
+  let endH = p.h;
+  let endMi = p.mi + totalMinutes;
+  endH += Math.floor(endMi / 60);
+  endMi = endMi % 60;
+  const fmt = (h: number, mi: number) => `${h.toString().padStart(2, '0')}:${mi.toString().padStart(2, '0')}`;
+  return `${MONTH_SHORT[p.mo - 1]} ${p.d}, ${p.y} · ${fmt(p.h, p.mi)} – ${fmt(endH, endMi)}`;
+}
+
+function formatR2InviteSummary(inv: R2Invite): string {
+  const range = formatR2Range(inv.start_at, inv.slot_minutes, inv.team_ids.length);
+  return `${range} IST · ${inv.team_ids.length} team${inv.team_ids.length === 1 ? '' : 's'} · ${inv.slot_minutes}-min slots`;
+}
+
+interface R2InviteBuilderModalProps {
+  panel: Panel;
+  /** null when creating new; otherwise the index of the invite being edited. */
+  inviteIndex: number | null;
+  teams: Team[];
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}
+
+function R2InviteBuilderModal({ panel, inviteIndex, teams, onClose, onSaved }: R2InviteBuilderModalProps) {
+  const editing = inviteIndex !== null;
+  const existing = editing ? panel.r2_invites[inviteIndex] : undefined;
+  const parsedStart = existing ? parseNaiveIso(existing.start_at) : null;
+
+  const [label, setLabel] = useState<string>(existing?.label ?? '');
+  const [dateVal, setDateVal] = useState<string>(
+    parsedStart
+      ? `${parsedStart.y}-${parsedStart.mo.toString().padStart(2, '0')}-${parsedStart.d.toString().padStart(2, '0')}`
+      : '',
+  );
+  const [timeVal, setTimeVal] = useState<string>(
+    parsedStart
+      ? `${parsedStart.h.toString().padStart(2, '0')}:${parsedStart.mi.toString().padStart(2, '0')}`
+      : '',
+  );
+  const [minutesVal, setMinutesVal] = useState<string>(existing ? String(existing.slot_minutes) : '15');
+  const [selectedTeamIds, setSelectedTeamIds] = useState<number[]>(existing?.team_ids ?? []);
+  const [search, setSearch] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Teams in this panel, in panel order, with name lookups.
+  const panelTeams = useMemo(() => {
+    const m = new Map(teams.map((t) => [t.id, t] as const));
+    return panel.team_ids.map((id) => m.get(id)).filter((t): t is Team => !!t);
+  }, [panel.team_ids, teams]);
+
+  // Teams already claimed by OTHER invites on this panel -- shown muted so
+  // the organizer doesn't accidentally double-book a team across invites.
+  // (Allowed if they really want to -- this is just a visual hint.)
+  const claimedByOther = useMemo(() => {
+    const s = new Set<number>();
+    panel.r2_invites.forEach((inv, idx) => {
+      if (idx === inviteIndex) return;
+      inv.team_ids.forEach((id) => s.add(id));
+    });
+    return s;
+  }, [panel.r2_invites, inviteIndex]);
+
+  const filteredTeams = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return panelTeams;
+    return panelTeams.filter((t) => t.name.toLowerCase().includes(q));
+  }, [panelTeams, search]);
+
+  const toggleTeam = (id: number) => {
+    setSelectedTeamIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  };
+
+  const selectAll = () => setSelectedTeamIds(filteredTeams.map((t) => t.id));
+  const clearAll = () => setSelectedTeamIds([]);
+
+  const previewRange = dateVal && timeVal && minutesVal && selectedTeamIds.length > 0
+    ? formatR2Range(`${dateVal}T${timeVal}:00`, Math.max(parseInt(minutesVal, 10) || 0, 1), selectedTeamIds.length)
+    : null;
+
+  const save = async () => {
+    if (!dateVal || !timeVal) {
+      alert('Please pick a start date and start time.');
+      return;
+    }
+    const mins = parseInt(minutesVal, 10);
+    if (!Number.isFinite(mins) || mins <= 0 || mins > 240) {
+      alert('Slot duration must be a positive number of minutes (max 240).');
+      return;
+    }
+    if (selectedTeamIds.length === 0) {
+      alert('Pick at least one team for this invite.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const payload = {
+        label: label.trim() || null,
+        start_at: `${dateVal}T${timeVal}:00`,
+        slot_minutes: mins,
+        team_ids: selectedTeamIds,
+      };
+      if (editing) {
+        await updatePanelR2Invite(panel.id, inviteIndex!, payload);
+      } else {
+        await createPanelR2Invite(panel.id, payload);
+      }
+      await onSaved();
+    } catch (e: any) {
+      alert(`Save failed: ${e?.message ?? e}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-3xl bg-ink-800 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden max-h-[92vh] flex flex-col"
+      >
+        <div className="bg-gradient-to-br from-amber-500/25 to-orange-500/15 p-4 border-b border-amber-500/40 flex items-start justify-between">
+          <div>
+            <h3 className="font-bold text-amber-200 text-base">
+              {editing ? '✏️ Edit Round 2 invite' : '➕ Add Round 2 invite'}
+            </h3>
+            <p className="text-xs text-slate-300 mt-0.5">
+              {panel.name} · pick a start time, slot duration, and which teams this invite covers.
+              Each invite generates one Outlook meeting.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-slate-300 hover:text-white text-xl leading-none px-1" aria-label="Close">×</button>
+        </div>
+
+        <div className="p-5 overflow-y-auto text-sm text-slate-200 space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <label className="text-xs text-slate-300 space-y-1 sm:col-span-1">
+              <span className="block uppercase tracking-wide text-slate-400">Label (optional)</span>
+              <input
+                type="text"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="e.g. Morning batch"
+                className="w-full bg-ink-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-100"
+              />
+            </label>
+            <label className="text-xs text-slate-300 space-y-1">
+              <span className="block uppercase tracking-wide text-slate-400">Start date</span>
+              <input
+                type="date"
+                value={dateVal}
+                onChange={(e) => setDateVal(e.target.value)}
+                className="w-full bg-ink-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-100"
+              />
+            </label>
+            <label className="text-xs text-slate-300 space-y-1">
+              <span className="block uppercase tracking-wide text-slate-400">Start time (IST)</span>
+              <input
+                type="time"
+                value={timeVal}
+                onChange={(e) => setTimeVal(e.target.value)}
+                className="w-full bg-ink-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-100"
+              />
+            </label>
+            <label className="text-xs text-slate-300 space-y-1">
+              <span className="block uppercase tracking-wide text-slate-400">Min / team</span>
+              <input
+                type="number"
+                min={1}
+                max={240}
+                value={minutesVal}
+                onChange={(e) => setMinutesVal(e.target.value)}
+                className="w-full bg-ink-900 border border-slate-600 rounded px-2 py-1.5 text-sm text-slate-100"
+              />
+            </label>
+          </div>
+
+          {previewRange && (
+            <div className="text-xs text-slate-400">
+              Preview: <strong className="text-slate-200">{previewRange}</strong> IST ·{' '}
+              {selectedTeamIds.length} team{selectedTeamIds.length === 1 ? '' : 's'} ·{' '}
+              {minutesVal}-min slots
+            </div>
+          )}
+
+          <div className="bg-ink-900/60 border border-slate-700/60 rounded-lg p-3">
+            <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-100">
+                  Teams for this invite ({selectedTeamIds.length} / {panelTeams.length})
+                </h4>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Pick which teams from this panel are scheduled in this invite. Slot order follows the pick order.
+                </p>
+              </div>
+              <div className="flex gap-2 items-center flex-wrap">
+                <input
+                  placeholder="Search teams…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-44 bg-ink-800 border border-slate-700/40 rounded px-3 py-1.5 text-xs focus:outline-none focus:border-amber-500/60"
+                />
+                <button
+                  onClick={selectAll}
+                  className="text-xs px-2 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                >
+                  All{search ? ' (filtered)' : ''}
+                </button>
+                <button
+                  onClick={clearAll}
+                  className="text-xs px-2 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-72 overflow-y-auto">
+              {filteredTeams.map((t) => {
+                const checked = selectedTeamIds.includes(t.id);
+                const alsoClaimed = claimedByOther.has(t.id);
+                return (
+                  <label
+                    key={t.id}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded border cursor-pointer transition ${checked ? 'border-amber-500/60 bg-amber-500/10 text-amber-100' : 'border-slate-700/40 hover:border-slate-500 text-slate-300'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleTeam(t.id)}
+                      className="accent-amber-500"
+                    />
+                    <span className="truncate">{t.name}</span>
+                    {alsoClaimed && !checked && (
+                      <span className="ml-auto text-[10px] uppercase tracking-wider text-amber-400/80 shrink-0" title="Team is already in another invite for this panel">
+                        in other invite
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+              {filteredTeams.length === 0 && (
+                <div className="text-xs text-slate-500 italic col-span-full text-center py-3">
+                  No teams match "{search}".
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-3 border-t border-slate-700/60 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="text-sm px-4 py-1.5 rounded border border-slate-600 hover:border-slate-400 text-slate-200 transition disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={saving}
+            className="text-sm px-4 py-1.5 rounded border border-emerald-500/60 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 transition disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : editing ? 'Save changes' : 'Create invite'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InvitePrepModal({
+  panelId,
+  panelName,
+  panelRound,
+  day,
+  meta,
+  inviteIndex,
+  inviteLabel,
+  onRefresh,
+  onClose,
+}: InvitePrepModalProps) {
+  void inviteIndex;
+  // Round 2 runs as a single block per invite; no day-split phrasing.
   const isRound2 = panelRound === 2;
-  const headerLabel = isRound2 ? 'Round 2' : `Day ${day}`;
+  const headerLabel = isRound2 ? (inviteLabel ? `Round 2 — ${inviteLabel}` : 'Round 2') : `Day ${day}`;
   const [lastCopied, setLastCopied] = useState<CopyTarget | null>(null);
   // Editable copy of the schedule. The slot/time/panel for each position
   // are fixed (those are the calendar slots); we only swap which team is
@@ -1218,11 +1628,12 @@ function InvitePrepModal({ panelId, panelName, panelRound, day, meta, onRefresh,
         <div className="bg-gradient-to-br from-amber-500/25 to-orange-500/15 p-4 border-b border-amber-500/40 flex items-start justify-between">
           <div>
             <h3 className="font-bold text-amber-200 text-base">
-              📅 {isRound2 ? 'Round 2' : `${panelName} — ${headerLabel}`} invite workspace
+              📅 {isRound2 ? headerLabel : `${panelName} — ${headerLabel}`} invite workspace
             </h3>
             <p className="text-xs text-slate-300 mt-0.5">
-              {dayLabel}, 2026 · 9:00 AM – 5:00 PM IST · {meta.team_count} team{meta.team_count === 1 ? '' : 's'} ·
-              Lunch 13:00 – 14:00 · 15-min slots
+              {isRound2
+                ? `${dayLabel}, 2026 · ${meta.team_count} team${meta.team_count === 1 ? '' : 's'}`
+                : `${dayLabel}, 2026 · 9:00 AM – 5:00 PM IST · ${meta.team_count} team${meta.team_count === 1 ? '' : 's'} · Lunch 13:00 – 14:00 · 15-min slots`}
             </p>
           </div>
           <button

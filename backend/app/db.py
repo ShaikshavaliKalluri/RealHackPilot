@@ -149,6 +149,16 @@ def lightweight_migrate(target_engine: Engine | None = None) -> None:
         # Each visit is still owned by the organizer who logged it.
         additions.append("ALTER TABLE judge_visits ALTER COLUMN judge_id DROP NOT NULL")
 
+    # Panels table -- R2 invites list (organizer-configured list of invite
+    # blocks, each with its own label, start time, slot duration, and team
+    # subset). Postgres uses JSONB for indexability; SQLite stores JSON as
+    # TEXT but accepts the JSON type alias.
+    if "panels" in insp.get_table_names():
+        panel_existing = {c["name"] for c in insp.get_columns("panels")}
+        json_type = "JSONB" if eng.dialect.name == "postgresql" else "JSON"
+        if "r2_invites" not in panel_existing:
+            additions.append(f"ALTER TABLE panels ADD COLUMN r2_invites {json_type} DEFAULT '[]'::{json_type}" if eng.dialect.name == "postgresql" else "ALTER TABLE panels ADD COLUMN r2_invites JSON")
+
     # Members table — same idempotent shape.
     if "members" in insp.get_table_names():
         member_existing = {c["name"] for c in insp.get_columns("members")}

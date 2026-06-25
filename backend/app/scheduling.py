@@ -222,34 +222,85 @@ def _generate_slot_starts(date: datetime) -> list[datetime]:
     return starts
 
 
+def _r2_invite(panel: models.Panel, invite_index: int) -> dict | None:
+    """Look up a single R2 invite block by index on the panel. Returns None
+    if the panel has no invites at that index. Defensive against the JSON
+    column being null on freshly-migrated rows."""
+    invites = panel.r2_invites or []
+    if invite_index < 0 or invite_index >= len(invites):
+        return None
+    return dict(invites[invite_index] or {})
+
+
+def _parse_r2_start(start_at_raw: str) -> datetime:
+    """Parse the ISO string stored in r2_invites[i]['start_at'] back to a
+    naive datetime. Accepts '...T10:00' and '...T10:00:00' shapes; strips
+    timezone if present (we treat the value as IST naive)."""
+    raw = start_at_raw.replace('Z', '')
+    dt = datetime.fromisoformat(raw)
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+
 def schedule_for_day(
     panel: models.Panel,
     day: int,
     db: Session | None = None,
+    r2_invite_index: int = 0,
 ) -> list[tuple[models.Team, datetime, datetime]]:
     """Return [(team, start_dt, end_dt)] for the requested day. Times are naive
     local IST (no tzinfo) — the .ics layer attaches TZID:India Standard Time.
 
     When `db` is provided, organizer-set day overrides from the
     panel_team_day_overrides table are honored before auto-distribution
-    fills the remaining slots."""
+    fills the remaining slots.
+
+    Round 2 panels use the r2_invites[r2_invite_index] block (organizer-
+    configured list of invite blocks with their own start time, slot
+    duration, and team subset). Returns empty if the index doesn't exist
+    or the block has no teams -- the frontend shows the invite-builder
+    form instead of an empty calendar.
+    """
     if day not in EVENT_DATES:
         raise ValueError(f"day must be 1 or 2, got {day}")
+
+    all_teams = [pt.team for pt in panel.teams if pt.team is not None]
+
+    # === Round 2: per-invite team subset + per-invite times ===
+    if panel.round == 2:
+        if day != 1:
+            return []  # R2 is a single block per invite; Day 2 returns empty
+        invite = _r2_invite(panel, r2_invite_index)
+        if invite is None:
+            return []
+        start_raw = invite.get("start_at")
+        slot_minutes = invite.get("slot_minutes")
+        team_ids = invite.get("team_ids") or []
+        if not start_raw or not slot_minutes or slot_minutes <= 0 or not team_ids:
+            return []
+        try:
+            cur = _parse_r2_start(start_raw)
+        except ValueError:
+            return []
+        slot_minutes = int(slot_minutes)
+        # Preserve the order the organizer saved (which is the order they
+        # picked the teams). Fall back to panel order for any orphaned ids.
+        teams_by_id = {t.id: t for t in all_teams}
+        out: list[tuple[models.Team, datetime, datetime]] = []
+        for tid in team_ids:
+            t = teams_by_id.get(tid)
+            if t is None:
+                continue
+            out.append((t, cur, cur + timedelta(minutes=slot_minutes)))
+            cur += timedelta(minutes=slot_minutes)
+        return out
+
+    # === Round 1: fixed dates + 15-min slots + breaks ===
     year, month, dom = EVENT_DATES[day]
     date = datetime(year, month, dom)
 
-    all_teams = [pt.team for pt in panel.teams if pt.team is not None]
-    # Round 2 (finals) has the smaller finalist set and fits on a single
-    # day -- skip the day-split logic entirely and put every team on Day 1.
-    # Day 2 invite for a Round 2 panel returns no teams (and the frontend
-    # hides that button), so this branch only matters if someone hits the
-    # endpoint directly.
-    if panel.round == 2:
-        teams_for_day = all_teams if day == 1 else []
-    else:
-        overrides = _load_day_overrides(panel, db) if db is not None else {}
-        day1_teams, day2_teams = _distribute_teams_across_days(all_teams, overrides=overrides)
-        teams_for_day = day1_teams if day == 1 else day2_teams
+    overrides = _load_day_overrides(panel, db) if db is not None else {}
+    day1_teams, day2_teams = _distribute_teams_across_days(all_teams, overrides=overrides)
+    teams_for_day = day1_teams if day == 1 else day2_teams
 
     if not teams_for_day:
         return []
@@ -268,10 +319,10 @@ def schedule_for_day(
             f"Split the panel into smaller groups or extend the working window."
         )
 
-    out: list[tuple[models.Team, datetime, datetime]] = []
+    out_r1: list[tuple[models.Team, datetime, datetime]] = []
     for team, start in zip(teams_for_day, slot_starts):
-        out.append((team, start, start + timedelta(minutes=SLOT_MINUTES)))
-    return out
+        out_r1.append((team, start, start + timedelta(minutes=SLOT_MINUTES)))
+    return out_r1
 
 
 # ---- iCalendar (.ics) builder ----
@@ -534,7 +585,12 @@ def _collect_attendees(
     )
 
 
-def build_panel_invite_meta(panel: models.Panel, day: int, db: Session | None = None) -> dict:
+def build_panel_invite_meta(
+    panel: models.Panel,
+    day: int,
+    db: Session | None = None,
+    r2_invite_index: int = 0,
+) -> dict:
     """Return JSON-ready meeting metadata for the Outlook-Web compose deeplink.
 
     Used by new Outlook (which doesn't reliably open downloaded .ics files):
@@ -544,24 +600,49 @@ def build_panel_invite_meta(panel: models.Panel, day: int, db: Session | None = 
 
     Times are ISO 8601 with the +05:30 IST offset baked in so Outlook anchors
     the meeting to IST regardless of the viewer's local timezone.
+
+    For Round 2, r2_invite_index selects which configured invite block on
+    the panel this meta is for. Each block has its own label, start time,
+    slot duration, and team subset.
     """
     if day not in EVENT_DATES:
         raise ValueError(f"day must be 1 or 2, got {day}")
 
-    schedule = schedule_for_day(panel, day, db=db)
-    year, month, dom = EVENT_DATES[day]
+    schedule = schedule_for_day(panel, day, db=db, r2_invite_index=r2_invite_index)
     ist_tz = timezone(IST_OFFSET)
-    day_start = datetime(year, month, dom, DAY_START[0], DAY_START[1], tzinfo=ist_tz)
-    day_end = datetime(year, month, dom, DAY_END[0], DAY_END[1], tzinfo=ist_tz)
+
+    r2_invite: dict | None = None
+    if panel.round == 2:
+        r2_invite = _r2_invite(panel, r2_invite_index)
+
+    if r2_invite is not None and r2_invite.get("start_at") and r2_invite.get("slot_minutes"):
+        # Round 2 uses the per-invite start time. day_start = the invite's
+        # configured start; day_end = start + total team minutes (so the
+        # Outlook block doesn't overshoot into an empty window).
+        try:
+            invite_start_naive = _parse_r2_start(r2_invite["start_at"])
+        except ValueError:
+            year, month, dom = EVENT_DATES[day]
+            invite_start_naive = datetime(year, month, dom, DAY_START[0], DAY_START[1])
+        slot_minutes = int(r2_invite["slot_minutes"])
+        day_start = invite_start_naive.replace(tzinfo=ist_tz)
+        team_count = len(schedule) if schedule else len(r2_invite.get("team_ids") or [])
+        day_end = day_start + timedelta(minutes=slot_minutes * max(team_count, 1))
+    else:
+        year, month, dom = EVENT_DATES[day]
+        day_start = datetime(year, month, dom, DAY_START[0], DAY_START[1], tzinfo=ist_tz)
+        day_end = datetime(year, month, dom, DAY_END[0], DAY_END[1], tzinfo=ist_tz)
 
     required, optional = _collect_attendees(panel, schedule)
 
     # Round 2 reads better without 'Day N' phrasing -- there's only one
-    # day. There's also only one Round 2 panel so the panel name is
-    # redundant in the subject. R1 keeps the Day 1 / Day 2 split with
-    # panel name (Panel 1 vs Panel 2 distinction matters there).
+    # day per invite. The optional per-invite label (e.g. 'Morning batch')
+    # is appended in parens so the organizer can distinguish multiple
+    # invites for the same panel in their Outlook sent items.
     if panel.round == 2:
-        summary = f"RealHack 2026 Round 2 ({day_start.strftime('%b %d')})"
+        label = (r2_invite or {}).get("label") if r2_invite else None
+        label_part = f" — {label}" if label else ""
+        summary = f"RealHack 2026 Round 2{label_part} ({day_start.strftime('%b %d')})"
     else:
         summary = f"RealHack 2026 Judging — {panel.name} — Day {day} ({day_start.strftime('%b %d')})"
     body = (

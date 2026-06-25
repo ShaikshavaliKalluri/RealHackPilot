@@ -143,6 +143,22 @@ class Panel(Base):
     created_by_email: Mapped[str | None] = mapped_column(String(255))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    # Round 2 invites -- list of independent invite "blocks", each producing
+    # one Outlook meeting. Shape:
+    #   [{label: str|None, start_at: ISO 8601 IST-naive, slot_minutes: int,
+    #     team_ids: list[int]}, ...]
+    # Organizers create N invites per panel via the R2 invite workspace --
+    # useful when the finalist demos need to be split across morning/afternoon,
+    # or when sub-groups of teams meet different judge subsets at different
+    # times. R1 keeps using EVENT_DATES + SLOT_MINUTES constants since 95
+    # teams across 2 days is a known shape. Nullable / empty list means
+    # no invites configured yet.
+    #
+    # Legacy single-config columns r2_start_at / r2_slot_minutes were
+    # superseded by this list; if they exist on older databases they are
+    # ignored (lightweight_migrate doesn't drop columns).
+    r2_invites: Mapped[list | None] = mapped_column(JSON, default=list)
+
     teams: Mapped[list["PanelTeam"]] = relationship(back_populates="panel", cascade="all, delete-orphan")
     judges: Mapped[list["PanelJudge"]] = relationship(back_populates="panel", cascade="all, delete-orphan")
 

@@ -189,6 +189,14 @@ class JudgeAssignmentOut(BaseModel):
     round: int
 
 
+class R2InviteOut(BaseModel):
+    """A single configured Round 2 invite block. Each panel can have many."""
+    label: str | None = None
+    start_at: str  # ISO 8601 IST-naive, e.g. '2026-06-25T10:00:00'
+    slot_minutes: int
+    team_ids: list[int] = []
+
+
 class PanelOut(BaseModel):
     """A panel with its team_ids and judge_ids flattened for the frontend."""
     id: int
@@ -196,11 +204,21 @@ class PanelOut(BaseModel):
     round: int
     team_ids: list[int] = []
     judge_ids: list[int] = []
+    # Round 2 only: organizer-defined list of invite blocks. Empty = none configured yet.
+    r2_invites: list[R2InviteOut] = []
 
 
 class PanelCreate(BaseModel):
     name: str
     round: int
+
+
+class R2InviteIn(BaseModel):
+    """Body for POST/PATCH /api/panels/{id}/r2-invites[/{idx}]."""
+    label: str | None = None
+    start_at: str  # ISO 8601
+    slot_minutes: int
+    team_ids: list[int]
 
 
 class PanelUpdate(BaseModel):

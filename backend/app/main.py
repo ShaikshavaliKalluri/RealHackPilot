@@ -52,6 +52,7 @@ from .schemas import (
     VisitNotesUpdate,
     UserRoleOut, JudgeAssignmentSet, JudgeAssignmentOut,
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet, PanelSwapTeamDays,
+    R2InviteIn,
     AdoptChannelByLinkRequest,
     SwagPersonOut, SwagMarkRequest, SwagStats,
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
@@ -1717,12 +1718,24 @@ def teams_for_judge(
 # ===== Panels: groups of teams + judges per round =====
 
 def _panel_to_out(p: models.Panel) -> PanelOut:
+    raw_invites = getattr(p, 'r2_invites', None) or []
+    r2_invites: list[dict] = []
+    for inv in raw_invites:
+        if not isinstance(inv, dict):
+            continue
+        r2_invites.append({
+            "label": inv.get("label"),
+            "start_at": inv.get("start_at", ""),
+            "slot_minutes": int(inv.get("slot_minutes") or 0),
+            "team_ids": list(inv.get("team_ids") or []),
+        })
     return PanelOut(
         id=p.id,
         name=p.name,
         round=p.round,
         team_ids=sorted({pt.team_id for pt in p.teams}),
         judge_ids=sorted({pj.judge_id for pj in p.judges}),
+        r2_invites=r2_invites,
     )
 
 
@@ -1749,6 +1762,115 @@ def create_panel(
         created_by_email=(profile.get("email") or "").lower() or None,
     )
     db.add(panel)
+    db.commit()
+    db.refresh(panel)
+    return _panel_to_out(panel)
+
+
+def _validate_r2_invite_payload(req: "R2InviteIn", panel: models.Panel) -> dict:
+    """Validate POST/PATCH body for an R2 invite block and return the dict
+    shape we persist to panel.r2_invites. Raises HTTPException(400) on
+    bad input."""
+    try:
+        raw = req.start_at.replace('Z', '')
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"start_at must be ISO 8601 datetime, got {req.start_at!r}")
+    if req.slot_minutes <= 0 or req.slot_minutes > 240:
+        raise HTTPException(status_code=400, detail="slot_minutes must be between 1 and 240")
+    panel_team_ids = {pt.team_id for pt in panel.teams}
+    cleaned_ids: list[int] = []
+    for tid in req.team_ids:
+        if tid not in panel_team_ids:
+            raise HTTPException(status_code=400, detail=f"team {tid} is not in panel {panel.id}")
+        if tid in cleaned_ids:
+            continue  # silently de-dupe order-preserving
+        cleaned_ids.append(tid)
+    if not cleaned_ids:
+        raise HTTPException(status_code=400, detail="team_ids must include at least one team")
+    label = (req.label or "").strip() or None
+    return {
+        "label": label,
+        # Store ISO without tz; the scheduling layer treats it as IST naive.
+        "start_at": dt.isoformat(timespec="seconds"),
+        "slot_minutes": int(req.slot_minutes),
+        "team_ids": cleaned_ids,
+    }
+
+
+@app.post("/api/panels/{panel_id}/r2-invites", response_model=PanelOut)
+def create_panel_r2_invite(
+    panel_id: int,
+    req: R2InviteIn,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> PanelOut:
+    """Append a new Round 2 invite block to the panel. Each block defines
+    one Outlook invite -- its own label, start datetime (IST naive ISO),
+    slot duration, and explicit team subset. Organizer only."""
+    _require_organizer_role(claims, db)
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+    if panel.round != 2:
+        raise HTTPException(status_code=400, detail="r2-invites are only valid for round-2 panels")
+    cleaned = _validate_r2_invite_payload(req, panel)
+    existing = list(panel.r2_invites or [])
+    existing.append(cleaned)
+    panel.r2_invites = existing
+    # JSON column needs explicit flag for SQLAlchemy to detect list mutation.
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(panel, "r2_invites")
+    db.commit()
+    db.refresh(panel)
+    return _panel_to_out(panel)
+
+
+@app.patch("/api/panels/{panel_id}/r2-invites/{invite_index}", response_model=PanelOut)
+def update_panel_r2_invite(
+    panel_id: int,
+    invite_index: int,
+    req: R2InviteIn,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> PanelOut:
+    _require_organizer_role(claims, db)
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+    existing = list(panel.r2_invites or [])
+    if invite_index < 0 or invite_index >= len(existing):
+        raise HTTPException(status_code=404, detail="invite index out of range")
+    cleaned = _validate_r2_invite_payload(req, panel)
+    existing[invite_index] = cleaned
+    panel.r2_invites = existing
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(panel, "r2_invites")
+    db.commit()
+    db.refresh(panel)
+    return _panel_to_out(panel)
+
+
+@app.delete("/api/panels/{panel_id}/r2-invites/{invite_index}", response_model=PanelOut)
+def delete_panel_r2_invite(
+    panel_id: int,
+    invite_index: int,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> PanelOut:
+    _require_organizer_role(claims, db)
+    panel = db.query(models.Panel).get(panel_id)
+    if not panel:
+        raise HTTPException(status_code=404, detail="panel not found")
+    existing = list(panel.r2_invites or [])
+    if invite_index < 0 or invite_index >= len(existing):
+        raise HTTPException(status_code=404, detail="invite index out of range")
+    existing.pop(invite_index)
+    panel.r2_invites = existing
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(panel, "r2_invites")
     db.commit()
     db.refresh(panel)
     return _panel_to_out(panel)
@@ -1854,17 +1976,14 @@ def get_panel_invite_ics(
 def get_panel_invite_meta(
     panel_id: int,
     day: int,
+    invite_index: int = 0,
     claims: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> dict:
     """Return JSON meeting metadata for the Outlook-Web compose deeplink path.
 
-    New Outlook doesn't reliably treat downloaded .ics files as editable
-    drafts. This endpoint feeds the frontend's clipboard + deeplink flow:
-    the frontend copies the attendee emails to the clipboard and opens
-    outlook.office.com/calendar/deeplink/compose with subject/start/end/
-    body/location, where new Outlook intercepts and opens its native
-    Create-event dialog with the user as organizer.
+    For Round 2 panels, `invite_index` selects which configured invite
+    block to render. Round 1 ignores invite_index (one schedule per day).
     """
     if day not in (1, 2):
         raise HTTPException(status_code=400, detail="day must be 1 or 2")
@@ -1872,7 +1991,7 @@ def get_panel_invite_meta(
     if not panel:
         raise HTTPException(status_code=404, detail="panel not found")
     try:
-        return scheduling.build_panel_invite_meta(panel, day=day, db=db)
+        return scheduling.build_panel_invite_meta(panel, day=day, db=db, r2_invite_index=invite_index)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
