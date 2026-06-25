@@ -38,6 +38,11 @@ export function OrganizerScoring({ teams, onReload }: Props) {
   }, []);
 
   useEffect(() => {
+    // Clear stale data first so the UI doesn't briefly show the previous
+    // round's leaderboard while the new fetch is in flight. The Leaderboard
+    // component below renders `null` if `leaderboard === null`, giving a
+    // clean transition.
+    setLeaderboard(null);
     reloadLeaderboard(round);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [round]);
@@ -690,7 +695,6 @@ function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: Advancement
         {winnerOpen && (
           <CrownWinnersModal
             rows={rankedRows}
-            teamById={teamById}
             onClose={() => setWinnerOpen(false)}
             onSaved={() => { setWinnerOpen(false); onAdvanced(); }}
           />
@@ -815,12 +819,11 @@ function AdvancementPanel({ round, leaderboard, teams, onAdvanced }: Advancement
 
 interface CrownWinnersModalProps {
   rows: LeaderboardData['rows'];
-  teamById: Map<number, Team>;
   onClose: () => void;
   onSaved: () => void;
 }
 
-function CrownWinnersModal({ rows, teamById, onClose, onSaved }: CrownWinnersModalProps) {
+function CrownWinnersModal({ rows, onClose, onSaved }: CrownWinnersModalProps) {
   // How many finalists to crown. Defaults to 5 — RealHack 2026 picks vary
   // (top 3, top 5, top 7, top 10) so we make this configurable up front.
   const [count, setCount] = useState<number>(Math.min(5, rows.length || 5));
