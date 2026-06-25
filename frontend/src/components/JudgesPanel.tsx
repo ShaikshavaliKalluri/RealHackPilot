@@ -733,15 +733,15 @@ export function JudgesPanel({ teams }: Props) {
                     )}
                     {p.team_ids.length > 0 && (
                       p.round === 2 ? (
-                        // Round 2 final has the smaller finalist set
-                        // (~20 teams) and fits on a single day, so one
-                        // invite is enough -- no day-split.
+                        // Round 2 has the smaller finalist set (~20 teams)
+                        // and fits on a single day, so one invite is
+                        // enough -- no day-split.
                         <button
                           onClick={() => handleOpenInviteWorkspace(p, 1)}
                           className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Open the finals invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
+                          title="Open the Round 2 invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
                         >
-                          📅 Finals invite
+                          📅 Round 2 invite
                         </button>
                       ) : (
                         <>
@@ -1103,9 +1103,9 @@ function regenerateBodyHtml(originalBodyHtml: string, scheduleRows: ScheduleRow[
 }
 
 function InvitePrepModal({ panelId, panelName, panelRound, day, meta, onRefresh, onClose }: InvitePrepModalProps) {
-  // Round 2 finals run as a single block; no day-split phrasing.
-  const isFinals = panelRound === 2;
-  const headerLabel = isFinals ? 'Finals' : `Day ${day}`;
+  // Round 2 runs as a single block; no day-split phrasing.
+  const isRound2 = panelRound === 2;
+  const headerLabel = isRound2 ? 'Round 2' : `Day ${day}`;
   const [lastCopied, setLastCopied] = useState<CopyTarget | null>(null);
   // Editable copy of the schedule. The slot/time/panel for each position
   // are fixed (those are the calendar slots); we only swap which team is
@@ -1217,7 +1217,9 @@ function InvitePrepModal({ panelId, panelName, panelRound, day, meta, onRefresh,
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-4xl bg-ink-800 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden max-h-[92vh] flex flex-col">
         <div className="bg-gradient-to-br from-amber-500/25 to-orange-500/15 p-4 border-b border-amber-500/40 flex items-start justify-between">
           <div>
-            <h3 className="font-bold text-amber-200 text-base">📅 {panelName} — {headerLabel} invite workspace</h3>
+            <h3 className="font-bold text-amber-200 text-base">
+              📅 {isRound2 ? 'Round 2' : `${panelName} — ${headerLabel}`} invite workspace
+            </h3>
             <p className="text-xs text-slate-300 mt-0.5">
               {dayLabel}, 2026 · 9:00 AM – 5:00 PM IST · {meta.team_count} team{meta.team_count === 1 ? '' : 's'} ·
               Lunch 13:00 – 14:00 · 15-min slots
@@ -1343,9 +1345,13 @@ function InvitePrepModal({ panelId, panelName, panelRound, day, meta, onRefresh,
                 <thead>
                   <tr className="bg-ink-900/80 text-amber-200">
                     <th className="px-2 py-2 text-center border border-slate-700/60 w-16">Move</th>
-                    <th className="px-2 py-2 text-center border border-slate-700/60 w-24">To Day {otherDay}</th>
+                    {!isRound2 && (
+                      <th className="px-2 py-2 text-center border border-slate-700/60 w-24">To Day {otherDay}</th>
+                    )}
                     <th className="px-3 py-2 text-left border border-slate-700/60">Team Name</th>
-                    <th className="px-3 py-2 text-left border border-slate-700/60">Panel</th>
+                    {!isRound2 && (
+                      <th className="px-3 py-2 text-left border border-slate-700/60">Panel</th>
+                    )}
                     <th className="px-3 py-2 text-left border border-slate-700/60">Slot</th>
                     <th className="px-3 py-2 text-right border border-slate-700/60">Time</th>
                     <th className="px-3 py-2 text-left border border-slate-700/60">Mentor</th>
@@ -1398,16 +1404,18 @@ function InvitePrepModal({ panelId, panelName, panelRound, day, meta, onRefresh,
                               </button>
                             </div>
                           </td>
-                          <td className="px-1 py-1 border border-slate-700/60 text-center">
-                            <button
-                              onClick={() => openSwapPicker(row)}
-                              disabled={swapping}
-                              className="text-xs px-2 py-1 rounded border border-sky-500/30 hover:border-sky-500/60 hover:bg-sky-500/10 text-sky-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                              title={`Swap ${row.team} with a team currently on Day ${otherDay}`}
-                            >
-                              → Day {otherDay}
-                            </button>
-                          </td>
+                          {!isRound2 && (
+                            <td className="px-1 py-1 border border-slate-700/60 text-center">
+                              <button
+                                onClick={() => openSwapPicker(row)}
+                                disabled={swapping}
+                                className="text-xs px-2 py-1 rounded border border-sky-500/30 hover:border-sky-500/60 hover:bg-sky-500/10 text-sky-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                title={`Swap ${row.team} with a team currently on Day ${otherDay}`}
+                              >
+                                → Day {otherDay}
+                              </button>
+                            </td>
+                          )}
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-100 font-medium">
                             <span className="inline-flex items-center gap-1.5">
                               {row.team}
@@ -1421,7 +1429,9 @@ function InvitePrepModal({ panelId, panelName, panelRound, day, meta, onRefresh,
                               )}
                             </span>
                           </td>
-                          <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300">{row.panel}</td>
+                          {!isRound2 && (
+                            <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300">{row.panel}</td>
+                          )}
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300">{row.slot}</td>
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-300 text-right font-mono">{row.time}</td>
                           <td className="px-3 py-1.5 border border-slate-700/60 text-slate-400">{row.mentor || '—'}</td>

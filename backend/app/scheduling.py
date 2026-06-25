@@ -354,17 +354,26 @@ def _ordinal_date(d: datetime) -> str:
 
 def _format_schedule_html(
     schedule: list[tuple[models.Team, datetime, datetime]],
-    panel_name: str,
+    panel_name: str | None,
     day_date: datetime,
 ) -> str:
-    """HTML schedule table — 4 columns matching the ShortHack 2025 template:
-    Team Name | Panel | Slot (date) | Time.
+    """HTML schedule table.
 
-    Inline styles only — Outlook desktop ignores <style> blocks. A BREAK
-    row spans all 4 columns where lunch falls (13:00 – 14:00 IST).
+    R1 layout (4 columns): Team Name | Panel | Slot | Time. Panel name
+    column is needed since R1 has Panel 1 vs Panel 2 attendees in the
+    same chain.
+
+    R2 layout (3 columns): Team Name | Slot | Time. Single Round-2 panel,
+    so the Panel column is redundant. Pass panel_name=None to hide it.
+
+    Inline styles only -- Outlook desktop ignores <style> blocks. A BREAK
+    row spans all columns where lunch falls (13:00 – 14:00 IST).
     """
     if not schedule:
         return "<p><em>(no teams scheduled for this day)</em></p>"
+
+    show_panel = panel_name is not None
+    colspan = 4 if show_panel else 3
 
     date_label = _ordinal_date(day_date)
     rows_html: list[str] = []
@@ -378,7 +387,7 @@ def _format_schedule_html(
             if b_end_minutes <= slot_minutes:
                 rows_html.append(
                     "<tr style='background:#dbe9f7;'>"
-                    "<td colspan='4' style='padding:10px 12px;border:1px solid #c9d6e8;text-align:center;"
+                    f"<td colspan='{colspan}' style='padding:10px 12px;border:1px solid #c9d6e8;text-align:center;"
                     "font-weight:700;color:#0a4f99;letter-spacing:.5px;'>BREAK</td>"
                     "</tr>"
                 )
@@ -386,12 +395,16 @@ def _format_schedule_html(
             else:
                 break
 
+        panel_cell = (
+            "<td style='padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;'>"
+            f"{_html_escape(panel_name)}</td>"
+            if show_panel else ""
+        )
         rows_html.append(
             "<tr>"
             "<td style='padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;'>"
             f"<strong style='color:#1a1f26;'>{_html_escape(team.name)}</strong></td>"
-            "<td style='padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;'>"
-            f"{_html_escape(panel_name)}</td>"
+            + panel_cell +
             "<td style='padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;'>"
             f"{date_label}</td>"
             "<td style='padding:8px 12px;border:1px solid #c9d6e8;background:#ffffff;color:#1a1f26;"
@@ -400,6 +413,10 @@ def _format_schedule_html(
             "</tr>"
         )
 
+    panel_header = (
+        "<th style='padding:10px 12px;text-align:left;border:1px solid #0a4f99;font-weight:700;'>Panel</th>"
+        if show_panel else ""
+    )
     return (
         "<table cellpadding='0' cellspacing='0' border='0' style='border-collapse:collapse;width:100%;"
         "max-width:680px;font-family:Segoe UI,-apple-system,BlinkMacSystemFont,Arial,sans-serif;"
@@ -407,7 +424,7 @@ def _format_schedule_html(
         "<thead>"
         "<tr style='background:#0a4f99;color:#ffffff;'>"
         "<th style='padding:10px 12px;text-align:left;border:1px solid #0a4f99;font-weight:700;'>Team Name</th>"
-        "<th style='padding:10px 12px;text-align:left;border:1px solid #0a4f99;font-weight:700;'>Panel</th>"
+        + panel_header +
         "<th style='padding:10px 12px;text-align:left;border:1px solid #0a4f99;font-weight:700;'>Slot</th>"
         "<th style='padding:10px 12px;text-align:right;border:1px solid #0a4f99;font-weight:700;'>Time</th>"
         "</tr>"
@@ -437,10 +454,15 @@ def _build_invite_body_html(
         # Greeting
         "<p style='margin:0 0 12px;'>Hi All,</p>"
 
-        # Excitement line
+        # Excitement line. R2 is a single panel, single day -- drop the
+        # 'Panel N -- Day N' phrasing in that case.
         "<p style='margin:0 0 18px;'>"
-        f"We are excited to invite you to <strong>RealHack 2026</strong> — "
-        f"{_html_escape(panel.name)} — Day {day} demos!"
+        + (
+            f"We are excited to invite you to <strong>RealHack 2026 &mdash; Round 2</strong> demos!"
+            if panel.round == 2
+            else f"We are excited to invite you to <strong>RealHack 2026</strong> &mdash; "
+                 f"{_html_escape(panel.name)} &mdash; Day {day} demos!"
+        ) +
         "</p>"
 
         # Guidelines section
@@ -462,8 +484,8 @@ def _build_invite_body_html(
         "</li>"
         "</ol>"
 
-        # Schedule table
-        f"{_format_schedule_html(schedule, panel.name, day_date)}"
+        # Schedule table. R2 hides the redundant Panel column (single panel).
+        f"{_format_schedule_html(schedule, None if panel.round == 2 else panel.name, day_date)}"
 
         # Sign-off
         "<p style='margin:22px 0 0;font-size:13px;'>"
@@ -534,10 +556,12 @@ def build_panel_invite_meta(panel: models.Panel, day: int, db: Session | None = 
 
     required, optional = _collect_attendees(panel, schedule)
 
-    # Finals (Round 2) read better without 'Day N' phrasing -- there's
-    # only one day. R1 keeps the Day 1 / Day 2 split.
+    # Round 2 reads better without 'Day N' phrasing -- there's only one
+    # day. There's also only one Round 2 panel so the panel name is
+    # redundant in the subject. R1 keeps the Day 1 / Day 2 split with
+    # panel name (Panel 1 vs Panel 2 distinction matters there).
     if panel.round == 2:
-        summary = f"RealHack 2026 Finals — {panel.name} ({day_start.strftime('%b %d')})"
+        summary = f"RealHack 2026 Round 2 ({day_start.strftime('%b %d')})"
     else:
         summary = f"RealHack 2026 Judging — {panel.name} — Day {day} ({day_start.strftime('%b %d')})"
     body = (
@@ -621,10 +645,12 @@ def build_panel_invite_ics(
 
     required, optional = _collect_attendees(panel, schedule)
 
-    # Finals (Round 2) read better without 'Day N' phrasing -- there's
-    # only one day. R1 keeps the Day 1 / Day 2 split.
+    # Round 2 reads better without 'Day N' phrasing -- there's only one
+    # day. There's also only one Round 2 panel so the panel name is
+    # redundant in the subject. R1 keeps the Day 1 / Day 2 split with
+    # panel name (Panel 1 vs Panel 2 distinction matters there).
     if panel.round == 2:
-        summary = f"RealHack 2026 Finals — {panel.name} ({day_start.strftime('%b %d')})"
+        summary = f"RealHack 2026 Round 2 ({day_start.strftime('%b %d')})"
     else:
         summary = f"RealHack 2026 Judging — {panel.name} — Day {day} ({day_start.strftime('%b %d')})"
     description_plain = (
