@@ -239,9 +239,17 @@ def schedule_for_day(
     date = datetime(year, month, dom)
 
     all_teams = [pt.team for pt in panel.teams if pt.team is not None]
-    overrides = _load_day_overrides(panel, db) if db is not None else {}
-    day1_teams, day2_teams = _distribute_teams_across_days(all_teams, overrides=overrides)
-    teams_for_day = day1_teams if day == 1 else day2_teams
+    # Round 2 (finals) has the smaller finalist set and fits on a single
+    # day -- skip the day-split logic entirely and put every team on Day 1.
+    # Day 2 invite for a Round 2 panel returns no teams (and the frontend
+    # hides that button), so this branch only matters if someone hits the
+    # endpoint directly.
+    if panel.round == 2:
+        teams_for_day = all_teams if day == 1 else []
+    else:
+        overrides = _load_day_overrides(panel, db) if db is not None else {}
+        day1_teams, day2_teams = _distribute_teams_across_days(all_teams, overrides=overrides)
+        teams_for_day = day1_teams if day == 1 else day2_teams
 
     if not teams_for_day:
         return []
@@ -526,7 +534,12 @@ def build_panel_invite_meta(panel: models.Panel, day: int, db: Session | None = 
 
     required, optional = _collect_attendees(panel, schedule)
 
-    summary = f"RealHack 2026 Judging — {panel.name} — Day {day} ({day_start.strftime('%b %d')})"
+    # Finals (Round 2) read better without 'Day N' phrasing -- there's
+    # only one day. R1 keeps the Day 1 / Day 2 split.
+    if panel.round == 2:
+        summary = f"RealHack 2026 Finals — {panel.name} ({day_start.strftime('%b %d')})"
+    else:
+        summary = f"RealHack 2026 Judging — {panel.name} — Day {day} ({day_start.strftime('%b %d')})"
     body = (
         f"{summary}\n\n"
         f"{_format_schedule_block(schedule)}\n\n"
@@ -608,7 +621,12 @@ def build_panel_invite_ics(
 
     required, optional = _collect_attendees(panel, schedule)
 
-    summary = f"RealHack 2026 Judging — {panel.name} — Day {day} ({day_start.strftime('%b %d')})"
+    # Finals (Round 2) read better without 'Day N' phrasing -- there's
+    # only one day. R1 keeps the Day 1 / Day 2 split.
+    if panel.round == 2:
+        summary = f"RealHack 2026 Finals — {panel.name} ({day_start.strftime('%b %d')})"
+    else:
+        summary = f"RealHack 2026 Judging — {panel.name} — Day {day} ({day_start.strftime('%b %d')})"
     description_plain = (
         f"{summary}\n\n"
         f"{_format_schedule_block(schedule)}\n\n"

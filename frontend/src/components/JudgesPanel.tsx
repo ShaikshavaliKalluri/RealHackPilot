@@ -99,7 +99,7 @@ export function JudgesPanel({ teams }: Props) {
   // Outlook new-meeting compose dialog. panelId enables in-modal actions
   // like cross-day team swaps that need a server roundtrip.
   const [inviteMeta, setInviteMeta] = useState<
-    | { meta: PanelInviteMeta; panelName: string; panelId: number; day: 1 | 2 }
+    | { meta: PanelInviteMeta; panelName: string; panelId: number; panelRound: number; day: 1 | 2 }
     | null
   >(null);
 
@@ -256,7 +256,13 @@ export function JudgesPanel({ teams }: Props) {
   const handleOpenInviteWorkspace = async (panel: Panel, day: 1 | 2) => {
     try {
       const meta = await fetchPanelInviteMeta(panel.id, day);
-      setInviteMeta({ meta, panelName: panel.name, panelId: panel.id, day });
+      setInviteMeta({
+        meta,
+        panelName: panel.name,
+        panelId: panel.id,
+        panelRound: panel.round,
+        day,
+      });
     } catch (e: any) {
       alert(`Day ${day} invite failed: ${e?.message ?? e}`);
     }
@@ -726,22 +732,35 @@ export function JudgesPanel({ teams }: Props) {
                       </button>
                     )}
                     {p.team_ids.length > 0 && (
-                      <>
+                      p.round === 2 ? (
+                        // Round 2 final has the smaller finalist set
+                        // (~20 teams) and fits on a single day, so one
+                        // invite is enough -- no day-split.
                         <button
                           onClick={() => handleOpenInviteWorkspace(p, 1)}
                           className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Open the Day 1 (June 24) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
+                          title="Open the finals invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
                         >
-                          📅 Day 1 invite
+                          📅 Finals invite
                         </button>
-                        <button
-                          onClick={() => handleOpenInviteWorkspace(p, 2)}
-                          className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
-                          title="Open the Day 2 (June 25) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
-                        >
-                          📅 Day 2 invite
-                        </button>
-                      </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleOpenInviteWorkspace(p, 1)}
+                            className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
+                            title="Open the Day 1 (June 24) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
+                          >
+                            📅 Day 1 invite
+                          </button>
+                          <button
+                            onClick={() => handleOpenInviteWorkspace(p, 2)}
+                            className="text-xs px-2.5 py-1 rounded border border-amber-500/30 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-300 transition"
+                            title="Open the Day 2 (June 25) invite workspace — copy subject, body, and attendee lists to paste into a new Outlook meeting"
+                          >
+                            📅 Day 2 invite
+                          </button>
+                        </>
+                      )
                     )}
                     <button
                       onClick={() => openEditor(p, 'judges')}
@@ -986,6 +1005,7 @@ export function JudgesPanel({ teams }: Props) {
         <InvitePrepModal
           panelId={inviteMeta.panelId}
           panelName={inviteMeta.panelName}
+          panelRound={inviteMeta.panelRound}
           day={inviteMeta.day}
           meta={inviteMeta.meta}
           onRefresh={refreshInviteMeta}
@@ -1008,6 +1028,10 @@ export function JudgesPanel({ teams }: Props) {
 interface InvitePrepModalProps {
   panelId: number;
   panelName: string;
+  /** Round number for the panel (1 = preliminaries split across two days,
+   *  2 = finals on a single day). Used to decide the workspace heading
+   *  and the email subject phrasing. */
+  panelRound: number;
   day: 1 | 2;
   meta: PanelInviteMeta;
   onRefresh: () => Promise<void>;
@@ -1078,7 +1102,10 @@ function regenerateBodyHtml(originalBodyHtml: string, scheduleRows: ScheduleRow[
   return originalBodyHtml.replace(tbodyRegex, `$1${newRows}$3`);
 }
 
-function InvitePrepModal({ panelId, panelName, day, meta, onRefresh, onClose }: InvitePrepModalProps) {
+function InvitePrepModal({ panelId, panelName, panelRound, day, meta, onRefresh, onClose }: InvitePrepModalProps) {
+  // Round 2 finals run as a single block; no day-split phrasing.
+  const isFinals = panelRound === 2;
+  const headerLabel = isFinals ? 'Finals' : `Day ${day}`;
   const [lastCopied, setLastCopied] = useState<CopyTarget | null>(null);
   // Editable copy of the schedule. The slot/time/panel for each position
   // are fixed (those are the calendar slots); we only swap which team is
@@ -1190,7 +1217,7 @@ function InvitePrepModal({ panelId, panelName, day, meta, onRefresh, onClose }: 
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-4xl bg-ink-800 border border-amber-500/40 rounded-2xl shadow-2xl shadow-black/50 overflow-hidden max-h-[92vh] flex flex-col">
         <div className="bg-gradient-to-br from-amber-500/25 to-orange-500/15 p-4 border-b border-amber-500/40 flex items-start justify-between">
           <div>
-            <h3 className="font-bold text-amber-200 text-base">📅 {panelName} — Day {day} invite workspace</h3>
+            <h3 className="font-bold text-amber-200 text-base">📅 {panelName} — {headerLabel} invite workspace</h3>
             <p className="text-xs text-slate-300 mt-0.5">
               {dayLabel}, 2026 · 9:00 AM – 5:00 PM IST · {meta.team_count} team{meta.team_count === 1 ? '' : 's'} ·
               Lunch 13:00 – 14:00 · 15-min slots
