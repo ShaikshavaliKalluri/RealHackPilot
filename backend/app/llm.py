@@ -182,6 +182,36 @@ def call_json(messages: list[dict], mock_payload: dict, mock_schema: dict, smart
     raise LLMError(f"All LLM providers failed; last error: {last_err}")
 
 
+def call_text(messages: list[dict], smart: bool = False) -> LLMResult:
+    """Call an LLM expecting plain-text output. No JSON parsing.
+
+    Uses the same provider fallback order as call_json. The 'mock' provider
+    is intentionally skipped here -- a mock summary would mislead organizers
+    into thinking the LLM ran. If all real providers fail, raises LLMError.
+    """
+    last_err: Exception | None = None
+    for provider in _providers_in_order():
+        try:
+            if provider == "openai":
+                model = settings.openai_model_smart if smart else settings.openai_model_fast
+                text, used_model = _call_openai(messages, model, json_mode=False)
+            elif provider == "anthropic":
+                model = settings.anthropic_model_smart if smart else settings.anthropic_model_fast
+                text, used_model = _call_anthropic(messages, model)
+            else:
+                continue
+            return LLMResult(provider=provider, model=used_model, data={"text": text.strip()}, raw_text=text)
+        except LLMError as e:
+            last_err = e
+            logger.info("Provider %s skipped (text): %s", provider, e)
+            continue
+        except Exception as e:  # pragma: no cover
+            last_err = e
+            logger.exception("Provider %s crashed (text): %s", provider, e)
+            continue
+    raise LLMError(f"All LLM text providers failed; last error: {last_err}")
+
+
 def _extract_json(text: str) -> str:
     """Pull the first {...} JSON block out of a possibly-noisy LLM response."""
     text = text.strip()

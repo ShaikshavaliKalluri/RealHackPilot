@@ -1696,3 +1696,97 @@ export async function fetchRoundSummary(): Promise<RoundSummary[]> {
   if (!r.ok) throw new Error(`Round summary failed: ${r.status}`);
   return r.json();
 }
+
+// ===== Feedback summary (AI-summarized judge comments per team) =====
+
+export interface FeedbackSummaryRow {
+  team_id: number;
+  team_name: string;
+  round: number;
+  comment_count: number;
+  has_channel: boolean;
+  summary: string | null;
+  generated_at: string | null;
+  edited_at: string | null;
+  posted_at: string | null;
+  posted_message_id: string | null;
+}
+
+export interface GenerateFeedbackSummaryResult {
+  team_id: number;
+  status: 'generated' | 'skipped_existing' | 'no_comments' | 'failed';
+  summary: string | null;
+  comment_count: number;
+  error: string | null;
+}
+
+export interface PostFeedbackSummaryResult {
+  team_id: number;
+  status: 'posted' | 'no_summary' | 'no_channel' | 'failed';
+  message_id: string | null;
+  posted_at: string | null;
+  error: string | null;
+}
+
+export async function fetchFeedbackSummaries(round: number): Promise<FeedbackSummaryRow[]> {
+  const r = await authFetch(`${BASE}/teams/feedback-summary?round=${round}`);
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Feedback summary fetch failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+export async function generateFeedbackSummaries(
+  round: number,
+  teamIds: number[],
+  force: boolean = false,
+): Promise<GenerateFeedbackSummaryResult[]> {
+  const r = await authFetch(`${BASE}/teams/feedback-summary/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ round, team_ids: teamIds, force }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Generate summaries failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+export async function updateFeedbackSummary(
+  teamId: number,
+  round: number,
+  summary: string,
+): Promise<FeedbackSummaryRow> {
+  const r = await authFetch(`${BASE}/teams/${teamId}/feedback-summary`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ round, summary }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Save summary failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+export async function postFeedbackSummaries(
+  round: number,
+  teamIds: number[],
+): Promise<PostFeedbackSummaryResult[]> {
+  const graphToken = await getGraphTeamsToken();
+  const r = await authFetch(`${BASE}/teams/feedback-summary/post`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Graph-Token': graphToken,
+    },
+    body: JSON.stringify({ round, team_ids: teamIds }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Post summaries failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}

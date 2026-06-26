@@ -243,6 +243,58 @@ class AdoptChannelByLinkRequest(BaseModel):
     teams_channel_link: str
 
 
+# ===== Feedback summary (AI-summarized judge comments) =====
+
+class FeedbackSummaryRow(BaseModel):
+    """One row in the feedback-summary table -- one team in one round."""
+    team_id: int
+    team_name: str
+    round: int
+    comment_count: int
+    has_channel: bool
+    summary: str | None = None
+    generated_at: str | None = None
+    edited_at: str | None = None
+    posted_at: str | None = None
+    posted_message_id: str | None = None
+
+
+class GenerateFeedbackSummariesRequest(BaseModel):
+    round: int
+    team_ids: list[int]
+    # If True, regenerate even for teams that already have a stored summary.
+    # Default: skip teams with an existing summary unless they were edited
+    # since (so editors don't clobber their work).
+    force: bool = False
+
+
+class GenerateFeedbackSummaryResult(BaseModel):
+    """Per-team outcome from a bulk generate call."""
+    team_id: int
+    status: str  # 'generated' | 'skipped_existing' | 'no_comments' | 'failed'
+    summary: str | None = None
+    comment_count: int = 0
+    error: str | None = None
+
+
+class UpdateFeedbackSummaryRequest(BaseModel):
+    round: int
+    summary: str
+
+
+class PostFeedbackSummariesRequest(BaseModel):
+    round: int
+    team_ids: list[int]
+
+
+class PostFeedbackSummaryResult(BaseModel):
+    team_id: int
+    status: str  # 'posted' | 'no_summary' | 'no_channel' | 'failed'
+    message_id: str | None = None
+    posted_at: str | None = None
+    error: str | None = None
+
+
 # ===== Swag (t-shirt) pickup =====
 
 class SwagPersonOut(BaseModel):

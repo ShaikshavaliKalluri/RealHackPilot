@@ -136,6 +136,9 @@ def lightweight_migrate(target_engine: Engine | None = None) -> None:
         additions.append(f"ALTER TABLE teams ADD COLUMN demo_status_at {ts_type}")
     if "demo_status_by" not in existing:
         additions.append("ALTER TABLE teams ADD COLUMN demo_status_by VARCHAR(255)")
+    # Per-round AI summary of judge comments. JSON keyed by round string.
+    if "feedback_summary" not in existing:
+        additions.append("ALTER TABLE teams ADD COLUMN feedback_summary JSON")
 
     # Drop the (judge_id, team_id) unique constraint on judge_visits if it
     # exists -- earlier model had it for "one visit per pair" semantics, then

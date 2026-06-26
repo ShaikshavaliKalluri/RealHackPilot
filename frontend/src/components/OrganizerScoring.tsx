@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Team, Judge, RubricAxis, LeaderboardData, LeaderboardRow } from '../types';
-import { fetchRubric, fetchJudges, createJudge, submitJudgeScore, fetchLeaderboard, fetchJudgeScores, advanceTeams, resetRoundAdvancements, setWinners } from '../api';
+import {
+  fetchRubric, fetchJudges, createJudge, submitJudgeScore, fetchLeaderboard,
+  fetchJudgeScores, advanceTeams, resetRoundAdvancements, setWinners,
+  fetchFeedbackSummaries, generateFeedbackSummaries, updateFeedbackSummary,
+  postFeedbackSummaries,
+  type FeedbackSummaryRow, type GenerateFeedbackSummaryResult, type PostFeedbackSummaryResult,
+} from '../api';
 
 interface Props {
   teams: Team[];
   onReload?: () => void;
 }
 
-type Tab = 'leaderboard' | 'manual';
+type Tab = 'leaderboard' | 'manual' | 'feedback';
 
 export function OrganizerScoring({ teams, onReload }: Props) {
   const [tab, setTab] = useState<Tab>('leaderboard');
@@ -62,6 +68,13 @@ export function OrganizerScoring({ teams, onReload }: Props) {
             className={`px-3 py-1.5 rounded text-sm font-semibold transition ${tab === 'manual' ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
           >
             Manual entry
+          </button>
+          <button
+            onClick={() => setTab('feedback')}
+            className={`px-3 py-1.5 rounded text-sm font-semibold transition ${tab === 'feedback' ? 'bg-lime-400 text-ink-950' : 'text-slate-300 hover:text-white'}`}
+            title="AI-summarized judge comments per team, ready to post to each team's channel"
+          >
+            Feedback to teams
           </button>
         </div>
 
@@ -131,6 +144,10 @@ export function OrganizerScoring({ teams, onReload }: Props) {
           onRefreshJudges={() => fetchJudges().then(setJudges).catch(() => {})}
           onSaved={() => reloadLeaderboard()}
         />
+      )}
+
+      {tab === 'feedback' && (
+        <FeedbackToTeamsPanel round={round} />
       )}
     </div>
   );
@@ -974,3 +991,467 @@ function CrownWinnersModal({ rows, onClose, onSaved }: CrownWinnersModalProps) {
 type _TeamRef = Team;
 const _teamRef: _TeamRef | null = null;
 void _teamRef;
+
+
+// ===== Feedback to teams (AI-summarized judge comments) =====
+
+interface FeedbackToTeamsPanelProps {
+  round: number;
+}
+
+function FeedbackToTeamsPanel({ round }: FeedbackToTeamsPanelProps) {
+  const [rows, setRows] = useState<FeedbackSummaryRow[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  // Per-team in-flight flags. Keys: `gen:<id>`, `post:<id>`, `save:<id>`.
+  const [busyKeys, setBusyKeys] = useState<Set<string>>(new Set());
+  // Local edit buffer keyed by team_id. Mirrors the saved summary until the
+  // user types -- then we hold their draft until Save or revert.
+  const [drafts, setDrafts] = useState<Map<number, string>>(new Map());
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState<'generate' | 'post' | null>(null);
+  const [bulkLog, setBulkLog] = useState<string[]>([]);
+
+  const setBusy = (key: string, on: boolean) => {
+    setBusyKeys((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(key); else next.delete(key);
+      return next;
+    });
+  };
+
+  const reload = async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const data = await fetchFeedbackSummaries(round);
+      setRows(data);
+      // Clear drafts that no longer match server state for clarity.
+      setDrafts(new Map());
+      setSelectedIds(new Set());
+    } catch (e: any) {
+      setErr(e?.message ?? String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round]);
+
+  const draftFor = (row: FeedbackSummaryRow): string => {
+    const d = drafts.get(row.team_id);
+    return d !== undefined ? d : (row.summary ?? '');
+  };
+
+  const isDirty = (row: FeedbackSummaryRow): boolean => {
+    const d = drafts.get(row.team_id);
+    return d !== undefined && d !== (row.summary ?? '');
+  };
+
+  const setDraft = (teamId: number, text: string) => {
+    setDrafts((prev) => {
+      const next = new Map(prev);
+      next.set(teamId, text);
+      return next;
+    });
+  };
+
+  const revertDraft = (teamId: number) => {
+    setDrafts((prev) => {
+      const next = new Map(prev);
+      next.delete(teamId);
+      return next;
+    });
+  };
+
+  const applyGenerateResults = (results: GenerateFeedbackSummaryResult[]) => {
+    setRows((prev) => {
+      if (!prev) return prev;
+      const byId = new Map(results.map((r) => [r.team_id, r] as const));
+      return prev.map((row) => {
+        const r = byId.get(row.team_id);
+        if (!r) return row;
+        if (r.status === 'generated' && r.summary) {
+          return {
+            ...row,
+            summary: r.summary,
+            comment_count: r.comment_count,
+            generated_at: new Date().toISOString(),
+            edited_at: null,
+            posted_at: null,
+            posted_message_id: null,
+          };
+        }
+        return row;
+      });
+    });
+    // Drop any drafts for teams whose summary was just regenerated.
+    setDrafts((prev) => {
+      const next = new Map(prev);
+      results.forEach((r) => { if (r.status === 'generated') next.delete(r.team_id); });
+      return next;
+    });
+  };
+
+  const generateOne = async (row: FeedbackSummaryRow, force: boolean) => {
+    setBusy(`gen:${row.team_id}`, true);
+    try {
+      const results = await generateFeedbackSummaries(round, [row.team_id], force);
+      applyGenerateResults(results);
+      const r = results[0];
+      if (r && r.status === 'failed') {
+        alert(`Generation failed for ${row.team_name}: ${r.error}`);
+      } else if (r && r.status === 'no_comments') {
+        alert(`No judge comments yet for ${row.team_name}.`);
+      } else if (r && r.status === 'skipped_existing') {
+        // Shouldn't happen with force=true; treat defensively.
+        alert(`Skipped (already exists). Pass Force to overwrite.`);
+      }
+    } catch (e: any) {
+      alert(`Generate failed: ${e?.message ?? e}`);
+    } finally {
+      setBusy(`gen:${row.team_id}`, false);
+    }
+  };
+
+  const saveEdit = async (row: FeedbackSummaryRow) => {
+    const text = draftFor(row).trim();
+    if (!text) {
+      alert('Summary text is empty.');
+      return;
+    }
+    setBusy(`save:${row.team_id}`, true);
+    try {
+      const fresh = await updateFeedbackSummary(row.team_id, round, text);
+      setRows((prev) => prev ? prev.map((r) => r.team_id === row.team_id ? fresh : r) : prev);
+      revertDraft(row.team_id);
+    } catch (e: any) {
+      alert(`Save failed: ${e?.message ?? e}`);
+    } finally {
+      setBusy(`save:${row.team_id}`, false);
+    }
+  };
+
+  const postOne = async (row: FeedbackSummaryRow) => {
+    if (isDirty(row)) {
+      alert('Save your edits before posting.');
+      return;
+    }
+    if (!row.summary) {
+      alert('Generate a summary first.');
+      return;
+    }
+    if (!row.has_channel) {
+      alert(`${row.team_name} has no Teams channel.`);
+      return;
+    }
+    if (row.posted_at && !confirm(`${row.team_name} was already posted at ${formatStamp(row.posted_at)}. Post again?`)) return;
+    setBusy(`post:${row.team_id}`, true);
+    try {
+      const results = await postFeedbackSummaries(round, [row.team_id]);
+      applyPostResults(results);
+      const r = results[0];
+      if (r && r.status !== 'posted') {
+        alert(`Post status: ${r.status}${r.error ? ` -- ${r.error}` : ''}`);
+      }
+    } catch (e: any) {
+      alert(`Post failed: ${e?.message ?? e}`);
+    } finally {
+      setBusy(`post:${row.team_id}`, false);
+    }
+  };
+
+  const applyPostResults = (results: PostFeedbackSummaryResult[]) => {
+    setRows((prev) => {
+      if (!prev) return prev;
+      const byId = new Map(results.map((r) => [r.team_id, r] as const));
+      return prev.map((row) => {
+        const r = byId.get(row.team_id);
+        if (!r || r.status !== 'posted') return row;
+        return { ...row, posted_at: r.posted_at, posted_message_id: r.message_id };
+      });
+    });
+  };
+
+  const bulkGenerate = async () => {
+    if (!rows) return;
+    const targetIds = selectedIds.size > 0
+      ? Array.from(selectedIds)
+      : rows.filter((r) => !r.summary && r.comment_count > 0).map((r) => r.team_id);
+    if (targetIds.length === 0) {
+      alert('No teams selected and no un-generated rows. Tick rows, or pick teams that have comments but no summary yet.');
+      return;
+    }
+    if (!confirm(`Generate AI summaries for ${targetIds.length} team${targetIds.length === 1 ? '' : 's'}? Existing summaries are kept unless you tick them and use Force regenerate per-row.`)) return;
+    setBulkBusy('generate');
+    setBulkLog([]);
+    try {
+      const results = await generateFeedbackSummaries(round, targetIds, false);
+      applyGenerateResults(results);
+      const counts = results.reduce<Record<string, number>>((acc, r) => {
+        acc[r.status] = (acc[r.status] ?? 0) + 1;
+        return acc;
+      }, {});
+      setBulkLog([
+        `Generated: ${counts.generated ?? 0}`,
+        `Skipped (already had summary): ${counts.skipped_existing ?? 0}`,
+        `No comments: ${counts.no_comments ?? 0}`,
+        `Failed: ${counts.failed ?? 0}`,
+      ]);
+    } catch (e: any) {
+      alert(`Bulk generate failed: ${e?.message ?? e}`);
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  const bulkPost = async () => {
+    if (!rows) return;
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      alert('Tick at least one row to post.');
+      return;
+    }
+    const targets = rows.filter((r) => ids.includes(r.team_id));
+    const withDirty = targets.filter((r) => isDirty(r));
+    if (withDirty.length > 0) {
+      alert(`Save edits first for: ${withDirty.map((r) => r.team_name).join(', ')}`);
+      return;
+    }
+    const ready = targets.filter((r) => r.summary && r.has_channel);
+    if (ready.length === 0) {
+      alert('None of the selected rows have both a saved summary and a Teams channel.');
+      return;
+    }
+    const alreadyPosted = ready.filter((r) => r.posted_at);
+    if (alreadyPosted.length > 0 && !confirm(`${alreadyPosted.length} of ${ready.length} selected teams were already posted previously. Post again?`)) return;
+    if (!confirm(`Post summary to ${ready.length} team channel${ready.length === 1 ? '' : 's'}?`)) return;
+    setBulkBusy('post');
+    setBulkLog([]);
+    try {
+      const results = await postFeedbackSummaries(round, ready.map((r) => r.team_id));
+      applyPostResults(results);
+      const counts = results.reduce<Record<string, number>>((acc, r) => {
+        acc[r.status] = (acc[r.status] ?? 0) + 1;
+        return acc;
+      }, {});
+      setBulkLog([
+        `Posted: ${counts.posted ?? 0}`,
+        `No summary: ${counts.no_summary ?? 0}`,
+        `No channel: ${counts.no_channel ?? 0}`,
+        `Failed: ${counts.failed ?? 0}`,
+      ]);
+    } catch (e: any) {
+      alert(`Bulk post failed: ${e?.message ?? e}`);
+    } finally {
+      setBulkBusy(null);
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectAll = () => setSelectedIds(new Set((rows ?? []).map((r) => r.team_id)));
+  const clearSelection = () => setSelectedIds(new Set());
+
+  if (loading && !rows) {
+    return <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-6 text-sm text-slate-300">Loading feedback data…</div>;
+  }
+  if (err) {
+    return <div className="bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded p-3 text-sm">{err}</div>;
+  }
+  if (!rows || rows.length === 0) {
+    return (
+      <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-6 text-sm text-slate-400">
+        No judge comments yet for Round {round}. Once judges submit scores with comments, summaries can be generated here.
+      </div>
+    );
+  }
+
+  const generatedCount = rows.filter((r) => r.summary).length;
+  const postedCount = rows.filter((r) => r.posted_at).length;
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-ink-800/60 border border-slate-700/40 rounded-xl p-4 flex flex-wrap items-center gap-3 justify-between">
+        <div className="text-sm text-slate-300">
+          <strong className="text-slate-100">{rows.length}</strong> team{rows.length === 1 ? '' : 's'} with judge comments ·{' '}
+          <strong className="text-lime-300">{generatedCount}</strong> summarized ·{' '}
+          <strong className="text-amber-300">{postedCount}</strong> posted to channels
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <button
+            onClick={selectAll}
+            className="text-xs px-2.5 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300"
+          >
+            Select all
+          </button>
+          <button
+            onClick={clearSelection}
+            className="text-xs px-2.5 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300"
+          >
+            Clear
+          </button>
+          <button
+            onClick={bulkGenerate}
+            disabled={bulkBusy !== null}
+            className="text-xs px-3 py-1.5 rounded border border-lime-500/40 hover:border-lime-500/70 hover:bg-lime-500/10 text-lime-200 transition disabled:opacity-50"
+            title="Generate AI summaries for selected rows (or all rows missing a summary if none selected)"
+          >
+            {bulkBusy === 'generate' ? 'Generating…' : '🤖 Generate'}
+          </button>
+          <button
+            onClick={bulkPost}
+            disabled={bulkBusy !== null || selectedIds.size === 0}
+            className="text-xs px-3 py-1.5 rounded border border-amber-500/40 hover:border-amber-500/70 hover:bg-amber-500/10 text-amber-200 transition disabled:opacity-50"
+            title="Post the saved summary to each selected team's Teams channel"
+          >
+            {bulkBusy === 'post' ? 'Posting…' : `📣 Post to selected (${selectedIds.size})`}
+          </button>
+          <button
+            onClick={reload}
+            className="text-xs px-3 py-1.5 rounded bg-ink-900 border border-slate-700/40 text-slate-200 hover:border-lime-500/40 transition"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {bulkLog.length > 0 && (
+        <div className="bg-ink-900/60 border border-slate-700/40 rounded-lg p-3 text-xs text-slate-300 space-y-1">
+          {bulkLog.map((line, i) => <div key={i}>{line}</div>)}
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {rows.map((row) => {
+          const dirty = isDirty(row);
+          const draft = draftFor(row);
+          const generating = busyKeys.has(`gen:${row.team_id}`);
+          const posting = busyKeys.has(`post:${row.team_id}`);
+          const saving = busyKeys.has(`save:${row.team_id}`);
+          const selected = selectedIds.has(row.team_id);
+          return (
+            <div
+              key={row.team_id}
+              className={`bg-ink-800/60 border rounded-xl p-4 transition ${selected ? 'border-lime-500/60' : 'border-slate-700/40'}`}
+            >
+              <div className="flex items-start gap-3 mb-2 flex-wrap">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => toggleSelect(row.team_id)}
+                    className="accent-lime-400"
+                  />
+                </label>
+                <div className="flex-1 min-w-[200px]">
+                  <div className="font-semibold text-slate-100">{row.team_name}</div>
+                  <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-2 flex-wrap">
+                    <span>{row.comment_count} comment{row.comment_count === 1 ? '' : 's'}</span>
+                    {row.has_channel
+                      ? <span className="text-emerald-400">✓ has channel</span>
+                      : <span className="text-rose-400">no channel</span>}
+                    {row.generated_at && <span>· generated {formatStamp(row.generated_at)}</span>}
+                    {row.edited_at && <span className="text-sky-300">· edited {formatStamp(row.edited_at)}</span>}
+                    {row.posted_at && <span className="text-amber-300">· posted {formatStamp(row.posted_at)}</span>}
+                  </div>
+                </div>
+                <div className="flex gap-2 items-center flex-wrap">
+                  {!row.summary && (
+                    <button
+                      onClick={() => generateOne(row, false)}
+                      disabled={generating || row.comment_count === 0}
+                      className="text-xs px-3 py-1.5 rounded border border-lime-500/40 hover:border-lime-500/70 hover:bg-lime-500/10 text-lime-200 transition disabled:opacity-50"
+                    >
+                      {generating ? 'Generating…' : '🤖 Generate'}
+                    </button>
+                  )}
+                  {row.summary && (
+                    <button
+                      onClick={() => generateOne(row, true)}
+                      disabled={generating}
+                      className="text-xs px-2.5 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition disabled:opacity-50"
+                      title="Regenerate -- replaces the current summary"
+                    >
+                      {generating ? 'Regen…' : '↻ Regenerate'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => postOne(row)}
+                    disabled={posting || !row.summary || !row.has_channel || dirty}
+                    className="text-xs px-3 py-1.5 rounded border border-amber-500/40 hover:border-amber-500/70 hover:bg-amber-500/10 text-amber-200 transition disabled:opacity-50"
+                    title={
+                      !row.has_channel ? 'No Teams channel' :
+                      !row.summary ? 'Generate a summary first' :
+                      dirty ? 'Save edits first' :
+                      row.posted_at ? 'Post again (replaces nothing -- adds a new message)' :
+                      'Post this summary to the team channel'
+                    }
+                  >
+                    {posting ? 'Posting…' : row.posted_at ? '📣 Re-post' : '📣 Post'}
+                  </button>
+                </div>
+              </div>
+
+              {row.summary !== null && (
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(row.team_id, e.target.value)}
+                  rows={6}
+                  className={`w-full bg-ink-900 border rounded p-2.5 text-sm text-slate-100 font-mono whitespace-pre-wrap transition ${dirty ? 'border-sky-500/60' : 'border-slate-700/40'}`}
+                />
+              )}
+              {row.summary === null && row.comment_count > 0 && (
+                <div className="text-xs text-slate-500 italic">
+                  No summary yet -- click Generate to create one from {row.comment_count} judge comment{row.comment_count === 1 ? '' : 's'}.
+                </div>
+              )}
+              {row.summary === null && row.comment_count === 0 && (
+                <div className="text-xs text-slate-500 italic">
+                  No judge comments to summarize.
+                </div>
+              )}
+              {dirty && (
+                <div className="mt-2 flex gap-2 items-center text-xs">
+                  <span className="text-sky-300">Unsaved edit</span>
+                  <button
+                    onClick={() => saveEdit(row)}
+                    disabled={saving}
+                    className="px-2.5 py-1 rounded border border-sky-500/60 bg-sky-500/15 hover:bg-sky-500/25 text-sky-200 transition disabled:opacity-50"
+                  >
+                    {saving ? 'Saving…' : 'Save edit'}
+                  </button>
+                  <button
+                    onClick={() => revertDraft(row.team_id)}
+                    disabled={saving}
+                    className="px-2.5 py-1 rounded border border-slate-600 hover:border-slate-400 text-slate-300 transition disabled:opacity-50"
+                  >
+                    Revert
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function formatStamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  } catch {
+    return iso;
+  }
+}

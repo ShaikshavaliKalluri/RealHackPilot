@@ -29,6 +29,7 @@ from .emails import TEMPLATES as EMAIL_TEMPLATES, render_many as render_emails
 from .judge import ai_judge, merge_human_scores
 from . import judging
 from . import comms
+from . import feedback_summary as feedback_service
 from . import backup as backup_service
 from . import llm as llm_service
 from . import chat as chat_service
@@ -54,6 +55,8 @@ from .schemas import (
     PanelOut, PanelCreate, PanelUpdate, PanelTeamsSet, PanelJudgesSet, PanelSwapTeamDays,
     R2InviteIn,
     AdoptChannelByLinkRequest,
+    FeedbackSummaryRow, GenerateFeedbackSummariesRequest, GenerateFeedbackSummaryResult,
+    UpdateFeedbackSummaryRequest, PostFeedbackSummariesRequest, PostFeedbackSummaryResult,
     SwagPersonOut, SwagMarkRequest, SwagStats,
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
     CommLogOut, TeamChannelCreateRequest, TeamMessageRequest, BroadcastRequest,
@@ -3748,6 +3751,211 @@ def check_repo(team_id: int, db: Session = Depends(get_db)) -> RepoCheckOut:
     result = comms.check_repo_readiness(team)
     db.commit()
     return RepoCheckOut(**result)
+
+
+# ===== Feedback summary (AI-summarized judge comments per team) =====
+
+
+def _feedback_row(team: models.Team, round_num: int) -> FeedbackSummaryRow:
+    """Build the wire shape for one team-round row. Comment count is the
+    number of non-empty judge comments currently in the DB for that round
+    (not the count at generation time -- that's stored separately on the
+    summary entry so the UI can show 'X new comments since last generation')."""
+    rk = feedback_service.round_key(round_num)
+    blob = team.feedback_summary or {}
+    entry = blob.get(rk) or {}
+    return FeedbackSummaryRow(
+        team_id=team.id,
+        team_name=team.name,
+        round=round_num,
+        comment_count=entry.get("comment_count", 0),
+        has_channel=bool(team.has_teams_channel and team.teams_channel_id and not str(team.teams_channel_id).startswith(("sandbox-", "mock-", "dryrun-"))),
+        summary=entry.get("summary"),
+        generated_at=entry.get("generated_at"),
+        edited_at=entry.get("edited_at"),
+        posted_at=entry.get("posted_at"),
+        posted_message_id=entry.get("posted_message_id"),
+    )
+
+
+@app.get("/api/teams/feedback-summary", response_model=list[FeedbackSummaryRow])
+def list_feedback_summaries(
+    round: int = 1,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> list[FeedbackSummaryRow]:
+    """List every team that has at least one judge comment in the given
+    round, with its current summary state (generated/edited/posted)."""
+    _require_organizer_role(claims, db)
+    if round not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
+
+    # Find every team that has a non-empty comment for this round. One query;
+    # JudgeScore.comment is a Text column so we test for non-null and non-empty.
+    team_ids_with_comments = {
+        tid for (tid,) in (
+            db.query(models.JudgeScore.team_id)
+            .filter(
+                models.JudgeScore.round == round,
+                models.JudgeScore.comment.isnot(None),
+                func.length(func.trim(models.JudgeScore.comment)) > 0,
+            )
+            .distinct()
+            .all()
+        )
+    }
+    if not team_ids_with_comments:
+        return []
+    teams = (
+        db.query(models.Team)
+        .filter(models.Team.id.in_(team_ids_with_comments))
+        .order_by(models.Team.name)
+        .all()
+    )
+    rows: list[FeedbackSummaryRow] = []
+    for t in teams:
+        row = _feedback_row(t, round)
+        # Live comment count -- recompute since teams' summaries may be stale.
+        row.comment_count = len(feedback_service.gather_comments(db, t, round))
+        rows.append(row)
+    return rows
+
+
+@app.post("/api/teams/feedback-summary/generate", response_model=list[GenerateFeedbackSummaryResult])
+def generate_feedback_summaries(
+    req: GenerateFeedbackSummariesRequest,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> list[GenerateFeedbackSummaryResult]:
+    """Generate (or regenerate) AI summaries of judge comments for the
+    given teams + round. Stored on Team.feedback_summary."""
+    actor_email = _require_organizer_role(claims, db)
+    if req.round not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
+    if not req.team_ids:
+        return []
+
+    teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
+    teams_by_id = {t.id: t for t in teams}
+    out: list[GenerateFeedbackSummaryResult] = []
+    for tid in req.team_ids:
+        team = teams_by_id.get(tid)
+        if team is None:
+            out.append(GenerateFeedbackSummaryResult(team_id=tid, status="failed", error="team not found"))
+            continue
+        existing = feedback_service.get_summary_state(team, req.round)
+        if existing and existing.get("summary") and not req.force:
+            out.append(GenerateFeedbackSummaryResult(
+                team_id=tid, status="skipped_existing",
+                summary=existing.get("summary"),
+                comment_count=existing.get("comment_count", 0),
+            ))
+            continue
+        comments = feedback_service.gather_comments(db, team, req.round)
+        if not comments:
+            out.append(GenerateFeedbackSummaryResult(team_id=tid, status="no_comments", comment_count=0))
+            continue
+        try:
+            summary_text = feedback_service.summarize_team_feedback(team.name, req.round, comments)
+        except Exception as e:
+            logger.exception("feedback summary generation failed for team %s", tid)
+            out.append(GenerateFeedbackSummaryResult(team_id=tid, status="failed", error=str(e), comment_count=len(comments)))
+            continue
+        feedback_service.store_summary(
+            db, team, req.round, summary_text,
+            comment_count=len(comments),
+            generated_by_email=actor_email,
+        )
+        out.append(GenerateFeedbackSummaryResult(
+            team_id=tid, status="generated",
+            summary=summary_text, comment_count=len(comments),
+        ))
+    return out
+
+
+@app.patch("/api/teams/{team_id}/feedback-summary", response_model=FeedbackSummaryRow)
+def edit_feedback_summary(
+    team_id: int,
+    req: UpdateFeedbackSummaryRequest,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> FeedbackSummaryRow:
+    """Edit the stored summary text for a team-round. Preserves comment_count
+    and generation timestamps; stamps edited_at."""
+    _require_organizer_role(claims, db)
+    if req.round not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+    existing = feedback_service.get_summary_state(team, req.round) or {}
+    feedback_service.store_summary(
+        db, team, req.round, req.summary.strip(),
+        comment_count=existing.get("comment_count", 0),
+        generated_by_email=existing.get("generated_by_email"),
+        is_edit=True,
+    )
+    return _feedback_row(team, req.round)
+
+
+@app.post("/api/teams/feedback-summary/post", response_model=list[PostFeedbackSummaryResult])
+def post_feedback_summaries(
+    req: PostFeedbackSummariesRequest,
+    request: Request,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> list[PostFeedbackSummaryResult]:
+    """Post the stored summary text to each team's Teams channel.
+
+    Requires X-Graph-Token header (delegated Graph token from the signed-in
+    organizer's MSAL session). Skips teams with no summary / no channel /
+    mock channel ids."""
+    actor_email = _require_organizer_role(claims, db)
+    if req.round not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
+    graph_token = request.headers.get("x-graph-token", "")
+    if not graph_token:
+        raise HTTPException(status_code=400, detail="Missing X-Graph-Token header")
+    if not req.team_ids:
+        return []
+
+    teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
+    teams_by_id = {t.id: t for t in teams}
+    out: list[PostFeedbackSummaryResult] = []
+    for tid in req.team_ids:
+        team = teams_by_id.get(tid)
+        if team is None:
+            out.append(PostFeedbackSummaryResult(team_id=tid, status="failed", error="team not found"))
+            continue
+        state = feedback_service.get_summary_state(team, req.round)
+        summary = (state or {}).get("summary")
+        if not summary:
+            out.append(PostFeedbackSummaryResult(team_id=tid, status="no_summary"))
+            continue
+        if not team.has_teams_channel or not team.teams_channel_id:
+            out.append(PostFeedbackSummaryResult(team_id=tid, status="no_channel"))
+            continue
+        if str(team.teams_channel_id).startswith(("sandbox-", "mock-", "dryrun-")):
+            out.append(PostFeedbackSummaryResult(team_id=tid, status="no_channel", error="mock channel id"))
+            continue
+        try:
+            result = feedback_service.post_summary_to_channel(
+                db, team, req.round, summary, graph_token, sent_by_email=actor_email,
+            )
+        except comms._GraphChannelError as e:
+            out.append(PostFeedbackSummaryResult(team_id=tid, status="failed", error=e.message))
+            continue
+        except Exception as e:
+            logger.exception("feedback summary post failed for team %s", tid)
+            out.append(PostFeedbackSummaryResult(team_id=tid, status="failed", error=str(e)))
+            continue
+        fresh_state = feedback_service.get_summary_state(team, req.round) or {}
+        out.append(PostFeedbackSummaryResult(
+            team_id=tid, status="posted",
+            message_id=result.get("message_id"),
+            posted_at=fresh_state.get("posted_at"),
+        ))
+    return out
 
 
 # ===== Backups =====
