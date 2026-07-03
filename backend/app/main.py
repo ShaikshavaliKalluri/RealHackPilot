@@ -30,6 +30,7 @@ from .judge import ai_judge, merge_human_scores
 from . import judging
 from . import comms
 from . import feedback_summary as feedback_service
+from . import bu_report as bu_report_service
 from . import backup as backup_service
 from . import llm as llm_service
 from . import chat as chat_service
@@ -57,6 +58,10 @@ from .schemas import (
     AdoptChannelByLinkRequest,
     FeedbackSummaryRow, GenerateFeedbackSummariesRequest, GenerateFeedbackSummaryResult,
     UpdateFeedbackSummaryRequest, PostFeedbackSummariesRequest, PostFeedbackSummaryResult,
+    BUTaxonomyResponse, BUTaxonomyEntry,
+    BUClassifyRequest, BUClassifyResult,
+    BUSummarizeRequest, BUSummarizeResult,
+    BUClassificationOverride, BULeadershipSummaryOverride,
     SwagPersonOut, SwagMarkRequest, SwagStats,
     LeaderboardOut, LeaderboardRow, JUDGE_RUBRIC_AXES,
     CommLogOut, TeamChannelCreateRequest, TeamMessageRequest, BroadcastRequest,
@@ -3956,6 +3961,216 @@ def post_feedback_summaries(
             posted_at=fresh_state.get("posted_at"),
         ))
     return out
+
+
+# ===== BU leadership report =====
+
+
+@app.get("/api/bu-report/taxonomy", response_model=BUTaxonomyResponse)
+def bu_report_taxonomy(claims: dict = Depends(require_auth)) -> BUTaxonomyResponse:
+    """Return the full BU + sub-tag taxonomy so the frontend can render
+    override dropdowns and legend copy. Organizer-only via the require_auth
+    middleware role gate."""
+    entries = [
+        BUTaxonomyEntry(
+            key=k,
+            display=v["display"],
+            description=v["description"],
+            sub_tags=list(v["sub_tags"]),
+        )
+        for k, v in bu_report_service.BU_TAXONOMY.items()
+    ]
+    return BUTaxonomyResponse(
+        bus=entries,
+        function_tags=list(bu_report_service.FUNCTION_TAGS),
+        theme_tags=list(bu_report_service.THEME_TAGS),
+    )
+
+
+@app.get("/api/bu-report/data")
+def bu_report_data(
+    round: int = 1,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return the assembled leadership report -- one section per BU with
+    team blocks, aggregate tag frequencies, and standouts marked. Organizer
+    only."""
+    _require_organizer_role(claims, db)
+    if round not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
+    return bu_report_service.build_report_data(db, round_num=round)
+
+
+@app.post("/api/bu-report/classify", response_model=list[BUClassifyResult])
+def bu_report_classify(
+    req: BUClassifyRequest,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> list[BUClassifyResult]:
+    """Bulk LLM-classify the given teams into BUs. Skips teams already
+    classified unless force=True."""
+    actor_email = _require_organizer_role(claims, db)
+    if not req.team_ids:
+        return []
+    teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
+    by_id = {t.id: t for t in teams}
+    out: list[BUClassifyResult] = []
+    for tid in req.team_ids:
+        team = by_id.get(tid)
+        if team is None:
+            out.append(BUClassifyResult(team_id=tid, status="failed", error="team not found"))
+            continue
+        if not (team.idea or "").strip():
+            out.append(BUClassifyResult(team_id=tid, status="no_idea"))
+            continue
+        existing = team.bu_classification or {}
+        if existing.get("bu") and not req.force:
+            out.append(BUClassifyResult(
+                team_id=tid, status="skipped_existing",
+                bu=existing.get("bu"),
+                sub_tags=existing.get("sub_tags") or [],
+                function_tags=existing.get("function_tags") or [],
+                theme_tags=existing.get("theme_tags") or [],
+                rationale=existing.get("rationale"),
+            ))
+            continue
+        try:
+            cls = bu_report_service.classify_team(team)
+        except Exception as e:
+            logger.exception("bu classify failed for team %s", tid)
+            out.append(BUClassifyResult(team_id=tid, status="failed", error=str(e)))
+            continue
+        bu_report_service.store_classification(db, team, cls, edited_by=actor_email)
+        out.append(BUClassifyResult(
+            team_id=tid, status="classified",
+            bu=cls["bu"], sub_tags=cls["sub_tags"],
+            function_tags=cls["function_tags"], theme_tags=cls["theme_tags"],
+            rationale=cls["rationale"],
+        ))
+    return out
+
+
+@app.post("/api/bu-report/summarize", response_model=list[BUSummarizeResult])
+def bu_report_summarize(
+    req: BUSummarizeRequest,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> list[BUSummarizeResult]:
+    """Bulk LLM-summarize the given teams for leadership. Optionally also
+    generate a judge-feedback synthesis (organizer opts in for the final
+    print run since it costs more LLM calls)."""
+    actor_email = _require_organizer_role(claims, db)
+    if req.round not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
+    if not req.team_ids:
+        return []
+    teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
+    by_id = {t.id: t for t in teams}
+    out: list[BUSummarizeResult] = []
+    for tid in req.team_ids:
+        team = by_id.get(tid)
+        if team is None:
+            out.append(BUSummarizeResult(team_id=tid, status="failed", error="team not found"))
+            continue
+        if not (team.idea or "").strip():
+            out.append(BUSummarizeResult(team_id=tid, status="no_idea"))
+            continue
+        existing = team.leadership_summary or {}
+        if existing.get("summary") and not req.force:
+            out.append(BUSummarizeResult(
+                team_id=tid, status="skipped_existing",
+                summary=existing.get("summary"),
+                ai_score_10=existing.get("ai_score_10"),
+                judge_synthesis=existing.get("judge_synthesis"),
+            ))
+            continue
+        try:
+            summary_data = bu_report_service.summarize_team_for_leadership(team)
+        except Exception as e:
+            logger.exception("bu summarize failed for team %s", tid)
+            out.append(BUSummarizeResult(team_id=tid, status="failed", error=str(e)))
+            continue
+        synth: str | None = None
+        if req.with_judge_synthesis:
+            js = bu_report_service.load_judge_scores(db, team.id, req.round)
+            synth = bu_report_service.synthesize_judge_feedback(team, js) or None
+        bu_report_service.store_leadership_summary(
+            db, team, summary_data,
+            judge_synthesis=synth,
+            edited_by=actor_email,
+        )
+        out.append(BUSummarizeResult(
+            team_id=tid, status="summarized",
+            summary=summary_data["summary"],
+            ai_score_10=summary_data["ai_score_10"],
+            judge_synthesis=synth,
+        ))
+    return out
+
+
+@app.patch("/api/teams/{team_id}/bu-classification")
+def override_bu_classification(
+    team_id: int,
+    req: BUClassificationOverride,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Manually override a team's BU classification. Validates that bu and
+    sub_tags come from the fixed taxonomy."""
+    actor_email = _require_organizer_role(claims, db)
+    if req.bu not in bu_report_service.BU_TAXONOMY:
+        raise HTTPException(status_code=400, detail=f"unknown BU key: {req.bu!r}")
+    valid_sub = set(bu_report_service.BU_TAXONOMY[req.bu]["sub_tags"])
+    bad_sub = [t for t in req.sub_tags if t not in valid_sub]
+    if bad_sub:
+        raise HTTPException(status_code=400, detail=f"sub_tags not in {req.bu} taxonomy: {bad_sub}")
+    bad_fn = [t for t in req.function_tags if t not in bu_report_service.FUNCTION_TAGS]
+    if bad_fn:
+        raise HTTPException(status_code=400, detail=f"unknown function_tags: {bad_fn}")
+    bad_th = [t for t in req.theme_tags if t not in bu_report_service.THEME_TAGS]
+    if bad_th:
+        raise HTTPException(status_code=400, detail=f"unknown theme_tags: {bad_th}")
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+    entry = bu_report_service.store_classification(
+        db, team,
+        {
+            "bu": req.bu,
+            "sub_tags": req.sub_tags,
+            "function_tags": req.function_tags,
+            "theme_tags": req.theme_tags,
+            "rationale": req.rationale or "",
+        },
+        edited_by=actor_email, is_edit=True,
+    )
+    return {"team_id": team_id, "bu_classification": entry}
+
+
+@app.patch("/api/teams/{team_id}/leadership-summary")
+def override_leadership_summary(
+    team_id: int,
+    req: BULeadershipSummaryOverride,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Manually override a team's leadership summary + AI score."""
+    actor_email = _require_organizer_role(claims, db)
+    if req.ai_score_10 < 1 or req.ai_score_10 > 10:
+        raise HTTPException(status_code=400, detail="ai_score_10 must be 1-10")
+    if not req.summary.strip():
+        raise HTTPException(status_code=400, detail="summary must not be empty")
+    team = db.query(models.Team).get(team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="team not found")
+    entry = bu_report_service.store_leadership_summary(
+        db, team,
+        {"summary": req.summary.strip(), "ai_score_10": int(req.ai_score_10)},
+        judge_synthesis=req.judge_synthesis,
+        edited_by=actor_email, is_edit=True,
+    )
+    return {"team_id": team_id, "leadership_summary": entry}
 
 
 # ===== Backups =====

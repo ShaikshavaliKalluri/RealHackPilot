@@ -14,6 +14,7 @@ import { UploadCard } from './components/UploadCard';
 import { DrillDownPanel } from './components/DrillDownPanel';
 import { EmailComposer } from './components/EmailComposer';
 import { OrganizerScoring } from './components/OrganizerScoring';
+import { BUReport } from './components/BUReport';
 import { CommsPanel } from './components/CommsPanel';
 import { SeatCoveragePanel } from './components/SeatCoveragePanel';
 import { BroadcastPanel } from './components/BroadcastPanel';
@@ -25,7 +26,7 @@ import { WinnersBanner } from './components/WinnersBanner';
 
 type Filter = 'all' | 'flagged' | 'complete' | 'incomplete';
 type StatsPanel = 'duplicates' | 'mentors' | 'complete' | 'incomplete' | 'flagged' | 'all_mentors' | 'all_participants' | 'unique_people' | null;
-type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics' | 'judges' | 'qr' | 'swag' | 'floor-walk';
+type Mode = 'dashboard' | 'judge' | 'scoring' | 'comms' | 'analytics' | 'judges' | 'qr' | 'swag' | 'floor-walk' | 'bu-report';
 
 export default function App() {
   // ---- Auth (MSAL) ----
@@ -107,6 +108,9 @@ export default function App() {
                  || email === 'suneel.nallu@realpage.com'
                  || email === 'bhaskar.jaddu@realpage.com';
     const isOrg = role.role === 'organizer' || isAdmin;
+    if (mode === 'bu-report' && !isAdmin) {
+      setMode('dashboard');
+    }
     if (mode === 'scoring' && !isAdmin) {
       setMode('dashboard');
     }
@@ -307,6 +311,9 @@ export default function App() {
     ...(isScoringAdmin
       ? [{ key: 'scoring' as Mode, label: 'Scoring', tone: 'bg-amber-500/15 text-amber-200 border-amber-500/30' }]
       : []),
+    ...(isScoringAdmin
+      ? [{ key: 'bu-report' as Mode, label: 'BU Report', tone: 'bg-teal-500/15 text-teal-200 border-teal-500/30', title: 'Leadership report grouped by RealPage BU with AI summaries + judge synthesis. Print-friendly.' }]
+      : []),
     { key: 'comms', label: 'Comms', tone: 'bg-violet-500/15 text-violet-200 border-violet-500/30' },
     { key: 'analytics', label: 'Analytics', tone: 'bg-teal-500/15 text-teal-200 border-teal-500/30' },
     { key: 'judges', label: 'People', tone: 'bg-rose-500/15 text-rose-200 border-rose-500/30', title: 'Manage judges, organizers, and REWS volunteers + assign judges to panels per round' },
@@ -434,6 +441,7 @@ export default function App() {
           {mode === 'qr' && <>Login <span className="text-sky-300">QR</span></>}
           {mode === 'swag' && <>Swag <span className="text-lime-300">Pickup</span></>}
           {mode === 'floor-walk' && <>Floor walk <span className="text-emerald-300">Visit tracker</span></>}
+          {mode === 'bu-report' && <>BU Leadership <span className="text-teal-300">Report</span></>}
         </h1>
         <p className="text-slate-400 mt-2 text-sm">
           {mode === 'dashboard' && 'Upload the latest MS Forms export. Teams get scored on completeness, screened for duplicates and rule violations, and surfaced in one place.'}
@@ -444,6 +452,7 @@ export default function App() {
           {mode === 'qr' && 'Printable QR code for the judging room — judges scan with their phone camera and sign in via Azure AD.'}
           {mode === 'swag' && 'Event-day swag kit pickup tracker. Search by name or email, tap to mark collected. Multiple organizers can use this simultaneously from their phones — no more shared Excel.'}
           {mode === 'floor-walk' && 'Judging walk on June 24-25, 2026. Tap to mark when judge groups visit each team and capture any feedback. Teams with no visits surface at the top so the organizer can chase coverage.'}
+          {mode === 'bu-report' && 'Every RealHack idea classified into a RealPage BU with an AI summary and score. Judges feedback synthesized for top-3-per-BU standouts. Switch to Presentation view and click Print to save as PDF for senior leadership.'}
         </p>
       </header>
 
@@ -697,6 +706,8 @@ export default function App() {
       )}
 
       {mode === 'scoring' && isScoringAdmin && <OrganizerScoring teams={teams} onReload={reload} />}
+
+      {mode === 'bu-report' && isScoringAdmin && <BUReport onReload={reload} />}
 
       {mode === 'analytics' && stats && (
         <Analytics teams={teams} stats={stats} onJumpToTeam={(id) => { setMode('dashboard'); setTimeout(() => jumpToTeam(id), 50); }} />

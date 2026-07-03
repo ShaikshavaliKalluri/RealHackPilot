@@ -1790,3 +1790,166 @@ export async function postFeedbackSummaries(
   }
   return r.json();
 }
+
+// ===== BU leadership report =====
+
+export interface BUTaxonomyEntry {
+  key: string;
+  display: string;
+  description: string;
+  sub_tags: string[];
+}
+
+export interface BUTaxonomyResponse {
+  bus: BUTaxonomyEntry[];
+  function_tags: string[];
+  theme_tags: string[];
+}
+
+export interface BUTeamBlock {
+  team_id: number;
+  team_name: string;
+  mentor_name: string | null;
+  idea: string;
+  bu: string | null;
+  sub_tags: string[];
+  function_tags: string[];
+  theme_tags: string[];
+  rationale: string;
+  summary: string;
+  ai_score_10: number | null;
+  judge_synthesis: string;
+  advanced_to_round: number;
+}
+
+export interface BUBlock {
+  key: string;
+  display: string;
+  description: string;
+  team_count: number;
+  avg_ai_score: number | null;
+  top_sub_tags: [string, number][];
+  top_function_tags: [string, number][];
+  top_theme_tags: [string, number][];
+  standouts: BUTeamBlock[];
+  long_tail: BUTeamBlock[];
+}
+
+export interface BUReportData {
+  round: number;
+  generated_at: string;
+  total_teams: number;
+  unclassified_count: number;
+  unclassified: BUTeamBlock[];
+  bus: BUBlock[];
+}
+
+export interface BUClassifyResult {
+  team_id: number;
+  status: 'classified' | 'skipped_existing' | 'no_idea' | 'failed';
+  bu: string | null;
+  sub_tags: string[];
+  function_tags: string[];
+  theme_tags: string[];
+  rationale: string | null;
+  error: string | null;
+}
+
+export interface BUSummarizeResult {
+  team_id: number;
+  status: 'summarized' | 'skipped_existing' | 'no_idea' | 'failed';
+  summary: string | null;
+  ai_score_10: number | null;
+  judge_synthesis: string | null;
+  error: string | null;
+}
+
+export async function fetchBUTaxonomy(): Promise<BUTaxonomyResponse> {
+  const r = await authFetch(`${BASE}/bu-report/taxonomy`);
+  if (!r.ok) throw new Error(`Taxonomy fetch failed: ${r.status}`);
+  return r.json();
+}
+
+export async function fetchBUReportData(round: number): Promise<BUReportData> {
+  const r = await authFetch(`${BASE}/bu-report/data?round=${round}`);
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`BU report fetch failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+export async function classifyBUTeams(
+  teamIds: number[], force: boolean = false,
+): Promise<BUClassifyResult[]> {
+  const r = await authFetch(`${BASE}/bu-report/classify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ team_ids: teamIds, force }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Classify failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+export async function summarizeBUTeams(
+  teamIds: number[],
+  round: number,
+  opts: { force?: boolean; withJudgeSynthesis?: boolean } = {},
+): Promise<BUSummarizeResult[]> {
+  const r = await authFetch(`${BASE}/bu-report/summarize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      team_ids: teamIds,
+      round,
+      force: opts.force ?? false,
+      with_judge_synthesis: opts.withJudgeSynthesis ?? false,
+    }),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Summarize failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+export async function overrideBUClassification(
+  teamId: number,
+  payload: {
+    bu: string;
+    sub_tags: string[];
+    function_tags: string[];
+    theme_tags: string[];
+    rationale?: string | null;
+  },
+): Promise<{ team_id: number; bu_classification: any }> {
+  const r = await authFetch(`${BASE}/teams/${teamId}/bu-classification`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Override classification failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+export async function overrideLeadershipSummary(
+  teamId: number,
+  payload: { summary: string; ai_score_10: number; judge_synthesis?: string | null },
+): Promise<{ team_id: number; leadership_summary: any }> {
+  const r = await authFetch(`${BASE}/teams/${teamId}/leadership-summary`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Override summary failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}

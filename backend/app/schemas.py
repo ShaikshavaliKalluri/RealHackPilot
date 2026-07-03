@@ -295,6 +295,69 @@ class PostFeedbackSummaryResult(BaseModel):
     error: str | None = None
 
 
+# ===== BU leadership report =====
+
+class BUTaxonomyEntry(BaseModel):
+    key: str
+    display: str
+    description: str
+    sub_tags: list[str]
+
+
+class BUTaxonomyResponse(BaseModel):
+    bus: list[BUTaxonomyEntry]
+    function_tags: list[str]
+    theme_tags: list[str]
+
+
+class BUClassifyRequest(BaseModel):
+    team_ids: list[int]
+    force: bool = False  # regenerate even if already classified
+
+
+class BUClassifyResult(BaseModel):
+    team_id: int
+    status: str  # 'classified' | 'skipped_existing' | 'no_idea' | 'failed'
+    bu: str | None = None
+    sub_tags: list[str] = []
+    function_tags: list[str] = []
+    theme_tags: list[str] = []
+    rationale: str | None = None
+    error: str | None = None
+
+
+class BUSummarizeRequest(BaseModel):
+    team_ids: list[int]
+    round: int = 1
+    force: bool = False
+    # Also synthesize judge feedback for standout teams (only recommended
+    # when generating for the final leadership doc, since it adds cost).
+    with_judge_synthesis: bool = False
+
+
+class BUSummarizeResult(BaseModel):
+    team_id: int
+    status: str  # 'summarized' | 'skipped_existing' | 'no_idea' | 'failed'
+    summary: str | None = None
+    ai_score_10: int | None = None
+    judge_synthesis: str | None = None
+    error: str | None = None
+
+
+class BUClassificationOverride(BaseModel):
+    bu: str
+    sub_tags: list[str] = []
+    function_tags: list[str] = []
+    theme_tags: list[str] = []
+    rationale: str | None = None
+
+
+class BULeadershipSummaryOverride(BaseModel):
+    summary: str
+    ai_score_10: int
+    judge_synthesis: str | None = None
+
+
 # ===== Swag (t-shirt) pickup =====
 
 class SwagPersonOut(BaseModel):
