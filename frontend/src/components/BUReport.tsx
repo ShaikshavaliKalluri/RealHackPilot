@@ -1,10 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchBUTaxonomy, fetchBUReportData, classifyBUTeams, summarizeBUTeams,
   overrideBUClassification, overrideLeadershipSummary, downloadBUReportPptx,
   type BUTaxonomyResponse, type BUReportData, type BUBlock, type BUTeamBlock,
   type BUClassifyResult, type BUSummarizeResult,
 } from '../api';
+// html2pdf.js has no types shipped; declare a minimal shape so we can call
+// it without silencing all typechecking. Loaded from node_modules.
+// @ts-expect-error -- no bundled types
+import html2pdf from 'html2pdf.js';
 
 type View = 'editor' | 'presentation';
 
@@ -736,6 +740,33 @@ function TeamEditorRow({ team, taxonomy, editing, onStartEdit, onEndEdit, onSave
 
 // ===== Presentation view (print-to-PDF friendly) =====
 
+// Runs html2pdf on an element and downloads the resulting file. Landscape
+// A4 is the default -- our cards are laid out 2-wide which suits landscape
+// better than portrait.
+async function exportElementToPdf(el: HTMLElement, filename: string) {
+  // Toggle a marker class on the presentation root so any child with
+  // .pv-hide-in-pdf becomes invisible during html2canvas rendering. We
+  // pick the highest ancestor that has the .bu-presentation class so both
+  // full-report and per-BU exports get the same hide behavior.
+  const root = el.closest('.bu-presentation') as HTMLElement | null || el;
+  root.classList.add('pv-html2pdf-rendering');
+  try {
+    await html2pdf()
+      .set({
+        margin: [10, 10, 10, 10],
+        filename,
+        image: { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
+        pagebreak: { mode: ['css', 'legacy'] },
+      })
+      .from(el)
+      .save();
+  } finally {
+    root.classList.remove('pv-html2pdf-rendering');
+  }
+}
+
 function PresentationView({ data, round }: { data: BUReportData; round: number }) {
   const populatedBUs = data.bus.filter((bu) => bu.team_count > 0);
   const totalJudgeSynth = populatedBUs.reduce(
@@ -747,9 +778,41 @@ function PresentationView({ data, round }: { data: BUReportData; round: number }
     0,
   );
 
+  const presentationRef = useRef<HTMLDivElement | null>(null);
+  const [downloadingAllPdf, setDownloadingAllPdf] = useState(false);
+  const downloadFullPdf = async () => {
+    if (!presentationRef.current) return;
+    setDownloadingAllPdf(true);
+    try {
+      await exportElementToPdf(
+        presentationRef.current,
+        `realhack-2026-bu-report-r${round}.pdf`,
+      );
+    } catch (e: any) {
+      alert(`PDF download failed: ${e?.message ?? e}`);
+    } finally {
+      setDownloadingAllPdf(false);
+    }
+  };
+
   return (
-    <div className="bu-presentation">
+    <div className="bu-presentation" ref={presentationRef}>
       <style>{PRESENTATION_STYLES}</style>
+      {/* Full-report PDF button floats at the top of the doc, mirrored by
+          per-BU buttons inside each section. Placed inside the ref target
+          so it appears in the printed HTML too -- html2pdf just renders
+          whatever is inside the element. To hide it in the PDF, use the
+          `.pv-hide-in-pdf` class + the CSS below. */}
+      <div className="pv-hide-in-pdf" style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button
+          onClick={downloadFullPdf}
+          disabled={downloadingAllPdf}
+          className="pv-bu-download"
+          style={{ borderColor: '#8b3a91', color: '#8b3a91', background: '#f7ebfb' }}
+        >
+          {downloadingAllPdf ? 'Building PDF…' : '⬇️ Download full report as PDF'}
+        </button>
+      </div>
       <header className="pv-header">
         <div className="pv-header-left">
           <div className="pv-brand">RealHack 2026</div>
@@ -820,6 +883,8 @@ interface BUPresentationSectionProps {
 
 function BUPresentationSection({ bu, round }: BUPresentationSectionProps) {
   const [downloading, setDownloading] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const sectionRef = useRef<HTMLElement | null>(null);
   const download = async () => {
     setDownloading(true);
     try {
@@ -830,20 +895,45 @@ function BUPresentationSection({ bu, round }: BUPresentationSectionProps) {
       setDownloading(false);
     }
   };
+  const downloadPdf = async () => {
+    if (!sectionRef.current) return;
+    setDownloadingPdf(true);
+    try {
+      const safe = bu.key.replace(/_/g, '-');
+      await exportElementToPdf(
+        sectionRef.current,
+        `realhack-2026-bu-report-r${round}-${safe}.pdf`,
+      );
+    } catch (e: any) {
+      alert(`PDF download failed: ${e?.message ?? e}`);
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
   return (
-    <section className="pv-section pv-bu">
+    <section className="pv-section pv-bu" ref={sectionRef}>
       <div className="pv-bu-header">
         <h2>{bu.display}</h2>
         <div className="pv-bu-meta">
           {bu.team_count} idea{bu.team_count === 1 ? '' : 's'}
         </div>
-        <button
-          onClick={download}
-          disabled={downloading}
-          className="pv-bu-download"
-        >
-          {downloading ? 'Building…' : `⬇️ Download ${bu.display}.pptx`}
-        </button>
+        <div className="pv-hide-in-pdf" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button
+            onClick={download}
+            disabled={downloading}
+            className="pv-bu-download"
+          >
+            {downloading ? 'Building…' : '⬇️ PPTX'}
+          </button>
+          <button
+            onClick={downloadPdf}
+            disabled={downloadingPdf}
+            className="pv-bu-download"
+            style={{ borderColor: '#8b3a91', color: '#8b3a91', background: '#f7ebfb' }}
+          >
+            {downloadingPdf ? 'Building…' : '⬇️ PDF'}
+          </button>
+        </div>
       </div>
       <p className="pv-desc">{bu.description}</p>
 
@@ -930,6 +1020,12 @@ const PRESENTATION_STYLES = `
 .pv-bu-download { font-size: 12px; padding: 6px 12px; border: 1px solid #0a4f99; border-radius: 4px; background: #f0f4f9; color: #0a4f99; cursor: pointer; font-weight: 600; }
 .pv-bu-download:hover:not(:disabled) { background: #dceafd; }
 .pv-bu-download:disabled { opacity: 0.6; cursor: default; }
+
+/* Hidden while html2pdf renders the DOM (interactive controls shouldn't
+ * appear in the exported PDF). html2pdf uses html2canvas under the hood
+ * which respects visibility: hidden but keeps layout. The exported PDF
+ * therefore has empty space where the button was, but nothing visible. */
+.pv-html2pdf-rendering .pv-hide-in-pdf { visibility: hidden !important; }
 .pv-bu-meta { font-size: 12px; color: #5a6a7a; }
 .pv-desc { font-size: 13px; color: #444; margin: 8px 0 14px 0; }
 .pv-tag-rollup { background: #f0f4f9; border-left: 4px solid #0a4f99; padding: 10px 14px; font-size: 12px; color: #333; margin-bottom: 16px; }
