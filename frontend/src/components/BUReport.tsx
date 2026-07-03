@@ -744,10 +744,11 @@ function TeamEditorRow({ team, taxonomy, editing, onStartEdit, onEndEdit, onSave
 // A4 is the default -- our cards are laid out 2-wide which suits landscape
 // better than portrait.
 async function exportElementToPdf(el: HTMLElement, filename: string) {
-  // Toggle a marker class on the presentation root so any child with
-  // .pv-hide-in-pdf becomes invisible during html2canvas rendering. We
-  // pick the highest ancestor that has the .bu-presentation class so both
-  // full-report and per-BU exports get the same hide behavior.
+  // html2canvas captures at the CURRENT browser viewport width by default,
+  // so a narrow window would collapse our card grid to one column. Force
+  // a wide capture so the landscape A4 page always gets a 3-column grid.
+  // 1440px matches the layout the design was tuned for.
+  const CAPTURE_WIDTH = 1440;
   const root = el.closest('.bu-presentation') as HTMLElement | null || el;
   root.classList.add('pv-html2pdf-rendering');
   try {
@@ -756,9 +757,19 @@ async function exportElementToPdf(el: HTMLElement, filename: string) {
         margin: [10, 10, 10, 10],
         filename,
         image: { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        html2canvas: {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          windowWidth: CAPTURE_WIDTH,
+          width: CAPTURE_WIDTH,
+        },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-        pagebreak: { mode: ['css', 'legacy'] },
+        // 'avoid-all' lets html2pdf inspect elements and split around any
+        // that carry `break-inside: avoid` / `page-break-inside: avoid`.
+        // Combined with the CSS below, our team cards never get bisected
+        // by a page break.
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['.pv-card', '.pv-section'] },
       })
       .from(el)
       .save();
@@ -1022,10 +1033,35 @@ const PRESENTATION_STYLES = `
 .pv-bu-download:disabled { opacity: 0.6; cursor: default; }
 
 /* Hidden while html2pdf renders the DOM (interactive controls shouldn't
- * appear in the exported PDF). html2pdf uses html2canvas under the hood
- * which respects visibility: hidden but keeps layout. The exported PDF
- * therefore has empty space where the button was, but nothing visible. */
+ * appear in the exported PDF). html2canvas respects visibility: hidden. */
 .pv-html2pdf-rendering .pv-hide-in-pdf { visibility: hidden !important; }
+
+/* Force a stable 3-column card grid during PDF export so a narrow browser
+ * window doesn't collapse the layout when captured. Also ensures cards
+ * and sections aren't split mid-content by a page break. */
+.pv-html2pdf-rendering .pv-cards { grid-template-columns: repeat(3, 1fr) !important; }
+.pv-html2pdf-rendering .pv-card {
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+.pv-html2pdf-rendering .pv-section {
+  break-inside: auto;
+  page-break-inside: auto;
+}
+.pv-html2pdf-rendering .pv-bu-header,
+.pv-html2pdf-rendering .pv-tag-rollup {
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+}
+/* Start each BU on a fresh page so leaders can flip cleanly through the doc. */
+.pv-html2pdf-rendering .pv-section.pv-bu {
+  break-before: page;
+  page-break-before: always;
+}
+.pv-html2pdf-rendering .pv-section.pv-bu:first-of-type {
+  break-before: auto;
+  page-break-before: auto;
+}
 .pv-bu-meta { font-size: 12px; color: #5a6a7a; }
 .pv-desc { font-size: 13px; color: #444; margin: 8px 0 14px 0; }
 .pv-tag-rollup { background: #f0f4f9; border-left: 4px solid #0a4f99; padding: 10px 14px; font-size: 12px; color: #333; margin-bottom: 16px; }
