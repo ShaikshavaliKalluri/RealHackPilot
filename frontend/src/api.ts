@@ -1953,3 +1953,20 @@ export async function overrideLeadershipSummary(
   }
   return r.json();
 }
+
+export async function downloadBUReportPptx(round: number): Promise<void> {
+  const r = await authFetch(`${BASE}/bu-report/export.pptx?round=${round}`);
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Download failed: ${r.status} ${t}`);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `realhack-2026-bu-report-r${round}.pptx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

@@ -31,6 +31,7 @@ from . import judging
 from . import comms
 from . import feedback_summary as feedback_service
 from . import bu_report as bu_report_service
+from . import bu_report_pptx
 from . import backup as backup_service
 from . import llm as llm_service
 from . import chat as chat_service
@@ -4022,46 +4023,66 @@ def bu_report_classify(
     db: Session = Depends(get_db),
 ) -> list[BUClassifyResult]:
     """Bulk LLM-classify the given teams into BUs. Skips teams already
-    classified unless force=True. Shaik-only."""
+    classified unless force=True. Shaik-only.
+
+    LLM calls run in a ThreadPoolExecutor so classifying ~95 teams takes
+    ~15-20s instead of ~3min. DB writes happen serially in the request
+    thread after all calls return (SQLAlchemy Session is not thread-safe).
+    """
+    from concurrent.futures import ThreadPoolExecutor
     actor_email = _require_bu_report_admin(claims)
     if not req.team_ids:
         return []
     teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
     by_id = {t.id: t for t in teams}
-    out: list[BUClassifyResult] = []
+
+    # Partition: skip / no-idea / needs-llm
+    out_map: dict[int, BUClassifyResult] = {}
+    to_classify: list[models.Team] = []
     for tid in req.team_ids:
         team = by_id.get(tid)
         if team is None:
-            out.append(BUClassifyResult(team_id=tid, status="failed", error="team not found"))
+            out_map[tid] = BUClassifyResult(team_id=tid, status="failed", error="team not found")
             continue
         if not (team.idea or "").strip():
-            out.append(BUClassifyResult(team_id=tid, status="no_idea"))
+            out_map[tid] = BUClassifyResult(team_id=tid, status="no_idea")
             continue
         existing = team.bu_classification or {}
         if existing.get("bu") and not req.force:
-            out.append(BUClassifyResult(
+            out_map[tid] = BUClassifyResult(
                 team_id=tid, status="skipped_existing",
                 bu=existing.get("bu"),
                 sub_tags=existing.get("sub_tags") or [],
                 function_tags=existing.get("function_tags") or [],
                 theme_tags=existing.get("theme_tags") or [],
                 rationale=existing.get("rationale"),
-            ))
+            )
             continue
+        to_classify.append(team)
+
+    def _classify_one(t: models.Team) -> tuple[int, dict | Exception]:
         try:
-            cls = bu_report_service.classify_team(team)
+            return t.id, bu_report_service.classify_team(t)
         except Exception as e:
-            logger.exception("bu classify failed for team %s", tid)
-            out.append(BUClassifyResult(team_id=tid, status="failed", error=str(e)))
-            continue
-        bu_report_service.store_classification(db, team, cls, edited_by=actor_email)
-        out.append(BUClassifyResult(
-            team_id=tid, status="classified",
-            bu=cls["bu"], sub_tags=cls["sub_tags"],
-            function_tags=cls["function_tags"], theme_tags=cls["theme_tags"],
-            rationale=cls["rationale"],
-        ))
-    return out
+            return t.id, e
+
+    if to_classify:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for tid, result in pool.map(_classify_one, to_classify):
+                team = by_id[tid]
+                if isinstance(result, Exception):
+                    logger.exception("bu classify failed for team %s: %s", tid, result)
+                    out_map[tid] = BUClassifyResult(team_id=tid, status="failed", error=str(result))
+                    continue
+                bu_report_service.store_classification(db, team, result, edited_by=actor_email)
+                out_map[tid] = BUClassifyResult(
+                    team_id=tid, status="classified",
+                    bu=result["bu"], sub_tags=result["sub_tags"],
+                    function_tags=result["function_tags"], theme_tags=result["theme_tags"],
+                    rationale=result["rationale"],
+                )
+
+    return [out_map[tid] for tid in req.team_ids]
 
 
 @app.post("/api/bu-report/summarize", response_model=list[BUSummarizeResult])
@@ -4072,7 +4093,12 @@ def bu_report_summarize(
 ) -> list[BUSummarizeResult]:
     """Bulk LLM-summarize the given teams for leadership. Optionally also
     generate a judge-feedback synthesis (organizer opts in for the final
-    print run since it costs more LLM calls). Shaik-only."""
+    print run since it costs more LLM calls). Shaik-only.
+
+    Parallelized like classify: LLM calls run in a ThreadPoolExecutor,
+    DB writes happen serially after all calls return.
+    """
+    from concurrent.futures import ThreadPoolExecutor
     actor_email = _require_bu_report_admin(claims)
     if req.round not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
@@ -4080,46 +4106,91 @@ def bu_report_summarize(
         return []
     teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
     by_id = {t.id: t for t in teams}
-    out: list[BUSummarizeResult] = []
+
+    out_map: dict[int, BUSummarizeResult] = {}
+    to_run: list[models.Team] = []
+    judge_scores_by_team: dict[int, list[models.JudgeScore]] = {}
     for tid in req.team_ids:
         team = by_id.get(tid)
         if team is None:
-            out.append(BUSummarizeResult(team_id=tid, status="failed", error="team not found"))
+            out_map[tid] = BUSummarizeResult(team_id=tid, status="failed", error="team not found")
             continue
         if not (team.idea or "").strip():
-            out.append(BUSummarizeResult(team_id=tid, status="no_idea"))
+            out_map[tid] = BUSummarizeResult(team_id=tid, status="no_idea")
             continue
         existing = team.leadership_summary or {}
         if existing.get("summary") and not req.force:
-            out.append(BUSummarizeResult(
+            out_map[tid] = BUSummarizeResult(
                 team_id=tid, status="skipped_existing",
                 summary=existing.get("summary"),
                 ai_score_10=existing.get("ai_score_10"),
                 judge_synthesis=existing.get("judge_synthesis"),
-            ))
+            )
             continue
+        to_run.append(team)
+        # Preload judge scores in the request thread (SQLAlchemy session
+        # can't be shared with worker threads).
+        if req.with_judge_synthesis:
+            judge_scores_by_team[team.id] = bu_report_service.load_judge_scores(db, team.id, req.round)
+
+    def _summarize_one(t: models.Team) -> tuple[int, dict | Exception, str | None]:
         try:
-            summary_data = bu_report_service.summarize_team_for_leadership(team)
+            summary_data = bu_report_service.summarize_team_for_leadership(t)
         except Exception as e:
-            logger.exception("bu summarize failed for team %s", tid)
-            out.append(BUSummarizeResult(team_id=tid, status="failed", error=str(e)))
-            continue
+            return t.id, e, None
         synth: str | None = None
         if req.with_judge_synthesis:
-            js = bu_report_service.load_judge_scores(db, team.id, req.round)
-            synth = bu_report_service.synthesize_judge_feedback(team, js) or None
-        bu_report_service.store_leadership_summary(
-            db, team, summary_data,
-            judge_synthesis=synth,
-            edited_by=actor_email,
-        )
-        out.append(BUSummarizeResult(
-            team_id=tid, status="summarized",
-            summary=summary_data["summary"],
-            ai_score_10=summary_data["ai_score_10"],
-            judge_synthesis=synth,
-        ))
-    return out
+            js = judge_scores_by_team.get(t.id, [])
+            synth = bu_report_service.synthesize_judge_feedback(t, js) or None
+        return t.id, summary_data, synth
+
+    if to_run:
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            for tid, summary_data, synth in pool.map(_summarize_one, to_run):
+                team = by_id[tid]
+                if isinstance(summary_data, Exception):
+                    logger.exception("bu summarize failed for team %s: %s", tid, summary_data)
+                    out_map[tid] = BUSummarizeResult(team_id=tid, status="failed", error=str(summary_data))
+                    continue
+                bu_report_service.store_leadership_summary(
+                    db, team, summary_data,
+                    judge_synthesis=synth,
+                    edited_by=actor_email,
+                )
+                out_map[tid] = BUSummarizeResult(
+                    team_id=tid, status="summarized",
+                    summary=summary_data["summary"],
+                    ai_score_10=summary_data["ai_score_10"],
+                    judge_synthesis=synth,
+                )
+
+    return [out_map[tid] for tid in req.team_ids]
+
+
+@app.get("/api/bu-report/export.pptx")
+def bu_report_export_pptx(
+    round: int = 1,
+    claims: dict = Depends(require_auth),
+    db: Session = Depends(get_db),
+):
+    """Generate and stream a downloadable .pptx of the leadership report
+    for the given round. Shaik-only. Uses the SAME report data as the
+    on-screen presentation view, rendered into a real PowerPoint file that
+    can be edited before sending."""
+    _require_bu_report_admin(claims)
+    if round not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
+    report = bu_report_service.build_report_data(db, round_num=round)
+    pptx_bytes = bu_report_pptx.build_pptx(report)
+    filename = f"realhack-2026-bu-report-r{round}.pptx"
+    return Response(
+        content=pptx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(pptx_bytes)),
+        },
+    )
 
 
 @app.patch("/api/teams/{team_id}/bu-classification")

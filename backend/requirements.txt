@@ -13,3 +13,4 @@ psycopg2-binary==2.9.10
 PyJWT[crypto]==2.9.0
 msal==1.31.0
 qrcode[pil]==7.4.2
+python-pptx==1.0.2
