@@ -233,10 +233,7 @@ def _add_bu_section_slide(prs: Presentation, bu: dict):
         size_pt=26, bold=True, color=BRAND_BLUE,
     )
     count = bu.get("team_count", 0)
-    avg = bu.get("avg_ai_score")
     meta = f"{count} idea{'' if count == 1 else 's'}"
-    if avg is not None:
-        meta += f"    ·    avg AI score {avg}/10"
     _add_text_box(
         slide, SLIDE_W - Inches(3.5), Inches(0.85),
         Inches(3), Inches(0.4),
@@ -318,21 +315,14 @@ def _add_team_card(slide, left, top, width, height, team: dict):
     inner_l = left + Inches(0.18)
     inner_w = width - Inches(0.28)
 
-    # Team name (left) + AI score badge (right)
+    # Team name (score badge removed -- leadership doesn't want AI score
+    # /10 badges visible on the leadership deck).
     _add_text_box(
         slide, inner_l, top + Inches(0.1),
-        inner_w - Inches(0.9), Inches(0.4),
+        inner_w, Inches(0.4),
         team.get("team_name", "?"),
         size_pt=12, bold=True, color=BRAND_BLUE,
     )
-    score = team.get("ai_score_10")
-    if score is not None:
-        _add_text_box(
-            slide, left + width - Inches(1.0), top + Inches(0.08),
-            Inches(0.85), Inches(0.4),
-            f"{score}/10",
-            size_pt=16, bold=True, color=BRAND_GREEN, align=PP_ALIGN.RIGHT,
-        )
 
     # Sub-tags
     tags = list(team.get("sub_tags") or [])[:3]

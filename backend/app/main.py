@@ -4146,7 +4146,10 @@ def bu_report_summarize(
         snap = bu_report_service.team_snapshot(team)
         judge_snaps: list[dict] = []
         if req.with_judge_synthesis:
-            rows = bu_report_service.load_judge_scores(db, team.id, req.round)
+            # Consolidate ALL rounds' judge feedback for this team into one
+            # synthesis. Leadership wanted the full picture per team, not a
+            # single-round slice.
+            rows = bu_report_service.load_all_judge_scores(db, team.id)
             judge_snaps = bu_report_service.judge_scores_snapshot(rows)
         to_run.append((snap, judge_snaps))
 

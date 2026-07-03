@@ -701,3 +701,15 @@ def load_judge_scores(db: Session, team_id: int, round_num: int) -> list[models.
         )
         .all()
     )
+
+
+def load_all_judge_scores(db: Session, team_id: int) -> list[models.JudgeScore]:
+    """Load every judge scoring record for this team across all rounds.
+    Used by the BU leadership report so the 'Judges said' synthesis
+    consolidates R1 + R2 (and any future rounds) feedback for each team,
+    giving leaders the full picture in one paragraph."""
+    return (
+        db.query(models.JudgeScore)
+        .filter(models.JudgeScore.team_id == team_id)
+        .all()
+    )

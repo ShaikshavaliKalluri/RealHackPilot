@@ -738,14 +738,12 @@ function TeamEditorRow({ team, taxonomy, editing, onStartEdit, onEndEdit, onSave
 
 function PresentationView({ data, round }: { data: BUReportData; round: number }) {
   const populatedBUs = data.bus.filter((bu) => bu.team_count > 0);
-  const totalWithScore = populatedBUs.reduce((sum, bu) => sum + bu.teams.filter((t) => t.ai_score_10 !== null).length, 0);
-  const scoreSum = populatedBUs.reduce(
-    (sum, bu) => sum + bu.teams.reduce((s, t) => s + (t.ai_score_10 ?? 0), 0),
-    0,
-  );
-  const overallAvg = totalWithScore > 0 ? (scoreSum / totalWithScore).toFixed(1) : null;
   const totalJudgeSynth = populatedBUs.reduce(
     (sum, bu) => sum + bu.teams.filter((t) => (t.judge_synthesis || '').trim()).length,
+    0,
+  );
+  const totalSummarized = populatedBUs.reduce(
+    (sum, bu) => sum + bu.teams.filter((t) => (t.summary || '').trim()).length,
     0,
   );
 
@@ -775,12 +773,10 @@ function PresentationView({ data, round }: { data: BUReportData; round: number }
             <div className="pv-stat-num">{populatedBUs.length}</div>
             <div className="pv-stat-label">BUs covered</div>
           </div>
-          {overallAvg && (
-            <div className="pv-stat">
-              <div className="pv-stat-num">{overallAvg}<span className="pv-stat-suffix">/10</span></div>
-              <div className="pv-stat-label">avg AI score</div>
-            </div>
-          )}
+          <div className="pv-stat">
+            <div className="pv-stat-num">{totalSummarized}</div>
+            <div className="pv-stat-label">summarized</div>
+          </div>
           {totalJudgeSynth > 0 && (
             <div className="pv-stat">
               <div className="pv-stat-num">{totalJudgeSynth}</div>
@@ -840,7 +836,6 @@ function BUPresentationSection({ bu, round }: BUPresentationSectionProps) {
         <h2>{bu.display}</h2>
         <div className="pv-bu-meta">
           {bu.team_count} idea{bu.team_count === 1 ? '' : 's'}
-          {bu.avg_ai_score !== null && <> · avg AI score {bu.avg_ai_score}/10</>}
         </div>
         <button
           onClick={download}
@@ -880,7 +875,6 @@ function TeamCard({ team }: { team: BUTeamBlock }) {
     <div className="pv-card">
       <div className="pv-card-head">
         <div className="pv-card-title">{team.team_name}</div>
-        <div className="pv-card-score">{team.ai_score_10 ?? '—'}<span>/10</span></div>
       </div>
       {(team.sub_tags.length > 0 || team.theme_tags.length > 0) && (
         <div className="pv-card-tags">
