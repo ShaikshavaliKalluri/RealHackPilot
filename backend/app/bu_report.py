@@ -253,9 +253,8 @@ def _leadership_summary_user_msg(team: models.Team) -> str:
 def _judge_synthesis_prompt_system() -> str:
     return (
         "You are synthesizing what a panel of RealPage judges thought about a "
-        "hackathon idea, for a leadership-facing report. This is only run for "
-        "standout ideas (top-3 in their BU) so leaders see qualitative signal, "
-        "not just AI scores.\n\n"
+        "hackathon idea, for a leadership-facing report. Focus purely on the "
+        "QUALITATIVE signal -- what the judges liked and what they questioned.\n\n"
         "Rules:\n"
         "- 2-3 sentences, ~50-70 words.\n"
         "- Neutral, factual tone. Not marketing.\n"
@@ -264,16 +263,23 @@ def _judge_synthesis_prompt_system() -> str:
         "positive, say so explicitly and skip the concern.\n"
         "- Never name or attribute any individual judge.\n"
         "- Do NOT invent feedback that isn't grounded in the comments provided.\n"
-        "- Do NOT quote judges verbatim -- paraphrase.\n\n"
+        "- Do NOT quote judges verbatim -- paraphrase.\n"
+        "- Do NOT mention any numeric score, average, percentage, or rating "
+        "(e.g. avoid phrases like '73.3', '7.8/10', 'scored high', 'high score', "
+        "'strong average'). The leadership doc shows scores separately.\n\n"
         "Output plain text only. No JSON, no preamble."
     )
 
 
 def _judge_synthesis_user_msg(team_name: str, scores_summary: str, comments: list[str]) -> str:
+    # Numeric scores intentionally omitted from the user message. The LLM
+    # tends to echo numbers even with a negative instruction; safest is to
+    # never let it see them for this specific synthesis. `scores_summary`
+    # is retained in the signature for backward compatibility but ignored.
+    _ = scores_summary
     comment_block = "\n\n".join(f"- {c}" for c in comments) if comments else "[no comments provided]"
     return (
         f"Team: {team_name}\n\n"
-        f"Judge score summary: {scores_summary}\n\n"
         f"Anonymous judge comments:\n\n{comment_block}"
     )
 
@@ -571,8 +577,15 @@ def store_leadership_summary(
 # Aggregation (per-BU rollup for the leadership doc)
 # ============================================================================
 
-def build_report_data(db: Session, round_num: int, standout_top_n: int = 3) -> dict:
+def build_report_data(db: Session, round_num: int, bu_filter: str | None = None) -> dict:
     """Assemble the full leadership report structure.
+
+    Every team in a BU is returned in one `teams` list, sorted by AI score
+    desc. There's no longer a standouts / long_tail split -- leadership
+    wanted every idea surfaced equally with its own judge synthesis.
+
+    When `bu_filter` is provided (one of BU_KEYS), only that BU's block is
+    returned in `bus` -- used by the per-BU PPTX download.
 
     Shape:
       {
@@ -587,11 +600,10 @@ def build_report_data(db: Session, round_num: int, standout_top_n: int = 3) -> d
             "description": "...",
             "team_count": N,
             "avg_ai_score": 6.4,
-            "top_sub_tags": [("loft_portal", 5), ("payments", 3), ...],
+            "top_sub_tags": [("loft_portal", 5), ...],
             "top_function_tags": [...],
             "top_theme_tags": [...],
-            "standouts": [ team_block, ... ],   # top-N by ai_score, has judge_synthesis
-            "long_tail": [ team_block, ... ],   # rest, no judge_synthesis
+            "teams": [ team_block, ... ],   # every team, sorted by AI score desc
           },
           ...
         ]
@@ -604,8 +616,6 @@ def build_report_data(db: Session, round_num: int, standout_top_n: int = 3) -> d
         .order_by(models.Team.name)
         .all()
     )
-    # Group teams by BU based on stored classification. Unclassified fall
-    # into a separate bucket the frontend surfaces at the top of the editor.
     by_bu: dict[str, list[models.Team]] = defaultdict(list)
     unclassified: list[models.Team] = []
     for t in all_teams:
@@ -618,16 +628,13 @@ def build_report_data(db: Session, round_num: int, standout_top_n: int = 3) -> d
 
     bu_blocks: list[dict[str, Any]] = []
     for bu_key in BU_KEYS:
+        if bu_filter and bu_key != bu_filter:
+            continue
         teams_in_bu = by_bu.get(bu_key, [])
-        team_blocks = [
-            _team_block(t, round_num=round_num) for t in teams_in_bu
-        ]
+        team_blocks = [_team_block(t, round_num=round_num) for t in teams_in_bu]
         # Sort by AI score desc, name asc for stable output.
         team_blocks.sort(key=lambda b: (-(b["ai_score_10"] or 0), b["team_name"].lower()))
-        standouts = team_blocks[:standout_top_n]
-        long_tail = team_blocks[standout_top_n:]
 
-        # Aggregate sub/function/theme tag frequencies from stored classifications.
         sub_counter: Counter[str] = Counter()
         fn_counter: Counter[str] = Counter()
         th_counter: Counter[str] = Counter()
@@ -652,8 +659,7 @@ def build_report_data(db: Session, round_num: int, standout_top_n: int = 3) -> d
             "top_sub_tags": sub_counter.most_common(5),
             "top_function_tags": fn_counter.most_common(3),
             "top_theme_tags": th_counter.most_common(3),
-            "standouts": standouts,
-            "long_tail": long_tail,
+            "teams": team_blocks,
         })
 
     return {
@@ -661,7 +667,7 @@ def build_report_data(db: Session, round_num: int, standout_top_n: int = 3) -> d
         "generated_at": datetime.utcnow().isoformat(),
         "total_teams": len(all_teams),
         "unclassified_count": len(unclassified),
-        "unclassified": [_team_block(t, round_num=round_num) for t in unclassified],
+        "unclassified": [_team_block(t, round_num=round_num) for t in unclassified] if not bu_filter else [],
         "bus": bu_blocks,
     }
 

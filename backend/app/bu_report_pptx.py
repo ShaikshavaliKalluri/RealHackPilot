@@ -210,17 +210,26 @@ def _add_overview_slide(prs: Presentation, report: dict):
         )
 
 
+TEAMS_PER_SLIDE = 4  # 2 rows x 2 cards per slide -- gives each team ~3" x ~2.5"
+
+
 def _add_bu_section_slide(prs: Presentation, bu: dict):
-    """One slide per BU: name, count, description, tag rollup, standout cards."""
+    """Render every team in the BU across as many slides as needed.
+    Slide 1 = BU intro (title, description, tag rollup, first batch of cards).
+    Subsequent slides = continuation cards, N per slide.
+    """
+    teams = bu.get("teams") or []
+    display = bu.get("display", "?")
+
+    # Slide 1: intro + first batch of cards
     slide = prs.slides.add_slide(prs.slide_layouts[6])
     _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, WHITE)
-    _add_brand_header(slide, bu.get("display", ""))
+    _add_brand_header(slide, display)
 
-    # Title row: BU name (left) + count/avg score (right)
     _add_text_box(
         slide, MARGIN_X, Inches(0.7),
         CONTENT_W - Inches(3), Inches(0.6),
-        bu.get("display", "?"),
+        display,
         size_pt=26, bold=True, color=BRAND_BLUE,
     )
     count = bu.get("team_count", 0)
@@ -235,7 +244,6 @@ def _add_bu_section_slide(prs: Presentation, bu: dict):
         size_pt=12, color=INK_LIGHT, align=PP_ALIGN.RIGHT,
     )
 
-    # Description
     _add_text_box(
         slide, MARGIN_X, Inches(1.35),
         CONTENT_W, Inches(0.7),
@@ -243,9 +251,8 @@ def _add_bu_section_slide(prs: Presentation, bu: dict):
         size_pt=11, color=INK_MID,
     )
 
-    # Tag rollup (thin band)
     tag_top = Inches(2.05)
-    tag_h = Inches(0.6)
+    tag_h = Inches(0.5)
     tag_lines = []
     if bu.get("top_sub_tags"):
         tag_lines.append("Divisions: " + ", ".join(f"{_pretty_tag(t)} ({n})" for t, n in bu["top_sub_tags"]))
@@ -254,170 +261,122 @@ def _add_bu_section_slide(prs: Presentation, bu: dict):
     if tag_lines:
         _add_rect(slide, MARGIN_X, tag_top, CONTENT_W, tag_h, BRAND_BLUE_BG)
         _add_rect(slide, MARGIN_X, tag_top, Inches(0.08), tag_h, BRAND_BLUE)
-        tb = slide.shapes.add_textbox(MARGIN_X + Inches(0.2), tag_top + Inches(0.06), CONTENT_W - Inches(0.3), tag_h)
+        tb = slide.shapes.add_textbox(MARGIN_X + Inches(0.15), tag_top + Inches(0.04), CONTENT_W - Inches(0.25), tag_h)
         tf = tb.text_frame
         tf.word_wrap = True
         p = tf.paragraphs[0]
         r = p.add_run()
-        _set_run(r, tag_lines[0], 11, color=INK_MID)
+        _set_run(r, tag_lines[0], 10, color=INK_MID)
         for extra in tag_lines[1:]:
-            _add_paragraph(tf, extra, size_pt=11, color=INK_MID, space_before_pt=1)
+            _add_paragraph(tf, extra, size_pt=10, color=INK_MID, space_before_pt=0)
 
-    # Standout cards: up to 3 side-by-side
-    standouts = bu.get("standouts", [])[:3]
-    if standouts:
-        cards_top = Inches(2.85)
-        cards_bottom = Inches(6.9)
-        cards_h = cards_bottom - cards_top
-        n = len(standouts)
-        gap = Inches(0.15)
-        card_w = (CONTENT_W - gap * (n - 1)) / n
-        for i, t in enumerate(standouts):
-            left = MARGIN_X + i * (card_w + gap)
-            _add_standout_card(slide, left, cards_top, card_w, cards_h, t)
+    # First batch of team cards on this same slide (limited to fit)
+    first_batch = teams[:TEAMS_PER_SLIDE]
+    if first_batch:
+        _add_team_card_grid(slide, first_batch, top=Inches(2.7), bottom=Inches(7.2))
 
-    # Long tail: bullet list at the bottom (compact)
-    long_tail = bu.get("long_tail", [])
-    if long_tail:
-        lt_top = Inches(6.95) if standouts else Inches(2.85)
+    # Continuation slides for the rest
+    remaining = teams[TEAMS_PER_SLIDE:]
+    while remaining:
+        batch = remaining[:TEAMS_PER_SLIDE]
+        remaining = remaining[TEAMS_PER_SLIDE:]
+        cont = prs.slides.add_slide(prs.slide_layouts[6])
+        _add_rect(cont, 0, 0, SLIDE_W, SLIDE_H, WHITE)
+        _add_brand_header(cont, f"{display} (continued)")
         _add_text_box(
-            slide, MARGIN_X, lt_top,
-            Inches(3), Inches(0.3),
-            f"Also submitted ({len(long_tail)})",
-            size_pt=10, bold=True, color=INK_LIGHT,
+            cont, MARGIN_X, Inches(0.7),
+            CONTENT_W, Inches(0.5),
+            f"{display}",
+            size_pt=22, bold=True, color=BRAND_BLUE,
         )
-        # If we have room, add a second slide for the long tail if it's big.
-        _add_long_tail_inline(slide, long_tail, MARGIN_X, lt_top + Inches(0.3), max_lines=1)
-
-    # If long tail has more than 1 line's worth, spill onto a follow-up slide
-    if len(long_tail) > 3:
-        _add_bu_long_tail_slide(prs, bu, long_tail[3:] if len(standouts) > 0 else long_tail)
+        _add_team_card_grid(cont, batch, top=Inches(1.4), bottom=Inches(7.2))
 
 
-def _add_standout_card(slide, left, top, width, height, team: dict):
-    """A single team card inside a BU slide."""
-    # Card body
+def _add_team_card_grid(slide, teams: list[dict], top, bottom):
+    """Lay out up to 4 team cards in a 2x2 grid between `top` and `bottom`."""
+    if not teams:
+        return
+    n = len(teams)
+    rows = 2 if n > 2 else 1
+    cols = 2 if n > 1 else 1
+    gap = Inches(0.15)
+    total_h = bottom - top
+    row_h = (total_h - gap * (rows - 1)) / rows
+    col_w = (CONTENT_W - gap * (cols - 1)) / cols
+    for i, t in enumerate(teams):
+        row = i // cols
+        col = i % cols
+        left = MARGIN_X + col * (col_w + gap)
+        card_top = top + row * (row_h + gap)
+        _add_team_card(slide, left, card_top, col_w, row_h, t)
+
+
+def _add_team_card(slide, left, top, width, height, team: dict):
+    """A single team card. Sized for 2x2 grid: ~6.35" wide, ~2.8" tall."""
     _add_rect(slide, left, top, width, height, BRAND_BLUE_BG, INK_HAIR)
-    # Left accent bar
     _add_rect(slide, left, top, Inches(0.08), height, BRAND_BLUE)
-    inner_l = left + Inches(0.2)
-    inner_w = width - Inches(0.3)
+    inner_l = left + Inches(0.18)
+    inner_w = width - Inches(0.28)
 
-    # Team name
-    name_tb = _add_text_box(
-        slide, inner_l, top + Inches(0.15),
-        inner_w - Inches(0.9), Inches(0.5),
+    # Team name (left) + AI score badge (right)
+    _add_text_box(
+        slide, inner_l, top + Inches(0.1),
+        inner_w - Inches(0.9), Inches(0.4),
         team.get("team_name", "?"),
-        size_pt=13, bold=True, color=BRAND_BLUE,
+        size_pt=12, bold=True, color=BRAND_BLUE,
     )
-    _ = name_tb
-
-    # AI score badge (top right of card)
     score = team.get("ai_score_10")
     if score is not None:
         _add_text_box(
-            slide, left + width - Inches(1.0), top + Inches(0.12),
-            Inches(0.85), Inches(0.5),
+            slide, left + width - Inches(1.0), top + Inches(0.08),
+            Inches(0.85), Inches(0.4),
             f"{score}/10",
-            size_pt=18, bold=True, color=BRAND_GREEN, align=PP_ALIGN.RIGHT,
+            size_pt=16, bold=True, color=BRAND_GREEN, align=PP_ALIGN.RIGHT,
         )
 
-    # Sub-tag chips
+    # Sub-tags
     tags = list(team.get("sub_tags") or [])[:3]
+    tags_top = top + Inches(0.5)
     if tags:
         tag_text = "  ·  ".join(_pretty_tag(t) for t in tags)
         _add_text_box(
-            slide, inner_l, top + Inches(0.6),
-            inner_w, Inches(0.35),
+            slide, inner_l, tags_top,
+            inner_w, Inches(0.3),
             tag_text,
-            size_pt=9, color=BRAND_BLUE,
+            size_pt=8, color=BRAND_BLUE,
         )
 
-    # Summary paragraph
-    summary_top = top + Inches(1.0)
-    summary_h = Inches(1.6)
+    # Summary
+    summary_top = top + Inches(0.85)
+    js_text = (team.get("judge_synthesis") or "").strip()
+    # Split remaining height between summary and judge synthesis.
+    remaining = (top + height) - summary_top - Inches(0.1)
+    if js_text:
+        summary_h = remaining * 0.5
+    else:
+        summary_h = remaining
     if team.get("summary"):
         _add_text_box(
             slide, inner_l, summary_top,
             inner_w, summary_h,
             team["summary"],
-            size_pt=10.5, color=INK_MID,
+            size_pt=9, color=INK_MID,
         )
 
     # Judge synthesis (amber block)
-    js_text = (team.get("judge_synthesis") or "").strip()
     if js_text:
-        js_top = summary_top + summary_h + Inches(0.1)
-        js_h = Inches(1.3)
+        js_top = summary_top + summary_h + Inches(0.05)
+        js_h = (top + height) - js_top - Inches(0.05)
         _add_rect(slide, inner_l, js_top, inner_w, js_h, BRAND_AMBER_BG)
         _add_rect(slide, inner_l, js_top, Inches(0.06), js_h, BRAND_AMBER)
-        tb = slide.shapes.add_textbox(inner_l + Inches(0.12), js_top + Inches(0.05), inner_w - Inches(0.2), js_h)
+        tb = slide.shapes.add_textbox(inner_l + Inches(0.1), js_top + Inches(0.03), inner_w - Inches(0.2), js_h - Inches(0.06))
         tf = tb.text_frame
         tf.word_wrap = True
         p = tf.paragraphs[0]
         r = p.add_run()
-        _set_run(r, "Judges said: ", 9, bold=True, color=RGBColor(0x7A, 0x5C, 0x00))
+        _set_run(r, "Judges said: ", 8, bold=True, color=RGBColor(0x7A, 0x5C, 0x00))
         r2 = p.add_run()
-        _set_run(r2, js_text, 9, color=INK_MID)
-
-
-def _add_long_tail_inline(slide, teams: list[dict], left, top, max_lines: int = 1):
-    """Compact one-line-per-team list at the bottom of the BU slide."""
-    box_h = Inches(0.35 * max_lines)
-    tb = slide.shapes.add_textbox(left, top, CONTENT_W, box_h)
-    tf = tb.text_frame
-    tf.word_wrap = True
-    text = "  ·  ".join(
-        f"{t.get('team_name','?')}" + (f" ({t.get('ai_score_10')}/10)" if t.get('ai_score_10') is not None else "")
-        for t in teams[: min(6, len(teams))]
-    )
-    p = tf.paragraphs[0]
-    run = p.add_run()
-    _set_run(run, text, 9, color=INK_LIGHT)
-
-
-def _add_bu_long_tail_slide(prs: Presentation, bu: dict, remaining: list[dict]):
-    """Follow-up slide for BUs with more long-tail items than fit on the
-    main slide."""
-    if not remaining:
-        return
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, WHITE)
-    _add_brand_header(slide, f"{bu.get('display', '')} (continued)")
-    _add_text_box(
-        slide, MARGIN_X, Inches(0.7),
-        CONTENT_W, Inches(0.5),
-        f"{bu.get('display','?')}  ·  also submitted ({len(remaining)})",
-        size_pt=20, bold=True, color=BRAND_BLUE,
-    )
-    # Two-column bullet list
-    per_col = (len(remaining) + 1) // 2
-    col_w = (CONTENT_W - Inches(0.4)) / 2
-    for col_i in range(2):
-        items = remaining[col_i * per_col:(col_i + 1) * per_col]
-        if not items:
-            continue
-        col_left = MARGIN_X + col_i * (col_w + Inches(0.4))
-        tb = slide.shapes.add_textbox(col_left, Inches(1.4), col_w, Inches(5.8))
-        tf = tb.text_frame
-        tf.word_wrap = True
-        for i, t in enumerate(items):
-            title = t.get("team_name", "?")
-            score = t.get("ai_score_10")
-            score_txt = f" · AI {score}/10" if score is not None else ""
-            summary = (t.get("summary") or "").strip()
-            if i == 0:
-                p = tf.paragraphs[0]
-            else:
-                p = tf.add_paragraph()
-                p.space_before = Pt(6)
-            r = p.add_run()
-            _set_run(r, f"{title}{score_txt}", 11, bold=True, color=BRAND_BLUE)
-            if summary:
-                p2 = tf.add_paragraph()
-                p2.space_before = Pt(1)
-                r2 = p2.add_run()
-                _set_run(r2, summary, 10, color=INK_MID)
+        _set_run(r2, js_text, 8, color=INK_MID)
 
 
 def _add_closing_slide(prs: Presentation):
@@ -441,16 +400,28 @@ def _pretty_tag(t: str) -> str:
     return t.replace("_", " ")
 
 
-def build_pptx(report: dict) -> bytes:
-    """Assemble the entire deck and return raw .pptx bytes."""
+def build_pptx(report: dict, single_bu: str | None = None) -> bytes:
+    """Assemble the deck and return raw .pptx bytes.
+
+    When `single_bu` is provided, the deck focuses on that one BU: a
+    BU-specific title slide (no full ecosystem overview), then the section
+    slides for that BU only. Used for the "download per BU" flow so each
+    BU head gets a scoped file to review.
+    """
     prs = Presentation()
     prs.slide_width = SLIDE_W
     prs.slide_height = SLIDE_H
 
-    _add_title_slide(prs, report)
-    _add_overview_slide(prs, report)
+    bus = report.get("bus", [])
+    if single_bu:
+        # BU-scoped deck: skip the ecosystem overview slide.
+        bu_display = next((b.get("display", single_bu) for b in bus), single_bu)
+        _add_bu_title_slide(prs, report, bu_display)
+    else:
+        _add_title_slide(prs, report)
+        _add_overview_slide(prs, report)
 
-    for bu in report.get("bus", []):
+    for bu in bus:
         if bu.get("team_count", 0) == 0:
             continue
         _add_bu_section_slide(prs, bu)
@@ -460,3 +431,36 @@ def build_pptx(report: dict) -> bytes:
     buf = io.BytesIO()
     prs.save(buf)
     return buf.getvalue()
+
+
+def _add_bu_title_slide(prs: Presentation, report: dict, bu_display: str):
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    _add_rect(slide, 0, 0, SLIDE_W, SLIDE_H, BRAND_BLUE)
+    _add_rect(slide, MARGIN_X, Inches(2.6), Inches(0.5), Inches(0.08), WHITE)
+    _add_text_box(
+        slide, MARGIN_X, Inches(2.2),
+        CONTENT_W, Inches(0.35),
+        "RealHack 2026 · Leadership Review",
+        size_pt=14, bold=True, color=WHITE,
+    )
+    _add_text_box(
+        slide, MARGIN_X, Inches(2.8),
+        CONTENT_W, Inches(1.6),
+        bu_display,
+        size_pt=48, bold=True, color=WHITE,
+    )
+    _add_text_box(
+        slide, MARGIN_X, Inches(4.2),
+        CONTENT_W, Inches(0.6),
+        "Every RealHack idea classified into this business unit, with AI-summary and judge feedback",
+        size_pt=16, color=BRAND_BLUE_LIGHT,
+    )
+    total = report.get("total_teams", 0)
+    round_num = report.get("round", 1)
+    meta = f"Round {round_num}  ·  {total} ideas across all BUs"
+    _add_text_box(
+        slide, MARGIN_X, Inches(6.6),
+        CONTENT_W, Inches(0.4),
+        meta,
+        size_pt=12, color=BRAND_BLUE_LIGHT,
+    )

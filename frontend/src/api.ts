@@ -1831,8 +1831,7 @@ export interface BUBlock {
   top_sub_tags: [string, number][];
   top_function_tags: [string, number][];
   top_theme_tags: [string, number][];
-  standouts: BUTeamBlock[];
-  long_tail: BUTeamBlock[];
+  teams: BUTeamBlock[];
 }
 
 export interface BUReportData {
@@ -1954,8 +1953,10 @@ export async function overrideLeadershipSummary(
   return r.json();
 }
 
-export async function downloadBUReportPptx(round: number): Promise<void> {
-  const r = await authFetch(`${BASE}/bu-report/export.pptx?round=${round}`);
+export async function downloadBUReportPptx(round: number, bu?: string): Promise<void> {
+  const params = new URLSearchParams({ round: String(round) });
+  if (bu) params.set('bu', bu);
+  const r = await authFetch(`${BASE}/bu-report/export.pptx?${params.toString()}`);
   if (!r.ok) {
     const t = await r.text();
     throw new Error(`Download failed: ${r.status} ${t}`);
@@ -1964,7 +1965,8 @@ export async function downloadBUReportPptx(round: number): Promise<void> {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `realhack-2026-bu-report-r${round}.pptx`;
+  const suffix = bu ? `-${bu.replace(/_/g, '-')}` : '';
+  a.download = `realhack-2026-bu-report-r${round}${suffix}.pptx`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

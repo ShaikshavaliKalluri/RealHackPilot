@@ -4203,19 +4203,30 @@ def bu_report_summarize(
 @app.get("/api/bu-report/export.pptx")
 def bu_report_export_pptx(
     round: int = 1,
+    bu: str | None = None,
     claims: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ):
-    """Generate and stream a downloadable .pptx of the leadership report
-    for the given round. Shaik-only. Uses the SAME report data as the
-    on-screen presentation view, rendered into a real PowerPoint file that
-    can be edited before sending."""
+    """Generate and stream a downloadable .pptx of the leadership report.
+    Shaik-only. Uses the SAME report data as the on-screen presentation view.
+
+    Query params:
+    - round: 1 | 2 | 3
+    - bu: optional BU key. When set, the exported deck only contains that
+      one BU's section -- used to send each BU head their own file.
+    """
     _require_bu_report_admin(claims)
     if round not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
-    report = bu_report_service.build_report_data(db, round_num=round)
-    pptx_bytes = bu_report_pptx.build_pptx(report)
-    filename = f"realhack-2026-bu-report-r{round}.pptx"
+    if bu is not None and bu not in bu_report_service.BU_TAXONOMY:
+        raise HTTPException(status_code=400, detail=f"unknown BU key: {bu!r}")
+    report = bu_report_service.build_report_data(db, round_num=round, bu_filter=bu)
+    pptx_bytes = bu_report_pptx.build_pptx(report, single_bu=bu)
+    if bu:
+        safe = bu.replace("_", "-")
+        filename = f"realhack-2026-bu-report-r{round}-{safe}.pptx"
+    else:
+        filename = f"realhack-2026-bu-report-r{round}.pptx"
     return Response(
         content=pptx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",

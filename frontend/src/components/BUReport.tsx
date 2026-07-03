@@ -51,8 +51,7 @@ export function BUReport({ onReload: _onReload }: Props) {
     if (!data) return [];
     const ids: number[] = [];
     for (const bu of data.bus) {
-      ids.push(...bu.standouts.map((t) => t.team_id));
-      ids.push(...bu.long_tail.map((t) => t.team_id));
+      ids.push(...bu.teams.map((t) => t.team_id));
     }
     ids.push(...data.unclassified.map((t) => t.team_id));
     return ids;
@@ -67,7 +66,7 @@ export function BUReport({ onReload: _onReload }: Props) {
     if (!data) return [];
     const ids: number[] = [];
     for (const bu of data.bus) {
-      for (const t of [...bu.standouts, ...bu.long_tail]) {
+      for (const t of bu.teams) {
         if (!t.summary) ids.push(t.team_id);
       }
     }
@@ -128,7 +127,7 @@ export function BUReport({ onReload: _onReload }: Props) {
 
   // ---------- Full pipeline (one-click auto-generate) ----------
   // Runs the entire generation flow: classify every team -> summarize every
-  // team -> synthesize judge feedback for the top-3-per-BU standouts.
+  // team -> summarize + synthesize judge feedback for every team.
   // The organizer isn't expected to click through 3 different bulk buttons
   // just to get a leadership doc.
   const runFullPipeline = async (opts: { force?: boolean } = {}) => {
@@ -136,12 +135,10 @@ export function BUReport({ onReload: _onReload }: Props) {
     if (!data) return;
     setPipelineError(null);
     try {
-      // Load a fresh copy of the report to snapshot which teams exist.
       const dNow = await fetchBUReportData(round);
       const everyId: number[] = [];
       for (const bu of dNow.bus) {
-        everyId.push(...bu.standouts.map((t) => t.team_id));
-        everyId.push(...bu.long_tail.map((t) => t.team_id));
+        everyId.push(...bu.teams.map((t) => t.team_id));
       }
       everyId.push(...dNow.unclassified.map((t) => t.team_id));
 
@@ -150,23 +147,16 @@ export function BUReport({ onReload: _onReload }: Props) {
         return;
       }
 
-      // Step 1: classify (skips teams already classified unless force=true)
+      // Step 1: classify every idea into a BU (skips already-classified
+      // unless force=true).
       setPipelineStep(`Classifying ${everyId.length} idea${everyId.length === 1 ? '' : 's'} into RealPage BUs…`);
       await classifyBUTeams(everyId, force);
 
-      // Step 2: summarize + AI score
-      setPipelineStep(`Writing leadership summaries for ${everyId.length} idea${everyId.length === 1 ? '' : 's'}…`);
-      await summarizeBUTeams(everyId, round, { force, withJudgeSynthesis: false });
-
-      // Step 3: re-fetch report to find the top-3-per-BU standouts, then
-      // synthesize judge feedback for just those (cost + political control).
-      setPipelineStep('Identifying standouts (top 3 per BU)…');
-      const d2 = await fetchBUReportData(round);
-      const standoutIdsList = d2.bus.flatMap((bu) => bu.standouts.map((t) => t.team_id));
-      if (standoutIdsList.length > 0) {
-        setPipelineStep(`Synthesizing judge feedback for ${standoutIdsList.length} standout${standoutIdsList.length === 1 ? '' : 's'}…`);
-        await summarizeBUTeams(standoutIdsList, round, { force: true, withJudgeSynthesis: true });
-      }
+      // Step 2: summarize + AI score + judge synthesis for EVERY team in
+      // one pass. Previously judge synth only ran on top-3-per-BU, but
+      // leadership wants every idea's judge feedback surfaced.
+      setPipelineStep(`Writing summaries + judge synthesis for ${everyId.length} idea${everyId.length === 1 ? '' : 's'}…`);
+      await summarizeBUTeams(everyId, round, { force, withJudgeSynthesis: true });
 
       setPipelineStep('Refreshing report…');
       await reload();
@@ -186,7 +176,7 @@ export function BUReport({ onReload: _onReload }: Props) {
     let summarized = 0;
     let total = 0;
     for (const bu of data.bus) {
-      for (const t of [...bu.standouts, ...bu.long_tail]) {
+      for (const t of bu.teams) {
         total++;
         if (t.bu) classified++;
         if (t.summary) summarized++;
@@ -320,7 +310,7 @@ export function BUReport({ onReload: _onReload }: Props) {
             </div>
           </div>
           <div className="text-xs text-slate-400">
-            This runs classify + summarize on every idea and layers judge synthesis on the standouts.
+            This classifies every idea into a RealPage BU, writes an AI summary + score, and synthesizes what the judges said. Every idea, not just the top three.
             Roughly a minute of LLM time -- safe to leave the tab open.
           </div>
         </div>
@@ -340,7 +330,7 @@ export function BUReport({ onReload: _onReload }: Props) {
             One click classifies every RealHack idea into a RealPage BU (Property &amp; Renters Management,
             Resident Solutions, Business Services, Data Analytics, Mixed Use, Smart Building, or Cross-Cutting),
             writes a 2-3 sentence leadership summary + AI score, and synthesizes judge feedback on the top 3
-            standouts per BU. Then hit Print / Save as PDF and send.
+            idea (with what the judges said). Then hit Download .pptx and send.
           </p>
           <p className="text-xs text-slate-400">
             Covers {data.total_teams} team{data.total_teams === 1 ? '' : 's'} · ~1 minute · &lt; $1 of Anthropic Haiku
@@ -381,12 +371,12 @@ export function BUReport({ onReload: _onReload }: Props) {
               {bulkBusy === 'summarize' ? 'Summarizing…' : `🤖 Summarize un-summarized (${unsummarizedIds.length})`}
             </button>
             <button
-              onClick={() => bulkSummarize(standoutIds(data), true, true)}
+              onClick={() => bulkSummarize(allTeamIds, true, true)}
               disabled={bulkBusy !== null}
               className="text-xs px-3 py-1.5 rounded border border-violet-500/40 hover:border-violet-500/70 hover:bg-violet-500/10 text-violet-200 transition disabled:opacity-50"
-              title="Regenerate summary + judge synthesis for the top-3-per-BU standouts (extra LLM cost)"
+              title="Regenerate summary + judge synthesis for every team (uses extra LLM calls)"
             >
-              {bulkBusy === 'summarize_with_judges' ? 'Synthesizing…' : `🎯 Synthesize standouts + judges`}
+              {bulkBusy === 'summarize_with_judges' ? 'Synthesizing…' : `🎯 Regenerate all + judges`}
             </button>
           </div>
 
@@ -432,7 +422,7 @@ export function BUReport({ onReload: _onReload }: Props) {
                 )}
               </div>
               <div className="space-y-2">
-                {[...bu.standouts, ...bu.long_tail].map((t) => (
+                {bu.teams.map((t) => (
                   <TeamEditorRow
                     key={t.team_id}
                     team={t}
@@ -449,13 +439,9 @@ export function BUReport({ onReload: _onReload }: Props) {
         </>
       )}
 
-      {view === 'presentation' && <PresentationView data={data} />}
+      {view === 'presentation' && <PresentationView data={data} round={round} />}
     </div>
   );
-}
-
-function standoutIds(data: BUReportData): number[] {
-  return data.bus.flatMap((bu) => bu.standouts.map((t) => t.team_id));
 }
 
 function summarizeCounts(results: BUClassifyResult[]): Record<string, number> {
@@ -722,7 +708,7 @@ function TeamEditorRow({ team, taxonomy, editing, onStartEdit, onEndEdit, onSave
             </div>
             <div>
               <div className="text-xs uppercase tracking-wide text-slate-400 mb-1">
-                Judge synthesis (standouts only — leave blank if no verbatim summary needed)
+                Judge synthesis (paraphrased judge feedback; leave blank if none)
               </div>
               <textarea
                 value={judgeSyn}
@@ -750,7 +736,7 @@ function TeamEditorRow({ team, taxonomy, editing, onStartEdit, onEndEdit, onSave
 
 // ===== Presentation view (print-to-PDF friendly) =====
 
-function PresentationView({ data }: { data: BUReportData }) {
+function PresentationView({ data, round }: { data: BUReportData; round: number }) {
   return (
     <div className="bu-presentation">
       <style>{PRESENTATION_STYLES}</style>
@@ -769,7 +755,7 @@ function PresentationView({ data }: { data: BUReportData }) {
       </header>
 
       {data.bus.map((bu) => bu.team_count === 0 ? null : (
-        <BUPresentationSection key={bu.key} bu={bu} />
+        <BUPresentationSection key={bu.key} bu={bu} round={round} />
       ))}
 
       {data.unclassified_count > 0 && (
@@ -795,7 +781,23 @@ function PresentationView({ data }: { data: BUReportData }) {
   );
 }
 
-function BUPresentationSection({ bu }: { bu: BUBlock }) {
+interface BUPresentationSectionProps {
+  bu: BUBlock;
+  round: number;
+}
+
+function BUPresentationSection({ bu, round }: BUPresentationSectionProps) {
+  const [downloading, setDownloading] = useState(false);
+  const download = async () => {
+    setDownloading(true);
+    try {
+      await downloadBUReportPptx(round, bu.key);
+    } catch (e: any) {
+      alert(`Download failed: ${e?.message ?? e}`);
+    } finally {
+      setDownloading(false);
+    }
+  };
   return (
     <section className="pv-section pv-bu">
       <div className="pv-bu-header">
@@ -804,6 +806,13 @@ function BUPresentationSection({ bu }: { bu: BUBlock }) {
           {bu.team_count} idea{bu.team_count === 1 ? '' : 's'}
           {bu.avg_ai_score !== null && <> · avg AI score {bu.avg_ai_score}/10</>}
         </div>
+        <button
+          onClick={download}
+          disabled={downloading}
+          className="pv-bu-download"
+        >
+          {downloading ? 'Building…' : `⬇️ Download ${bu.display}.pptx`}
+        </button>
       </div>
       <p className="pv-desc">{bu.description}</p>
 
@@ -821,35 +830,16 @@ function BUPresentationSection({ bu }: { bu: BUBlock }) {
         </div>
       )}
 
-      {bu.standouts.length > 0 && (
-        <div className="pv-standouts">
-          <h3>Standouts (top {bu.standouts.length} by AI score)</h3>
-          <div className="pv-cards">
-            {bu.standouts.map((t) => <StandoutCard key={t.team_id} team={t} />)}
-          </div>
-        </div>
-      )}
-
-      {bu.long_tail.length > 0 && (
-        <div className="pv-long-tail-wrap">
-          <h3>Also submitted ({bu.long_tail.length})</h3>
-          <ul className="pv-long-tail">
-            {bu.long_tail.map((t) => (
-              <li key={t.team_id}>
-                <strong>{t.team_name}</strong>
-                {t.ai_score_10 !== null && <span className="pv-score-inline"> · AI {t.ai_score_10}/10</span>}
-                {t.sub_tags.length > 0 && <span className="pv-tags-inline"> · {t.sub_tags.map(prettyTag).join(', ')}</span>}
-                {t.summary && <>: {t.summary}</>}
-              </li>
-            ))}
-          </ul>
+      {bu.teams.length > 0 && (
+        <div className="pv-cards">
+          {bu.teams.map((t) => <TeamCard key={t.team_id} team={t} />)}
         </div>
       )}
     </section>
   );
 }
 
-function StandoutCard({ team }: { team: BUTeamBlock }) {
+function TeamCard({ team }: { team: BUTeamBlock }) {
   return (
     <div className="pv-card">
       <div className="pv-card-head">
@@ -901,6 +891,9 @@ const PRESENTATION_STYLES = `
 .pv-section { margin-bottom: 40px; page-break-inside: avoid; }
 .pv-bu-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .pv-bu-header h2 { font-size: 22px; }
+.pv-bu-download { font-size: 12px; padding: 6px 12px; border: 1px solid #0a4f99; border-radius: 4px; background: #f0f4f9; color: #0a4f99; cursor: pointer; font-weight: 600; }
+.pv-bu-download:hover:not(:disabled) { background: #dceafd; }
+.pv-bu-download:disabled { opacity: 0.6; cursor: default; }
 .pv-bu-meta { font-size: 12px; color: #5a6a7a; }
 .pv-desc { font-size: 13px; color: #444; margin: 8px 0 14px 0; }
 .pv-tag-rollup { background: #f0f4f9; border-left: 4px solid #0a4f99; padding: 10px 14px; font-size: 12px; color: #333; margin-bottom: 16px; }
