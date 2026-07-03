@@ -4036,9 +4036,11 @@ def bu_report_classify(
     teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
     by_id = {t.id: t for t in teams}
 
-    # Partition: skip / no-idea / needs-llm
+    # Partition: skip / no-idea / needs-llm. Extract plain-text snapshots
+    # BEFORE spawning workers -- SQLAlchemy ORM instances are not safe to
+    # access from threads other than the one that owns the Session.
     out_map: dict[int, BUClassifyResult] = {}
-    to_classify: list[models.Team] = []
+    to_classify: list[dict] = []
     for tid in req.team_ids:
         team = by_id.get(tid)
         if team is None:
@@ -4058,29 +4060,43 @@ def bu_report_classify(
                 rationale=existing.get("rationale"),
             )
             continue
-        to_classify.append(team)
+        to_classify.append(bu_report_service.team_snapshot(team))
 
-    def _classify_one(t: models.Team) -> tuple[int, dict | Exception]:
+    def _classify_one(snap: dict) -> tuple[int, dict | Exception]:
         try:
-            return t.id, bu_report_service.classify_team(t)
+            return snap["id"], bu_report_service.classify_snapshot(snap)
         except Exception as e:
-            return t.id, e
+            return snap["id"], e
 
     if to_classify:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            for tid, result in pool.map(_classify_one, to_classify):
-                team = by_id[tid]
-                if isinstance(result, Exception):
-                    logger.exception("bu classify failed for team %s: %s", tid, result)
-                    out_map[tid] = BUClassifyResult(team_id=tid, status="failed", error=str(result))
-                    continue
-                bu_report_service.store_classification(db, team, result, edited_by=actor_email)
-                out_map[tid] = BUClassifyResult(
-                    team_id=tid, status="classified",
-                    bu=result["bu"], sub_tags=result["sub_tags"],
-                    function_tags=result["function_tags"], theme_tags=result["theme_tags"],
-                    rationale=result["rationale"],
-                )
+        try:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                for tid, result in pool.map(_classify_one, to_classify):
+                    team = by_id[tid]
+                    if isinstance(result, Exception):
+                        logger.error("bu classify failed for team %s: %s", tid, result, exc_info=result)
+                        out_map[tid] = BUClassifyResult(team_id=tid, status="failed", error=str(result))
+                        continue
+                    try:
+                        bu_report_service.store_classification(db, team, result, edited_by=actor_email)
+                    except Exception as e:
+                        logger.exception("bu classify persist failed for team %s", tid)
+                        out_map[tid] = BUClassifyResult(team_id=tid, status="failed", error=f"persist: {e}")
+                        continue
+                    out_map[tid] = BUClassifyResult(
+                        team_id=tid, status="classified",
+                        bu=result["bu"], sub_tags=result["sub_tags"],
+                        function_tags=result["function_tags"], theme_tags=result["theme_tags"],
+                        rationale=result["rationale"],
+                    )
+        except Exception as e:
+            logger.exception("bu classify pool crashed")
+            # Fill any leftover slots with a failure record so the client
+            # still gets a response instead of a 500 wall.
+            for snap in to_classify:
+                out_map.setdefault(snap["id"], BUClassifyResult(
+                    team_id=snap["id"], status="failed", error=f"pool: {e}",
+                ))
 
     return [out_map[tid] for tid in req.team_ids]
 
@@ -4107,9 +4123,9 @@ def bu_report_summarize(
     teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
     by_id = {t.id: t for t in teams}
 
+    # Plain-data snapshots for workers -- see classify endpoint comment.
     out_map: dict[int, BUSummarizeResult] = {}
-    to_run: list[models.Team] = []
-    judge_scores_by_team: dict[int, list[models.JudgeScore]] = {}
+    to_run: list[tuple[dict, list[dict]]] = []  # (team_snap, judge_snaps)
     for tid in req.team_ids:
         team = by_id.get(tid)
         if team is None:
@@ -4127,42 +4143,59 @@ def bu_report_summarize(
                 judge_synthesis=existing.get("judge_synthesis"),
             )
             continue
-        to_run.append(team)
-        # Preload judge scores in the request thread (SQLAlchemy session
-        # can't be shared with worker threads).
+        snap = bu_report_service.team_snapshot(team)
+        judge_snaps: list[dict] = []
         if req.with_judge_synthesis:
-            judge_scores_by_team[team.id] = bu_report_service.load_judge_scores(db, team.id, req.round)
+            rows = bu_report_service.load_judge_scores(db, team.id, req.round)
+            judge_snaps = bu_report_service.judge_scores_snapshot(rows)
+        to_run.append((snap, judge_snaps))
 
-    def _summarize_one(t: models.Team) -> tuple[int, dict | Exception, str | None]:
+    def _summarize_one(bundle: tuple[dict, list[dict]]) -> tuple[int, dict | Exception, str | None]:
+        snap, judge_snaps = bundle
         try:
-            summary_data = bu_report_service.summarize_team_for_leadership(t)
+            summary_data = bu_report_service.summarize_snapshot(snap)
         except Exception as e:
-            return t.id, e, None
+            return snap["id"], e, None
         synth: str | None = None
-        if req.with_judge_synthesis:
-            js = judge_scores_by_team.get(t.id, [])
-            synth = bu_report_service.synthesize_judge_feedback(t, js) or None
-        return t.id, summary_data, synth
+        if req.with_judge_synthesis and judge_snaps:
+            try:
+                synth = bu_report_service.synthesize_from_snapshots(snap["name"], judge_snaps) or None
+            except Exception as e:
+                logger.warning("judge synth failed for team %s: %s", snap["id"], e)
+                synth = None
+        return snap["id"], summary_data, synth
 
     if to_run:
-        with ThreadPoolExecutor(max_workers=8) as pool:
-            for tid, summary_data, synth in pool.map(_summarize_one, to_run):
-                team = by_id[tid]
-                if isinstance(summary_data, Exception):
-                    logger.exception("bu summarize failed for team %s: %s", tid, summary_data)
-                    out_map[tid] = BUSummarizeResult(team_id=tid, status="failed", error=str(summary_data))
-                    continue
-                bu_report_service.store_leadership_summary(
-                    db, team, summary_data,
-                    judge_synthesis=synth,
-                    edited_by=actor_email,
-                )
-                out_map[tid] = BUSummarizeResult(
-                    team_id=tid, status="summarized",
-                    summary=summary_data["summary"],
-                    ai_score_10=summary_data["ai_score_10"],
-                    judge_synthesis=synth,
-                )
+        try:
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                for tid, summary_data, synth in pool.map(_summarize_one, to_run):
+                    team = by_id[tid]
+                    if isinstance(summary_data, Exception):
+                        logger.error("bu summarize failed for team %s: %s", tid, summary_data, exc_info=summary_data)
+                        out_map[tid] = BUSummarizeResult(team_id=tid, status="failed", error=str(summary_data))
+                        continue
+                    try:
+                        bu_report_service.store_leadership_summary(
+                            db, team, summary_data,
+                            judge_synthesis=synth,
+                            edited_by=actor_email,
+                        )
+                    except Exception as e:
+                        logger.exception("bu summarize persist failed for team %s", tid)
+                        out_map[tid] = BUSummarizeResult(team_id=tid, status="failed", error=f"persist: {e}")
+                        continue
+                    out_map[tid] = BUSummarizeResult(
+                        team_id=tid, status="summarized",
+                        summary=summary_data["summary"],
+                        ai_score_10=summary_data["ai_score_10"],
+                        judge_synthesis=synth,
+                    )
+        except Exception as e:
+            logger.exception("bu summarize pool crashed")
+            for snap, _ in to_run:
+                out_map.setdefault(snap["id"], BUSummarizeResult(
+                    team_id=snap["id"], status="failed", error=f"pool: {e}",
+                ))
 
     return [out_map[tid] for tid in req.team_ids]
 

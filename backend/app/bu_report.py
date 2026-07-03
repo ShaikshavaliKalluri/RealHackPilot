@@ -282,19 +282,50 @@ def _judge_synthesis_user_msg(team_name: str, scores_summary: str, comments: lis
 # LLM callers
 # ============================================================================
 
-def classify_team(team: models.Team) -> dict:
-    """Call the LLM to classify one team. Returns the dict shape we persist
-    to Team.bu_classification (without the timestamps -- caller stamps those).
+def team_snapshot(team: models.Team) -> dict:
+    """Extract the plain-text fields the LLM needs into a dict. Called from
+    the request thread before spawning worker threads -- workers should NOT
+    touch SQLAlchemy ORM instances since Session/expiration state isn't
+    thread-safe."""
+    return {
+        "id": team.id,
+        "name": team.name or "",
+        "idea": (team.idea or "").strip(),
+        "approach": (team.approach or "").strip(),
+        "tools": (team.tools or "").strip(),
+        "viability": (team.viability or "").strip(),
+        "business_value": (team.business_value or "").strip(),
+    }
 
-    Raises LLMError on provider failure. Raises ValueError on malformed
-    output that can't be coerced to the schema.
+
+def _classify_user_msg_from_snap(snap: dict) -> str:
+    parts = [
+        f"Team: {snap['name']}",
+        f"Idea: {snap['idea'] or '[none provided]'}",
+    ]
+    if snap["approach"]:
+        parts.append(f"Approach: {snap['approach']}")
+    if snap["tools"]:
+        parts.append(f"Tools: {snap['tools']}")
+    if snap["viability"]:
+        parts.append(f"Viability: {snap['viability']}")
+    if snap["business_value"]:
+        parts.append(f"Business value: {snap['business_value']}")
+    return "\n\n".join(parts)
+
+
+def classify_snapshot(snap: dict) -> dict:
+    """Thread-safe classify: takes a plain dict (from team_snapshot) instead
+    of an ORM instance. Returns the dict we persist to Team.bu_classification.
+
+    Raises LLMError on provider failure. Raises ValueError on missing idea.
     """
-    if not (team.idea or "").strip():
+    if not snap.get("idea"):
         raise ValueError("team has no idea text to classify")
     result = call_json(
         [
             {"role": "system", "content": _classify_prompt_system()},
-            {"role": "user", "content": _classify_user_msg(team)},
+            {"role": "user", "content": _classify_user_msg_from_snap(snap)},
         ],
         mock_payload={},
         mock_schema={},
@@ -303,9 +334,7 @@ def classify_team(team: models.Team) -> dict:
     data = result.data or {}
     bu = data.get("bu")
     if bu not in BU_TAXONOMY:
-        # Fall back to cross_cutting rather than hard-fail; the organizer can
-        # override in the editor.
-        logger.warning("classify_team: unknown bu %r for team %s; using cross_cutting", bu, team.id)
+        logger.warning("classify: unknown bu %r for team %s; using cross_cutting", bu, snap.get("id"))
         bu = "cross_cutting"
     valid_sub = set(BU_TAXONOMY[bu]["sub_tags"])
     sub_tags = [t for t in (data.get("sub_tags") or []) if t in valid_sub][:3]
@@ -319,6 +348,48 @@ def classify_team(team: models.Team) -> dict:
         "theme_tags": theme_tags,
         "rationale": rationale,
     }
+
+
+def classify_team(team: models.Team) -> dict:
+    """Legacy ORM-based classify (single team). Retained for callers that
+    don't have a pre-extracted snapshot. Delegates to classify_snapshot."""
+    return classify_snapshot(team_snapshot(team))
+
+
+def summarize_snapshot(snap: dict) -> dict:
+    """Thread-safe leadership summary. Returns {summary, ai_score_10}."""
+    if not snap.get("idea"):
+        raise ValueError("team has no idea text to summarize")
+    parts = [
+        f"Team: {snap['name']}",
+        f"Idea: {snap['idea'] or '[none provided]'}",
+    ]
+    if snap["approach"]:
+        parts.append(f"Approach: {snap['approach']}")
+    if snap["business_value"]:
+        parts.append(f"Business value: {snap['business_value']}")
+    if snap["viability"]:
+        parts.append(f"Viability: {snap['viability']}")
+    user_msg = "\n\n".join(parts)
+    result = call_json(
+        [
+            {"role": "system", "content": _leadership_summary_prompt_system()},
+            {"role": "user", "content": user_msg},
+        ],
+        mock_payload={},
+        mock_schema={},
+        smart=False,
+    )
+    data = result.data or {}
+    summary = (data.get("summary") or "").strip()
+    try:
+        score = int(data.get("ai_score_10") or 0)
+    except (TypeError, ValueError):
+        score = 0
+    score = max(1, min(10, score)) if score else 5
+    if not summary:
+        raise ValueError("empty summary from LLM")
+    return {"summary": summary, "ai_score_10": score}
 
 
 def summarize_team_for_leadership(team: models.Team) -> dict:
@@ -345,6 +416,56 @@ def summarize_team_for_leadership(team: models.Team) -> dict:
     if not summary:
         raise ValueError("empty summary from LLM")
     return {"summary": summary, "ai_score_10": score}
+
+
+def judge_scores_snapshot(rows: list[models.JudgeScore]) -> list[dict]:
+    """Extract judge score fields to plain dicts before worker threads use
+    them. Same thread-safety rationale as team_snapshot."""
+    out = []
+    for r in rows:
+        out.append({
+            "total": int(r.total or 0),
+            "scores": dict(r.scores or {}),
+            "comment": (r.comment or "").strip() or None,
+        })
+    return out
+
+
+def synthesize_from_snapshots(team_name: str, judge_snaps: list[dict]) -> str:
+    """Thread-safe judge-feedback synthesis."""
+    if not judge_snaps:
+        return ""
+    comments = [s["comment"] for s in judge_snaps if s.get("comment")]
+    axis_totals: dict[str, list[int]] = defaultdict(list)
+    totals: list[int] = []
+    for s in judge_snaps:
+        totals.append(int(s.get("total") or 0))
+        for axis, v in (s.get("scores") or {}).items():
+            try:
+                axis_totals[axis].append(int(v))
+            except (TypeError, ValueError):
+                continue
+    avg_total = round(sum(totals) / len(totals), 1) if totals else 0.0
+    axis_avgs = {
+        a: round(sum(vs) / len(vs), 1) for a, vs in axis_totals.items() if vs
+    }
+    axis_line = ", ".join(f"{a}={v}" for a, v in axis_avgs.items()) if axis_avgs else "n/a"
+    scores_summary = (
+        f"average weighted total = {avg_total}/100 across {len(judge_snaps)} judges. "
+        f"Axis averages: {axis_line}."
+    )
+    try:
+        result = call_text(
+            [
+                {"role": "system", "content": _judge_synthesis_prompt_system()},
+                {"role": "user", "content": _judge_synthesis_user_msg(team_name, scores_summary, comments)},
+            ],
+            smart=False,
+        )
+    except LLMError as e:
+        logger.warning("judge synthesis failed for team %s: %s", team_name, e)
+        return ""
+    return (result.data.get("text") or "").strip()
 
 
 def synthesize_judge_feedback(team: models.Team, judge_scores: list[models.JudgeScore]) -> str:
