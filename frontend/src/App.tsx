@@ -108,7 +108,9 @@ export default function App() {
                  || email === 'suneel.nallu@realpage.com'
                  || email === 'bhaskar.jaddu@realpage.com';
     const isOrg = role.role === 'organizer' || isAdmin;
-    if (mode === 'bu-report' && !isAdmin) {
+    // BU Report is Shaik-only until it stabilizes; Suneel + Bhaskar still
+    // have Scoring access but not this view.
+    if (mode === 'bu-report' && email !== 'shaikshavali.kalluri@realpage.com') {
       setMode('dashboard');
     }
     if (mode === 'scoring' && !isAdmin) {
@@ -293,6 +295,10 @@ export default function App() {
     'bhaskar.jaddu@realpage.com',
   ]);
   const isScoringAdmin = SCORING_ADMIN_EMAILS.has((role.email || '').toLowerCase());
+  // BU Leadership Report is a Shaik-only view: it exposes AI-classified BU
+  // buckets and a judge-comment synthesis intended for senior leadership
+  // review. Owned end-to-end by Shaik until it stabilizes.
+  const isBUReportAdmin = (role.email || '').toLowerCase() === 'shaikshavali.kalluri@realpage.com';
   // The Floor walk tab (with the new demo-status tracker) is organizer-only.
   // Sandbox admins always count as organizers so Shaik can demo in Test Mode
   // before the sandbox DB has the judges-table seed.
@@ -311,7 +317,7 @@ export default function App() {
     ...(isScoringAdmin
       ? [{ key: 'scoring' as Mode, label: 'Scoring', tone: 'bg-amber-500/15 text-amber-200 border-amber-500/30' }]
       : []),
-    ...(isScoringAdmin
+    ...(isBUReportAdmin
       ? [{ key: 'bu-report' as Mode, label: 'BU Report', tone: 'bg-teal-500/15 text-teal-200 border-teal-500/30', title: 'Leadership report grouped by RealPage BU with AI summaries + judge synthesis. Print-friendly.' }]
       : []),
     { key: 'comms', label: 'Comms', tone: 'bg-violet-500/15 text-violet-200 border-violet-500/30' },
@@ -707,7 +713,7 @@ export default function App() {
 
       {mode === 'scoring' && isScoringAdmin && <OrganizerScoring teams={teams} onReload={reload} />}
 
-      {mode === 'bu-report' && isScoringAdmin && <BUReport onReload={reload} />}
+      {mode === 'bu-report' && isBUReportAdmin && <BUReport onReload={reload} />}
 
       {mode === 'analytics' && stats && (
         <Analytics teams={teams} stats={stats} onJumpToTeam={(id) => { setMode('dashboard'); setTimeout(() => jumpToTeam(id), 50); }} />

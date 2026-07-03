@@ -2305,6 +2305,20 @@ def unmark_swag_collected(
     return SwagPersonOut(**roster[email])
 
 
+BU_REPORT_ADMIN_EMAIL = "shaikshavali.kalluri@realpage.com"
+
+
+def _require_bu_report_admin(claims: dict) -> str:
+    """BU Report endpoints are Shaik-only until the feature stabilizes.
+    Belt-and-suspenders alongside the frontend tab hiding: hitting the URL
+    directly still 403s for anyone else."""
+    profile = build_profile_payload(claims, {})
+    actor_email = (profile.get("email") or "").strip().lower()
+    if actor_email != BU_REPORT_ADMIN_EMAIL:
+        raise HTTPException(status_code=403, detail="BU Report is restricted.")
+    return actor_email
+
+
 def _require_organizer_role(claims: dict, db: Session) -> str:
     """Inline check used by handlers that need organizer-only enforcement
     on top of the middleware's role gate (which accepts organizer/judge
@@ -3969,8 +3983,8 @@ def post_feedback_summaries(
 @app.get("/api/bu-report/taxonomy", response_model=BUTaxonomyResponse)
 def bu_report_taxonomy(claims: dict = Depends(require_auth)) -> BUTaxonomyResponse:
     """Return the full BU + sub-tag taxonomy so the frontend can render
-    override dropdowns and legend copy. Organizer-only via the require_auth
-    middleware role gate."""
+    override dropdowns and legend copy. Shaik-only."""
+    _require_bu_report_admin(claims)
     entries = [
         BUTaxonomyEntry(
             key=k,
@@ -3994,9 +4008,8 @@ def bu_report_data(
     db: Session = Depends(get_db),
 ) -> dict:
     """Return the assembled leadership report -- one section per BU with
-    team blocks, aggregate tag frequencies, and standouts marked. Organizer
-    only."""
-    _require_organizer_role(claims, db)
+    team blocks, aggregate tag frequencies, and standouts marked. Shaik-only."""
+    _require_bu_report_admin(claims)
     if round not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
     return bu_report_service.build_report_data(db, round_num=round)
@@ -4009,8 +4022,8 @@ def bu_report_classify(
     db: Session = Depends(get_db),
 ) -> list[BUClassifyResult]:
     """Bulk LLM-classify the given teams into BUs. Skips teams already
-    classified unless force=True."""
-    actor_email = _require_organizer_role(claims, db)
+    classified unless force=True. Shaik-only."""
+    actor_email = _require_bu_report_admin(claims)
     if not req.team_ids:
         return []
     teams = db.query(models.Team).filter(models.Team.id.in_(req.team_ids)).all()
@@ -4059,8 +4072,8 @@ def bu_report_summarize(
 ) -> list[BUSummarizeResult]:
     """Bulk LLM-summarize the given teams for leadership. Optionally also
     generate a judge-feedback synthesis (organizer opts in for the final
-    print run since it costs more LLM calls)."""
-    actor_email = _require_organizer_role(claims, db)
+    print run since it costs more LLM calls). Shaik-only."""
+    actor_email = _require_bu_report_admin(claims)
     if req.round not in (1, 2, 3):
         raise HTTPException(status_code=400, detail="round must be 1, 2, or 3")
     if not req.team_ids:
@@ -4117,8 +4130,8 @@ def override_bu_classification(
     db: Session = Depends(get_db),
 ) -> dict:
     """Manually override a team's BU classification. Validates that bu and
-    sub_tags come from the fixed taxonomy."""
-    actor_email = _require_organizer_role(claims, db)
+    sub_tags come from the fixed taxonomy. Shaik-only."""
+    actor_email = _require_bu_report_admin(claims)
     if req.bu not in bu_report_service.BU_TAXONOMY:
         raise HTTPException(status_code=400, detail=f"unknown BU key: {req.bu!r}")
     valid_sub = set(bu_report_service.BU_TAXONOMY[req.bu]["sub_tags"])
@@ -4155,8 +4168,8 @@ def override_leadership_summary(
     claims: dict = Depends(require_auth),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Manually override a team's leadership summary + AI score."""
-    actor_email = _require_organizer_role(claims, db)
+    """Manually override a team's leadership summary + AI score. Shaik-only."""
+    actor_email = _require_bu_report_admin(claims)
     if req.ai_score_10 < 1 or req.ai_score_10 > 10:
         raise HTTPException(status_code=400, detail="ai_score_10 must be 1-10")
     if not req.summary.strip():
