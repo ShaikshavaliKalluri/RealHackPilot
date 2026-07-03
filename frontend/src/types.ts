@@ -129,6 +129,10 @@ export interface LeaderboardPerJudge {
   comment: string | null;
   submitted_at: string | null;
   entered_by_email: string | null;
+  // False when the judge submitted 0 across every axis. Row is shown in
+  // the breakdown so organizers can see who still needs to enter real
+  // scores, but is excluded from judge_count / avg_score.
+  counted: boolean;
 }
 
 export interface LeaderboardRow {
@@ -136,7 +140,12 @@ export interface LeaderboardRow {
   team_name: string;
   panel_id: number | null;
   panel_name: string | null;
+  // Count of judges whose submission is counted toward avg_score. Excludes
+  // all-zero submissions.
   judge_count: number;
+  // Number of judge rows filtered out because they were all-zero. Shown
+  // as a "N pending" pill next to the team average.
+  not_counted_count: number;
   total_sum: number;
   avg_score: number;
   per_axis_avg: Record<string, number>;

@@ -254,12 +254,25 @@ function LeaderboardSection({ panelTitle, rows, expandedTeamId, onToggleExpand }
                     ) : (
                       <div className="space-y-2.5">
                         {row.per_judge.map((pj) => (
-                          <div key={pj.judge_id} className="bg-ink-800/60 border border-slate-700/40 rounded-lg p-3">
+                          <div
+                            key={pj.judge_id}
+                            className={`bg-ink-800/60 border rounded-lg p-3 ${pj.counted ? 'border-slate-700/40' : 'border-amber-500/40 opacity-70'}`}
+                          >
                             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                              <div className="font-semibold text-slate-100 text-sm">{pj.judge_name}</div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-semibold text-slate-100 text-sm">{pj.judge_name}</span>
+                                {!pj.counted && (
+                                  <span
+                                    className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-200"
+                                    title="Judge submitted 0 across every axis. Excluded from the team average until real scores are entered."
+                                  >
+                                    Not counted (all zeros)
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-right">
                                 <span className="text-[10px] uppercase tracking-wider text-slate-500">Weighted total</span>
-                                <span className="ml-2 text-lg font-extrabold text-lime-300">
+                                <span className={`ml-2 text-lg font-extrabold ${pj.counted ? 'text-lime-300' : 'text-slate-500'}`}>
                                   {fmt10(pj.weighted_total, 1)}<span className="text-xs text-slate-500 font-normal">/10</span>
                                 </span>
                               </div>
@@ -300,19 +313,37 @@ function LeaderboardSection({ panelTitle, rows, expandedTeamId, onToggleExpand }
                   </div>
 
                   <div className="bg-lime-500/5 border border-lime-500/30 rounded-lg p-3">
-                    <div className="text-xs uppercase tracking-wider text-lime-300/90 mb-2 font-semibold">
-                      Team average (this is what the panel leaderboard ranks on)
+                    <div className="text-xs uppercase tracking-wider text-lime-300/90 mb-2 font-semibold flex items-center gap-2 flex-wrap">
+                      <span>Team average (this is what the panel leaderboard ranks on)</span>
+                      {row.not_counted_count > 0 && (
+                        <span
+                          className="normal-case tracking-normal text-[10px] px-2 py-0.5 rounded border border-amber-500/50 bg-amber-500/10 text-amber-200"
+                          title="These judges submitted all zeros and are excluded until they enter real scores."
+                        >
+                          {row.not_counted_count} judge{row.not_counted_count === 1 ? '' : 's'} not yet counted
+                        </span>
+                      )}
                     </div>
                     <div className="text-xs text-slate-300 font-mono">
-                      {row.per_judge.map((pj, i) => (
-                        <span key={pj.judge_id}>
-                          {i > 0 && <span className="text-slate-600"> + </span>}
-                          <span className="text-lime-300">{fmt10(pj.weighted_total, 1)}</span>
-                        </span>
-                      ))}
-                      <span className="text-slate-500"> ÷ {row.judge_count} = </span>
-                      <span className="text-lime-300 font-bold text-base">{fmt10(row.avg_score)}</span>
-                      <span className="text-slate-500">/10</span>
+                      {(() => {
+                        const counted = row.per_judge.filter((pj) => pj.counted);
+                        if (counted.length === 0) {
+                          return <span className="text-slate-500">No counted scores yet.</span>;
+                        }
+                        return (
+                          <>
+                            {counted.map((pj, i) => (
+                              <span key={pj.judge_id}>
+                                {i > 0 && <span className="text-slate-600"> + </span>}
+                                <span className="text-lime-300">{fmt10(pj.weighted_total, 1)}</span>
+                              </span>
+                            ))}
+                            <span className="text-slate-500"> ÷ {row.judge_count} = </span>
+                            <span className="text-lime-300 font-bold text-base">{fmt10(row.avg_score)}</span>
+                            <span className="text-slate-500">/10</span>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>

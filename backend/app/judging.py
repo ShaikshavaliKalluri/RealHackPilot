@@ -144,17 +144,42 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
                 "total_sum": 0,
                 "avg_score": 0.0,
                 "per_axis_avg": {k: 0.0 for k in JUDGE_RUBRIC_KEYS},
+                "not_counted_count": 0,
                 "comments": [],
                 "per_judge": [],
             })
             continue
 
-        total_sum = sum(r.total for r in rs)
-        avg_score = total_sum / len(rs)
-        axis_avg: dict[str, float] = {}
-        for key in JUDGE_RUBRIC_KEYS:
-            vals = [r.scores.get(key, 0) for r in rs if r.scores]
-            axis_avg[key] = (sum(vals) / len(vals)) if vals else 0.0
+        # Exclude "all-zero" submissions from the team average. A judge who
+        # entered 0 across every axis has effectively not scored the team
+        # yet (they may have logged a comment intending to score later, or
+        # accidentally saved before filling in numbers). Counting those 0s
+        # unfairly drags the team average down for every other judge who
+        # DID score. We still show these rows in per_judge with counted=False
+        # so organizers can see they need to chase the judge.
+        def _is_zero_submission(r: "JudgeScore") -> bool:
+            if int(r.total or 0) > 0:
+                return False
+            axis_vals = (r.scores or {}).values()
+            return all((int(v or 0) == 0) for v in axis_vals) if axis_vals else True
+
+        counted_rs = [r for r in rs if not _is_zero_submission(r)]
+        not_counted = len(rs) - len(counted_rs)
+
+        if not counted_rs:
+            # Every submission is zero -- treat as unscored for ranking
+            # purposes, but still emit per_judge below so the organizer sees
+            # who filed the placeholder rows.
+            total_sum = 0
+            avg_score = 0.0
+            axis_avg = {k: 0.0 for k in JUDGE_RUBRIC_KEYS}
+        else:
+            total_sum = sum(r.total for r in counted_rs)
+            avg_score = total_sum / len(counted_rs)
+            axis_avg = {}
+            for key in JUDGE_RUBRIC_KEYS:
+                vals = [r.scores.get(key, 0) for r in counted_rs if r.scores]
+                axis_avg[key] = (sum(vals) / len(vals)) if vals else 0.0
 
         comments = []
         # Per-judge breakdown -- one entry per JudgeScore row, with the
@@ -190,6 +215,10 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
                 "comment": r.comment or None,
                 "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
                 "entered_by_email": r.entered_by_email,
+                # False = judge submitted 0 across every axis, so this row
+                # is excluded from the team average (see counted_rs above).
+                # Frontend dims these rows + shows a "not counted" tag.
+                "counted": not _is_zero_submission(r),
             })
 
         out.append({
@@ -197,7 +226,11 @@ def leaderboard(db: Session, round_num: int) -> list[dict]:
             "team_name": t.name,
             "panel_id": panel_id,
             "panel_name": panel_name,
-            "judge_count": len(rs),
+            # judge_count is the number counted toward the average. Rows
+            # excluded (all-zero submissions) are surfaced separately via
+            # not_counted_count and the counted=False flag on per_judge.
+            "judge_count": len(counted_rs),
+            "not_counted_count": not_counted,
             "total_sum": total_sum,
             # 3-decimal rounding -- gives organizers finer tie-breaking
             # without going full float; matters at the top of the leaderboard
