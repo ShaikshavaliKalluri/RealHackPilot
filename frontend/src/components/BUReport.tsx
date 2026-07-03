@@ -737,21 +737,57 @@ function TeamEditorRow({ team, taxonomy, editing, onStartEdit, onEndEdit, onSave
 // ===== Presentation view (print-to-PDF friendly) =====
 
 function PresentationView({ data, round }: { data: BUReportData; round: number }) {
+  const populatedBUs = data.bus.filter((bu) => bu.team_count > 0);
+  const totalWithScore = populatedBUs.reduce((sum, bu) => sum + bu.teams.filter((t) => t.ai_score_10 !== null).length, 0);
+  const scoreSum = populatedBUs.reduce(
+    (sum, bu) => sum + bu.teams.reduce((s, t) => s + (t.ai_score_10 ?? 0), 0),
+    0,
+  );
+  const overallAvg = totalWithScore > 0 ? (scoreSum / totalWithScore).toFixed(1) : null;
+  const totalJudgeSynth = populatedBUs.reduce(
+    (sum, bu) => sum + bu.teams.filter((t) => (t.judge_synthesis || '').trim()).length,
+    0,
+  );
+
   return (
     <div className="bu-presentation">
       <style>{PRESENTATION_STYLES}</style>
       <header className="pv-header">
-        <div className="pv-brand">RealHack 2026</div>
-        <h1>Leadership Report: Ideas by Business Unit</h1>
-        <div className="pv-meta">
-          Round {data.round} · {data.total_teams} ideas submitted · generated {formatStamp(data.generated_at)}
+        <div className="pv-header-left">
+          <div className="pv-brand">RealHack 2026</div>
+          <h1>Leadership Report: Ideas by Business Unit</h1>
+          <div className="pv-meta">
+            Round {data.round} · {data.total_teams} ideas submitted · generated {formatStamp(data.generated_at)}
+          </div>
+          <p className="pv-lead">
+            Every RealHack 2026 idea has been classified into one of RealPage's business units,
+            with an AI summary and a synthesis of what the judges said. Ideas are sorted by AI
+            score within each BU. If something looks useful for your area, reach out to the team
+            and consider adopting or evolving it.
+          </p>
         </div>
-        <p className="pv-lead">
-          Every RealHack 2026 idea has been classified into one of six RealPage business units.
-          For each BU, this report shows the top three standout ideas (with judge feedback synthesis)
-          followed by the long tail. If an idea sparks interest for your area, reach out to the team
-          and consider adopting or evolving it.
-        </p>
+        <div className="pv-header-stats">
+          <div className="pv-stat">
+            <div className="pv-stat-num">{data.total_teams}</div>
+            <div className="pv-stat-label">ideas total</div>
+          </div>
+          <div className="pv-stat">
+            <div className="pv-stat-num">{populatedBUs.length}</div>
+            <div className="pv-stat-label">BUs covered</div>
+          </div>
+          {overallAvg && (
+            <div className="pv-stat">
+              <div className="pv-stat-num">{overallAvg}<span className="pv-stat-suffix">/10</span></div>
+              <div className="pv-stat-label">avg AI score</div>
+            </div>
+          )}
+          {totalJudgeSynth > 0 && (
+            <div className="pv-stat">
+              <div className="pv-stat-num">{totalJudgeSynth}</div>
+              <div className="pv-stat-label">with judge feedback</div>
+            </div>
+          )}
+        </div>
       </header>
 
       {data.bus.map((bu) => bu.team_count === 0 ? null : (
@@ -883,11 +919,17 @@ const PRESENTATION_STYLES = `
   margin: 0;
   color: #0a4f99;
 }
-.pv-header { border-bottom: 3px solid #0a4f99; padding-bottom: 20px; margin-bottom: 28px; }
+.pv-header { border-bottom: 3px solid #0a4f99; padding-bottom: 20px; margin-bottom: 28px; display: flex; gap: 32px; align-items: stretch; flex-wrap: wrap; }
+.pv-header-left { flex: 1 1 60%; min-width: 320px; }
 .pv-brand { font-size: 12px; letter-spacing: 2px; font-weight: 700; color: #0a4f99; text-transform: uppercase; margin-bottom: 4px; }
 .pv-header h1 { font-size: 28px; margin: 4px 0 6px 0; }
 .pv-meta { font-size: 12px; color: #5a6a7a; }
-.pv-lead { font-size: 14px; color: #333; max-width: 850px; margin-top: 12px; }
+.pv-lead { font-size: 14px; color: #333; margin-top: 12px; }
+.pv-header-stats { flex: 1 1 30%; min-width: 240px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-content: center; }
+.pv-stat { background: #f0f4f9; border: 1px solid #cad9e8; border-left: 4px solid #0a4f99; border-radius: 6px; padding: 12px 14px; }
+.pv-stat-num { font-size: 24px; font-weight: 700; color: #0a4f99; line-height: 1.1; }
+.pv-stat-suffix { font-size: 12px; font-weight: 400; color: #5a6a7a; margin-left: 2px; }
+.pv-stat-label { font-size: 11px; color: #5a6a7a; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
 .pv-section { margin-bottom: 40px; page-break-inside: avoid; }
 .pv-bu-header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .pv-bu-header h2 { font-size: 22px; }
