@@ -55,13 +55,17 @@ def _get_jwks() -> dict:
 
 
 def _signing_key_for(token: str) -> str:
-    """Pick the matching signing key from JWKS based on the token's kid header."""
+    """Pick the matching signing key from JWKS based on the token's kid header.
+    Refetches once if the kid is unknown (Microsoft rotated its keys since we
+    cached them) instead of rejecting everyone until the cache expires."""
+    global _jwks_cache_expires
     header = jwt.get_unverified_header(token)
     kid = header.get("kid")
-    jwks = _get_jwks()
-    for key in jwks.get("keys", []):
-        if key.get("kid") == kid:
-            return jwt.algorithms.RSAAlgorithm.from_jwk(key)  # type: ignore[attr-defined]
+    for _ in range(2):
+        for key in _get_jwks().get("keys", []):
+            if key.get("kid") == kid:
+                return jwt.algorithms.RSAAlgorithm.from_jwk(key)  # type: ignore[attr-defined]
+        _jwks_cache_expires = 0.0
     raise jwt.InvalidKeyError(f"No matching JWK for kid={kid}")
 
 
@@ -82,6 +86,7 @@ def validate_token(token: str) -> dict:
         audience=_VALID_AUDIENCES,
         issuer=_ISSUER_V2,
         options={"verify_aud": True, "verify_iss": True, "verify_exp": True},
+        leeway=120,  # tolerate small clock drift between laptops/VMs and Entra
     )
 
 

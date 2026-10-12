@@ -1,6 +1,6 @@
 import { useMsal } from '@azure/msal-react';
 import { useMemo } from 'react';
-import { loginRequest } from '../auth';
+import { clearStuckInteraction, loginRequest, resetSignIn } from '../auth';
 
 interface Props {
   error?: string | null;
@@ -13,6 +13,12 @@ export function LoginPage({ error }: Props) {
 
   const handleLogin = () => {
     instance.loginRedirect(loginRequest).catch((e) => {
+      // A redirect that never finished blocks new ones; clear it and retry once.
+      if (String(e?.errorCode ?? e).includes('interaction_in_progress')) {
+        clearStuckInteraction();
+        instance.loginRedirect(loginRequest).catch((err) => console.error('Login redirect failed', err));
+        return;
+      }
       console.error('Login redirect failed', e);
     });
   };
@@ -109,6 +115,9 @@ export function LoginPage({ error }: Props) {
                 <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
               </svg>
             )}
+          </button>
+          <button type="button" onClick={resetSignIn} className="block mx-auto mt-3 text-xs text-slate-400 hover:text-slate-200 underline">
+            Trouble signing in? Reset sign-in for this site
           </button>
 
           {error && (() => {

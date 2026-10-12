@@ -52,7 +52,18 @@ async function authFetch(input: RequestInfo | URL, init: RequestInit = {}): Prom
     // Likely an expired ID token — force a silent refresh and retry once.
     r = await attempt(true);
   }
+  if (r.status === 401) signalSessionExpired();
   return r;
+}
+
+/** Fired when the API still says 401 after a refresh. App.tsx listens and
+ * signs in again instead of leaving the page on "Loading...". */
+export const SESSION_EXPIRED_EVENT = 'realhack:session-expired';
+let expiredSignalled = false;
+function signalSessionExpired(): void {
+  if (expiredSignalled) return;
+  expiredSignalled = true;
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
 }
 
 export async function fetchTeams(): Promise<Team[]> {

@@ -10,7 +10,7 @@
  * Production redirect URI: https://realhack.realpage.com (must be added as a
  * SPA platform redirect URI on the app reg before sign-in works).
  */
-import { InteractionRequiredAuthError, PublicClientApplication, type Configuration } from '@azure/msal-browser';
+import { CacheLookupPolicy, InteractionRequiredAuthError, PublicClientApplication, type AccountInfo, type Configuration } from '@azure/msal-browser';
 
 const msalConfig: Configuration = {
   auth: {
@@ -147,53 +147,104 @@ export async function getGraphSendToken(): Promise<string> {
   }
 }
 
-/**
- * Get a bearer token for the signed-in user — used in the Authorization
- * header on every call to our backend API.
- *
- * Returns the ID TOKEN (not the access token) because our backend validates
- * audience = our client_id, and only the ID token has our client_id as its
- * audience. The access token returned for the User.Read scope has
- * Microsoft Graph as its audience and would fail backend validation.
- *
- * ID tokens have a ~1 hour lifetime. When `forceRefresh` is true we use
- * ssoSilent to round-trip Microsoft via a hidden iframe and get a fresh
- * ID token — important after a 401-expired response from the backend.
- *
- * (If/when we expose a custom API scope like `api://<clientId>/access`,
- * we can switch to a properly-scoped access token. Until then ID-token-as-
- * auth is fine for an internal app and is the simplest path.)
- */
-export async function getAccessToken(opts: { forceRefresh?: boolean } = {}): Promise<string | null> {
-  const accounts = msalInstance.getAllAccounts();
-  if (accounts.length === 0) return null;
-  const account = accounts[0];
-  // First try acquireTokenSilent with forceRefresh if requested. This
-  // sometimes — but not always — yields a fresh ID token.
+// ===== Backend bearer token =====
+//
+// The API accepts the ID token (audience = our client id). Users kept getting
+// stuck on "Loading..." with 401s that only went away in incognito:
+//   1. acquireTokenSilent returns the CACHED id token even after it has
+//      expired (it only checks the access token), so the API said 401;
+//   2. the refresh used ssoSilent, a hidden iframe to login.microsoftonline.com
+//      that Chrome blocks along with third-party cookies;
+//   3. nothing fell back to signing in again, so the page hung.
+// Now we check the id token's own exp, refresh with the refresh token (plain
+// HTTPS, no iframe), and if that fails App.tsx re-runs sign-in.
+
+const REFRESH_MARGIN_S = 5 * 60;
+
+function tokenSecondsLeft(idToken: string | undefined): number {
+  if (!idToken) return -1;
   try {
-    const result = await msalInstance.acquireTokenSilent({
+    const payload = JSON.parse(atob(idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return (payload.exp ?? 0) - Date.now() / 1000;
+  } catch {
+    return -1;
+  }
+}
+
+function currentAccount(): AccountInfo | null {
+  return msalInstance.getActiveAccount() ?? msalInstance.getAllAccounts()[0] ?? null;
+}
+
+let inflightRefresh: Promise<string | null> | null = null;
+
+async function refreshIdToken(account: AccountInfo): Promise<string | null> {
+  try {
+    const r = await msalInstance.acquireTokenSilent({
       scopes: loginRequest.scopes,
       account,
-      forceRefresh: opts.forceRefresh ?? false,
+      forceRefresh: true,
+      cacheLookupPolicy: CacheLookupPolicy.RefreshToken,
     });
-    if (opts.forceRefresh) {
-      // forceRefresh requested but acquireTokenSilent might still hand
-      // back the cached ID token. Fall through to ssoSilent which always
-      // round-trips Microsoft and returns a fresh idToken.
-      try {
-        const sso = await msalInstance.ssoSilent({
-          scopes: loginRequest.scopes,
-          account,
-          loginHint: account.username,
-        });
-        return sso.idToken || result.idToken;
-      } catch {
-        return result.idToken;
-      }
-    }
-    return result.idToken;
+    return tokenSecondsLeft(r.idToken) > 60 ? r.idToken : null;
   } catch {
-    // Silent acquire failed entirely — caller will handle via redirect.
     return null;
   }
+}
+
+/** ID token for our backend, refreshed before it expires. Returns null when
+ * the session can't be renewed silently (App.tsx then signs in again). */
+export async function getAccessToken(opts: { forceRefresh?: boolean } = {}): Promise<string | null> {
+  const account = currentAccount();
+  if (!account) return null;
+  if (!opts.forceRefresh) {
+    try {
+      const r = await msalInstance.acquireTokenSilent({ scopes: loginRequest.scopes, account });
+      if (tokenSecondsLeft(r.idToken) > REFRESH_MARGIN_S) return r.idToken;
+    } catch { /* fall through to refresh */ }
+  }
+  // Many calls start together on page load; share one refresh between them.
+  inflightRefresh ??= refreshIdToken(account).finally(() => { inflightRefresh = null; });
+  return inflightRefresh;
+}
+
+const REAUTH_KEY = 'realhack:reauth-at';
+
+/** Silent renewal failed: sign in again with a full-page redirect (first-party
+ * cookies, so usually no password prompt). Loop-guarded: returns false if we
+ * already tried in the last 2 minutes, so the login page shows instead. */
+export function reauthenticate(): boolean {
+  try {
+    const last = Number(sessionStorage.getItem(REAUTH_KEY) || 0);
+    if (Date.now() - last < 2 * 60_000) return false;
+    sessionStorage.setItem(REAUTH_KEY, String(Date.now()));
+  } catch { /* ignore */ }
+  const account = currentAccount();
+  clearStuckInteraction();
+  void msalInstance.loginRedirect({ ...loginRequest, loginHint: account?.username, account: account ?? undefined })
+    .catch(() => { /* LoginPage takes over */ });
+  return true;
+}
+
+/** An interrupted redirect can leave MSAL's "interaction in progress" flag
+ * behind, blocking every later sign-in with interaction_in_progress. */
+export function clearStuckInteraction(): void {
+  for (const store of [sessionStorage, localStorage]) {
+    try {
+      for (const k of Object.keys(store)) {
+        if (k.includes('interaction.status') || k.endsWith('.interaction_status')) store.removeItem(k);
+      }
+    } catch { /* ignore */ }
+  }
+}
+
+/** Last resort: forget this site's cached sign-in (what incognito does). */
+export function resetSignIn(): void {
+  for (const store of [localStorage, sessionStorage]) {
+    try {
+      Object.keys(store)
+        .filter((k) => k.startsWith('msal.') || k.includes('login.windows.net') || k.includes('login.microsoftonline.com') || k.startsWith('realhack:reauth'))
+        .forEach((k) => store.removeItem(k));
+    } catch { /* ignore */ }
+  }
+  window.location.replace(window.location.origin + window.location.pathname + window.location.search);
 }

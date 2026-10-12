@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
-import { fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, exportDevOpsRepos, fetchMyRole, isSandboxMode, setSandboxMode, type LLMHealth, type AIScreenStatus, type UserProfile, type UserRole } from './api';
+import { reauthenticate } from './auth';
+import { SESSION_EXPIRED_EVENT, fetchTeams, fetchStats, runAIScreen, aiScreenStatus, aiScreenOne, llmHealth, fetchMe, exportCsv, exportDevOpsRepos, fetchMyRole, isSandboxMode, setSandboxMode, type LLMHealth, type AIScreenStatus, type UserProfile, type UserRole } from './api';
 import { JudgeDashboard } from './components/JudgeDashboard';
 import { JudgesPanel } from './components/JudgesPanel';
 import { LoginQRPage } from './components/LoginQRPage';
@@ -34,6 +35,14 @@ export default function App() {
   const { inProgress } = useMsal();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<UserRole | null>(null);
+  // API still 401 after a token refresh: sign in again (redirect) rather
+  // than sitting on "Loading..." forever.
+  const [sessionExpired, setSessionExpired] = useState(false);
+  useEffect(() => {
+    const onExpired = () => { if (!reauthenticate()) setSessionExpired(true); };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
   // Organizer-only: lets them preview the dashboard AS a specific judge to verify assignments.
   const [previewJudge, setPreviewJudge] = useState<{ id: number; name: string } | null>(null);
   // Mobile hamburger menu state — on screens narrower than `lg` the nav tabs
@@ -207,8 +216,8 @@ export default function App() {
       </div>
     );
   }
-  if (!isAuthenticated) {
-    return <LoginPage error={authError} />;
+  if (!isAuthenticated || sessionExpired) {
+    return <LoginPage error={sessionExpired ? 'Your session expired. Please sign in again.' : authError} />;
   }
 
   // Wait for role lookup before routing — prevents flicker between organizer
